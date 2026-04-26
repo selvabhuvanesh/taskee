@@ -13,12 +13,13 @@ struct AppBackground: View {
     var body: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.1, green: 0.1, blue: 0.35),
-                Color(red: 0.15, green: 0.08, blue: 0.3),
-                Color(red: 0.08, green: 0.05, blue: 0.2)
+                Color(red: 0.0, green: 0.5, blue: 0.5),
+                Color(red: 0.15, green: 0.3, blue: 0.45),
+                Color(red: 0.3, green: 0.1, blue: 0.4),
+                Color(red: 0.35, green: 0.05, blue: 0.45)
             ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
+            startPoint: .top,
+            endPoint: .bottom
         )
         .ignoresSafeArea()
     }
@@ -734,28 +735,50 @@ struct TaskRow: View {
             }
 
             Spacer()
+
+            if onEdit != nil || onDelete != nil {
+                HStack(spacing: 14) {
+                    if let onEdit {
+                        Button {
+                            onEdit()
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.blue.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let onDelete {
+                        Button {
+                            onDelete()
+                        } label: {
+                            Image(systemName: "trash.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.red.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
         .opacity(task.isApproved ? 0.7 : 1)
-        .swipeActions(edge: .trailing, allowsFullSwipe: !task.isApproved) {
-            if !task.isApproved {
-                Button(role: .destructive) {
-                    onDelete?()
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                onDelete?()
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if !task.isApproved {
-                Button {
-                    onEdit?()
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-                .tint(.blue)
+            Button {
+                onEdit?()
+            } label: {
+                Label("Edit", systemImage: "pencil")
             }
+            .tint(.blue)
         }
     }
 }
