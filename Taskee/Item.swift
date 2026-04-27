@@ -20,8 +20,8 @@ final class Item {
     var createdByChild: Bool
     var isArchived: Bool
 
-    init(name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false) {
-        self.id = UUID()
+    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false) {
+        self.id = id
         self.name = name
         self.targetDate = targetDate
         self.assignedTo = assignedTo
@@ -49,18 +49,22 @@ final class Item {
 
 @Model
 final class FamilyMember {
+    var id: UUID = UUID()
     var name: String
     var memberRole: String
     var avatar: String
     var isAccepted: Bool
     var totalEarned: Double
+    var appleUserID: String
 
-    init(name: String, memberRole: String = "child", avatar: String = "person.circle.fill", isAccepted: Bool = true, totalEarned: Double = 0) {
+    init(id: UUID = UUID(), name: String, memberRole: String = "child", avatar: String = "person.circle.fill", isAccepted: Bool = true, totalEarned: Double = 0, appleUserID: String = "") {
+        self.id = id
         self.name = name
         self.memberRole = memberRole
         self.avatar = avatar
         self.isAccepted = isAccepted
         self.totalEarned = totalEarned
+        self.appleUserID = appleUserID
     }
 
     var isParent: Bool { memberRole == "parent" }

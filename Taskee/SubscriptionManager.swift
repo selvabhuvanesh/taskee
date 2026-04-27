@@ -1,0 +1,198 @@
+//
+//  SubscriptionManager.swift
+//  Taskee
+//
+
+import StoreKit
+import SwiftData
+
+@Observable
+final class SubscriptionManager {
+
+    // MARK: - Product IDs (register these in App Store Connect)
+
+    static let familyMonthly  = "com.taskee.family.monthly"
+    static let familyAnnual   = "com.taskee.family.annual"
+    static let proMonthly     = "com.taskee.pro.monthly"
+    static let proAnnual      = "com.taskee.pro.annual"
+
+    private static let familyIDs: Set<String> = [familyMonthly, familyAnnual]
+    private static let proIDs: Set<String>    = [proMonthly, proAnnual]
+    private static let allIDs: Set<String>    = familyIDs.union(proIDs)
+
+    // MARK: - State
+
+    enum Tier: String, Comparable {
+        case free, family, pro
+
+        static func < (lhs: Tier, rhs: Tier) -> Bool {
+            let order: [Tier] = [.free, .family, .pro]
+            return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
+        }
+    }
+
+    private(set) var tier: Tier = .free
+    var products: [Product] = []
+    var purchaseError: String?
+
+    // MARK: - Tier Limits
+
+    var maxMembers: Int {
+        switch tier {
+        case .free:   return 4
+        case .family: return 6
+        case .pro:    return 10
+        }
+    }
+
+    var maxTasksPerMonth: Int? {
+        switch tier {
+        case .free:   return 100
+        case .family: return 250
+        case .pro:    return nil
+        }
+    }
+
+    var maxPickupsPerDay: Int? {
+        switch tier {
+        case .free:   return 3
+        case .family: return 10
+        case .pro:    return nil
+        }
+    }
+
+    // MARK: - Anti-Bot: Rate Limiting
+
+    private var lastTaskCreated: Date = .distantPast
+    private let taskCooldown: TimeInterval = 10
+
+    var canCreateTask: Bool {
+        Date().timeIntervalSince(lastTaskCreated) >= taskCooldown
+    }
+
+    func recordTaskCreation() {
+        lastTaskCreated = Date()
+    }
+
+    // MARK: - Anti-Bot: Pickup Rate Limiting
+
+    func pickupsUsedToday() -> Int {
+        UserDefaults.standard.integer(forKey: pickupKey())
+    }
+
+    func recordPickup() {
+        let key = pickupKey()
+        UserDefaults.standard.set(pickupsUsedToday() + 1, forKey: key)
+    }
+
+    func canSendPickup() -> Bool {
+        guard let limit = maxPickupsPerDay else { return true }
+        return pickupsUsedToday() < limit
+    }
+
+    private func pickupKey() -> String {
+        let day = Calendar.current.startOfDay(for: Date())
+        let stamp = Int(day.timeIntervalSince1970)
+        return "pickups-\(stamp)"
+    }
+
+    // MARK: - Task Count This Month
+
+    func tasksCreatedThisMonth(allTasks: [Item]) -> Int {
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
+        return allTasks.filter { $0.targetDate >= startOfMonth }.count
+    }
+
+    func canCreateMoreTasks(allTasks: [Item]) -> Bool {
+        guard let limit = maxTasksPerMonth else { return true }
+        return tasksCreatedThisMonth(allTasks: allTasks) < limit
+    }
+
+    func tasksRemaining(allTasks: [Item]) -> Int? {
+        guard let limit = maxTasksPerMonth else { return nil }
+        return max(0, limit - tasksCreatedThisMonth(allTasks: allTasks))
+    }
+
+    // MARK: - Member Count
+
+    func canAddMember(currentCount: Int) -> Bool {
+        currentCount < maxMembers
+    }
+
+    // MARK: - StoreKit 2
+
+    func loadProducts() async {
+        do {
+            products = try await Product.products(for: SubscriptionManager.allIDs)
+                .sorted { $0.price < $1.price }
+        } catch {
+            purchaseError = "Failed to load products."
+        }
+    }
+
+    func purchase(_ product: Product) async -> Bool {
+        do {
+            let result = try await product.purchase()
+            switch result {
+            case .success(let verification):
+                let transaction = try checkVerified(verification)
+                await transaction.finish()
+                await refreshTier()
+                return true
+            case .userCancelled:
+                return false
+            case .pending:
+                return false
+            @unknown default:
+                return false
+            }
+        } catch {
+            purchaseError = error.localizedDescription
+            return false
+        }
+    }
+
+    func restorePurchases() async {
+        try? await AppStore.sync()
+        await refreshTier()
+    }
+
+    func refreshTier() async {
+        var resolved: Tier = .free
+
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checkVerified(result) else { continue }
+            if SubscriptionManager.proIDs.contains(transaction.productID) {
+                resolved = .pro
+                break
+            } else if SubscriptionManager.familyIDs.contains(transaction.productID) {
+                resolved = .family
+            }
+        }
+
+        tier = resolved
+    }
+
+    func listenForTransactions() async {
+        for await result in Transaction.updates {
+            if let _ = try? checkVerified(result) {
+                await refreshTier()
+            }
+        }
+    }
+
+    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+        switch result {
+        case .verified(let value):
+            return value
+        case .unverified:
+            throw StoreError.unverified
+        }
+    }
+
+    enum StoreError: Error {
+        case unverified
+    }
+}

@@ -11,11 +11,19 @@ import SwiftData
 struct RoleSelectionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
     @State private var selectedRole = ""
     @State private var name = ""
     @State private var inviteCode = ""
     @State private var selectedAvatar = "person.circle.fill"
     @State private var joinExisting = false
+    @State private var isValidating = false
+    @State private var showInvalidCode = false
+    @State private var showCloudUnavailable = false
+    @State private var showAlreadyHasFamily = false
+    @State private var existingFamilyCode = ""
+    @State private var showFamilyFull = false
 
     var body: some View {
         ZStack {
@@ -108,7 +116,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white.opacity(0.3))
             }
             .padding(18)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -131,7 +139,7 @@ struct RoleSelectionView: View {
                             .font(.system(size: 28))
                             .frame(width: 48, height: 48)
                             .background(
-                                selectedAvatar == avatar ? .blue.opacity(0.3) : .white.opacity(0.08),
+                                selectedAvatar == avatar ? .blue.opacity(0.3) : .white.opacity(0.15),
                                 in: Circle()
                             )
                             .foregroundStyle(selectedAvatar == avatar ? .blue : .white.opacity(0.6))
@@ -161,7 +169,7 @@ struct RoleSelectionView: View {
                     .font(.body)
                     .foregroundStyle(.white)
                     .padding(14)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -181,7 +189,7 @@ struct RoleSelectionView: View {
                     }
                     .font(.subheadline)
                     .padding(12)
-                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 }
 
                 Button {
@@ -196,7 +204,7 @@ struct RoleSelectionView: View {
                     }
                     .font(.subheadline)
                     .padding(12)
-                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
 
@@ -211,7 +219,7 @@ struct RoleSelectionView: View {
                         .foregroundStyle(.white)
                         .textInputAutocapitalization(.characters)
                         .padding(14)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
                                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -221,34 +229,65 @@ struct RoleSelectionView: View {
 
             Button {
                 let trimmedName = name.trimmingCharacters(in: .whitespaces)
-                authManager.userName = trimmedName
-                authManager.role = "parent"
-                authManager.avatar = selectedAvatar
                 if joinExisting {
-                    authManager.familyCode = inviteCode.uppercased()
+                    isValidating = true
+                    Task {
+                        let result = await cloudKitManager.validateFamilyCode(inviteCode.uppercased())
+                        isValidating = false
+                        switch result {
+                        case .valid:
+                            let count = await cloudKitManager.memberCount(familyCode: inviteCode.uppercased())
+                            guard count < subscriptionManager.maxMembers else {
+                                showFamilyFull = true
+                                return
+                            }
+                            completeParentSetup(name: trimmedName, code: inviteCode.uppercased(), isNew: false)
+                        case .invalid:
+                            showInvalidCode = true
+                        case .cloudUnavailable:
+                            showCloudUnavailable = true
+                        }
+                    }
                 } else {
-                    authManager.generateFamilyCode()
+                    isValidating = true
+                    Task {
+                        if let existing = await cloudKitManager.familyAlreadyExists(appleUserID: authManager.appleUserID) {
+                            isValidating = false
+                            existingFamilyCode = existing
+                            showAlreadyHasFamily = true
+                            return
+                        }
+                        authManager.generateFamilyCode()
+                        let code = authManager.familyCode
+                        let saved = await cloudKitManager.registerFamily(code: code, createdBy: trimmedName, appleUserID: authManager.appleUserID)
+                        isValidating = false
+                        if saved {
+                            completeParentSetup(name: trimmedName, code: code, isNew: true)
+                        } else {
+                            showCloudUnavailable = true
+                        }
+                    }
                 }
-                let member = FamilyMember(
-                    name: trimmedName,
-                    memberRole: "parent",
-                    avatar: selectedAvatar
-                )
-                modelContext.insert(member)
             } label: {
-                Text(joinExisting ? "Join as Parent" : "Create Family")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        isParentFormValid
-                            ? AnyShapeStyle(.blue)
-                            : AnyShapeStyle(.white.opacity(0.1)),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .foregroundStyle(.white)
+                HStack(spacing: 8) {
+                    if isValidating {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(joinExisting ? "Join as Parent" : "Create Family")
+                }
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    isParentFormValid && !isValidating
+                        ? AnyShapeStyle(.blue)
+                        : AnyShapeStyle(.white.opacity(0.1)),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+                .foregroundStyle(.white)
             }
-            .disabled(!isParentFormValid)
+            .disabled(!isParentFormValid || isValidating)
 
             Button {
                 withAnimation(.snappy) { selectedRole = "" }
@@ -256,6 +295,56 @@ struct RoleSelectionView: View {
                 Text("Back")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+        .alert("Invalid Family Code", isPresented: $showInvalidCode) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("No family exists with that invite code. Please check the code and try again.")
+        }
+        .alert("Connection Error", isPresented: $showCloudUnavailable) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(cloudKitManager.lastSyncError ?? "Unable to connect. Please check your internet connection and try again.")
+        }
+        .alert("Family Already Exists", isPresented: $showAlreadyHasFamily) {
+            Button("Use Existing Family") {
+                let trimmedName = name.trimmingCharacters(in: .whitespaces)
+                completeParentSetup(name: trimmedName, code: existingFamilyCode, isNew: false)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("You already have a family with code \(existingFamilyCode). You can use your existing family or join another family with an invite code.")
+        }
+        .alert("Family Full", isPresented: $showFamilyFull) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This family has reached the maximum number of members (\(subscriptionManager.maxMembers)) for the current plan.")
+        }
+    }
+
+    private func completeParentSetup(name: String, code: String, isNew: Bool) {
+        let member = FamilyMember(
+            name: name,
+            memberRole: "parent",
+            avatar: selectedAvatar,
+            appleUserID: authManager.appleUserID
+        )
+        modelContext.insert(member)
+        Task {
+            let pushed = await cloudKitManager.pushMember(member, familyCode: code)
+            if pushed {
+                authManager.userName = name
+                authManager.role = "parent"
+                authManager.avatar = selectedAvatar
+                authManager.familyCode = code
+                if !isNew {
+                    await cloudKitManager.syncAll(context: modelContext, familyCode: code)
+                }
+                await cloudKitManager.setupSubscriptions(familyCode: code)
+            } else {
+                modelContext.delete(member)
+                showCloudUnavailable = true
             }
         }
     }
@@ -273,7 +362,7 @@ struct RoleSelectionView: View {
                     .font(.body)
                     .foregroundStyle(.white)
                     .padding(14)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -290,7 +379,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
                     .textInputAutocapitalization(.characters)
                     .padding(14)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -299,30 +388,63 @@ struct RoleSelectionView: View {
 
             Button {
                 let trimmedName = name.trimmingCharacters(in: .whitespaces)
-                authManager.userName = trimmedName
-                authManager.role = "child"
-                authManager.familyCode = inviteCode.uppercased()
-                authManager.avatar = selectedAvatar
-                let member = FamilyMember(
-                    name: trimmedName,
-                    memberRole: "child",
-                    avatar: selectedAvatar
-                )
-                modelContext.insert(member)
+                let code = inviteCode.uppercased()
+                isValidating = true
+                Task {
+                    let result = await cloudKitManager.validateFamilyCode(code)
+                    isValidating = false
+                    switch result {
+                    case .invalid:
+                        showInvalidCode = true
+                    case .cloudUnavailable:
+                        showCloudUnavailable = true
+                    case .valid:
+                        let count = await cloudKitManager.memberCount(familyCode: code)
+                        guard count < subscriptionManager.maxMembers else {
+                            showFamilyFull = true
+                            return
+                        }
+                        let member = FamilyMember(
+                            name: trimmedName,
+                            memberRole: "child",
+                            avatar: selectedAvatar,
+                            appleUserID: authManager.appleUserID
+                        )
+                        modelContext.insert(member)
+                        let pushed = await cloudKitManager.pushMember(member, familyCode: code)
+                        if pushed {
+                            authManager.userName = trimmedName
+                            authManager.role = "child"
+                            authManager.familyCode = code
+                            authManager.avatar = selectedAvatar
+                            await cloudKitManager.syncAll(context: modelContext, familyCode: code)
+                            await cloudKitManager.setupSubscriptions(familyCode: code)
+                        } else {
+                            modelContext.delete(member)
+                            showCloudUnavailable = true
+                        }
+                    }
+                }
             } label: {
-                Text("Join Family")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        isChildFormValid
-                            ? AnyShapeStyle(.blue)
-                            : AnyShapeStyle(.white.opacity(0.1)),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .foregroundStyle(.white)
+                HStack(spacing: 8) {
+                    if isValidating {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text("Join Family")
+                }
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    isChildFormValid && !isValidating
+                        ? AnyShapeStyle(.blue)
+                        : AnyShapeStyle(.white.opacity(0.1)),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+                .foregroundStyle(.white)
             }
-            .disabled(!isChildFormValid)
+            .disabled(!isChildFormValid || isValidating)
 
             Button {
                 withAnimation(.snappy) { selectedRole = "" }
@@ -331,6 +453,21 @@ struct RoleSelectionView: View {
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
             }
+        }
+        .alert("Invalid Family Code", isPresented: $showInvalidCode) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("No family exists with that invite code. Please check the code and try again.")
+        }
+        .alert("Connection Error", isPresented: $showCloudUnavailable) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(cloudKitManager.lastSyncError ?? "Unable to connect. Please check your internet connection and try again.")
+        }
+        .alert("Family Full", isPresented: $showFamilyFull) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This family has reached the maximum number of members (\(subscriptionManager.maxMembers)) for the current plan.")
         }
     }
 
@@ -352,4 +489,6 @@ struct RoleSelectionView: View {
     RoleSelectionView()
         .modelContainer(for: [Item.self, FamilyMember.self], inMemory: true)
         .environment(AuthManager())
+        .environment(CloudKitManager())
+        .environment(SubscriptionManager())
 }

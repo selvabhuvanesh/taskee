@@ -59,6 +59,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var tasks: [Item]
     @Query private var allMembers: [FamilyMember]
 
@@ -115,10 +116,16 @@ struct ContentView: View {
                     }
                     .padding(.top, 8)
 
-                    if filteredTasks.isEmpty {
-                        emptyState
-                    } else {
-                        groupList
+                    ScrollView {
+                        if filteredTasks.isEmpty {
+                            emptyState
+                        } else {
+                            groupListContent
+                        }
+                    }
+                    .refreshable {
+                        guard !authManager.familyCode.isEmpty else { return }
+                        await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode)
                     }
 
                     addTaskButton
@@ -164,7 +171,9 @@ struct ContentView: View {
 
                         Menu {
                             Text(authManager.userName)
-                            Text(authManager.phoneNumber)
+                            if !authManager.email.isEmpty {
+                                Text(authManager.email)
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 authManager.logout()
@@ -271,26 +280,24 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var groupList: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(groupedTasks, id: \.key) { group in
-                    NavigationLink(destination: DateTasksView(
-                        dateLabel: group.key,
-                        tasks: group.tasks,
-                        children: children,
-                        onTaskCompleted: { reward in
-                            celebrationReward = reward
-                            showCelebration = true
-                        }
-                    )) {
-                        GroupCard(dateLabel: group.key, count: group.tasks.count)
+    private var groupListContent: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(groupedTasks, id: \.key) { group in
+                NavigationLink(destination: DateTasksView(
+                    dateLabel: group.key,
+                    tasks: group.tasks,
+                    children: children,
+                    onTaskCompleted: { reward in
+                        celebrationReward = reward
+                        showCelebration = true
                     }
+                )) {
+                    GroupCard(dateLabel: group.key, count: group.tasks.count)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     private var addTaskButton: some View {
@@ -333,7 +340,7 @@ struct GroupCard: View {
                 .foregroundStyle(.white.opacity(0.35))
         }
         .padding(16)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -346,6 +353,8 @@ struct GroupCard: View {
 struct DateTasksView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
     let dateLabel: String
     let tasks: [Item]
     let children: [FamilyMember]
@@ -353,14 +362,16 @@ struct DateTasksView: View {
     @State private var taskToDelete: Item?
     @State private var taskToEdit: Item?
     @State private var taskToApprove: Item?
+    @State private var showingAddTask = false
 
     var body: some View {
         ZStack {
             AppBackground()
 
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(tasks) { task in
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(tasks) { task in
                         TaskRow(
                             task: task,
                             showAssignee: true,
@@ -372,20 +383,37 @@ struct DateTasksView: View {
                         )
                         .padding(.horizontal, 16)
                         .padding(.vertical, 2)
-                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
                         )
                         .padding(.horizontal, 16)
                     }
                 }
                 .padding(.vertical, 12)
+                }
+
+                Button {
+                    showingAddTask = true
+                } label: {
+                    Label("Add Task", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(.white.opacity(0.2), in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
+                .padding(.bottom, 16)
             }
         }
         .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationTitle(dateLabel)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingAddTask) {
+            AddTaskView(children: children)
+        }
         .alert("Delete Task", isPresented: Binding(
             get: { taskToDelete != nil },
             set: { if !$0 { taskToDelete = nil } }
@@ -395,10 +423,12 @@ struct DateTasksView: View {
             }
             Button("Delete", role: .destructive) {
                 if let task = taskToDelete {
-                    notificationManager.cancelTaskReminder(taskId: task.id)
+                    let taskID = task.id
+                    notificationManager.cancelTaskReminder(taskId: taskID)
                     withAnimation {
                         modelContext.delete(task)
                     }
+                    Task { await cloudKitManager.deleteRemoteTask(taskID) }
                     taskToDelete = nil
                 }
             }
@@ -442,6 +472,8 @@ struct DateTasksView: View {
         if task.reward > 0 && !task.assignedTo.isEmpty {
             if let child = children.first(where: { $0.name == task.assignedTo }) {
                 child.totalEarned += task.reward
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
             }
         }
         if !task.assignedTo.isEmpty {
@@ -451,6 +483,8 @@ struct DateTasksView: View {
                 reward: task.reward
             )
         }
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
         SoundManager.shared.playApplause()
         onTaskCompleted?(task.reward)
     }
@@ -461,6 +495,8 @@ struct DateTasksView: View {
 struct ChildTasksView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
     let child: FamilyMember
     let tasks: [Item]
     let allChildren: [FamilyMember]
@@ -470,6 +506,7 @@ struct ChildTasksView: View {
     @State private var taskToApprove: Item?
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
+    @State private var showingAddTask = false
 
     private var filteredTasks: [Item] {
         showOpenOnly ? tasks.filter { !$0.isApproved } : tasks
@@ -522,11 +559,11 @@ struct ChildTasksView: View {
                                         )
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 2)
-                                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 12)
                                                 .strokeBorder(
-                                                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.08),
+                                                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.15),
                                                     lineWidth: 1
                                                 )
                                         )
@@ -538,6 +575,20 @@ struct ChildTasksView: View {
                         .padding(.top, 8)
                     }
                 }
+
+                Button {
+                    showingAddTask = true
+                } label: {
+                    Label("Add Task", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(.blue, in: RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: .blue.opacity(0.4), radius: 8, y: 4)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
 
             CelebrationOverlay(
@@ -570,8 +621,10 @@ struct ChildTasksView: View {
             Button("Cancel", role: .cancel) { taskToDelete = nil }
             Button("Delete", role: .destructive) {
                 if let task = taskToDelete {
-                    notificationManager.cancelTaskReminder(taskId: task.id)
+                    let taskID = task.id
+                    notificationManager.cancelTaskReminder(taskId: taskID)
                     withAnimation { modelContext.delete(task) }
+                    Task { await cloudKitManager.deleteRemoteTask(taskID) }
                     taskToDelete = nil
                 }
             }
@@ -599,6 +652,11 @@ struct ChildTasksView: View {
                         childName: child.name,
                         reward: task.reward
                     )
+                    let familyCode = authManager.familyCode
+                    Task {
+                        await cloudKitManager.pushTask(task, familyCode: familyCode)
+                        await cloudKitManager.pushMember(child, familyCode: familyCode)
+                    }
                     SoundManager.shared.playApplause()
                     celebrationReward = task.reward
                     showCelebration = true
@@ -616,6 +674,9 @@ struct ChildTasksView: View {
         }
         .sheet(item: $taskToEdit) { task in
             EditTaskView(task: task, children: allChildren)
+        }
+        .sheet(isPresented: $showingAddTask) {
+            AddTaskView(children: allChildren, preselectedChild: child.name)
         }
     }
 
@@ -800,7 +861,12 @@ struct AddTaskView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
     let children: [FamilyMember]
+    var preselectedChild: String = ""
 
     @State private var taskName = ""
     @State private var targetDate = Date()
@@ -836,6 +902,35 @@ struct AddTaskView: View {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
 
+                        if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
+                            HStack(spacing: 8) {
+                                Image(systemName: remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                    .foregroundStyle(remaining <= 10 ? .orange : .cyan)
+                                Text("\(remaining) tasks remaining this month")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                                Text(subscriptionManager.tier.rawValue.capitalized)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white.opacity(0.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(.white.opacity(0.1), in: Capsule())
+                            }
+                            .padding(12)
+                            .background(
+                                (remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
                                 .font(.caption)
@@ -845,7 +940,7 @@ struct AddTaskView: View {
                                 .font(.body)
                                 .foregroundStyle(.white)
                                 .padding(14)
-                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
                                         .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -868,7 +963,7 @@ struct AddTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -892,7 +987,7 @@ struct AddTaskView: View {
                                     .keyboardType(.decimalPad)
                             }
                             .padding(14)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -927,14 +1022,22 @@ struct AddTaskView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if selectedChild.isEmpty && !preselectedChild.isEmpty {
+                    selectedChild = preselectedChild
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
+                        guard subscriptionManager.canCreateTask,
+                              subscriptionManager.canCreateMoreTasks(allTasks: allTasks) else { return }
                         let dates = generateTaskDates()
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
+                        var createdTasks: [Item] = []
                         for date in dates {
                             let task = Item(
                                 name: trimmedName,
@@ -943,6 +1046,8 @@ struct AddTaskView: View {
                                 reward: rewardValue
                             )
                             modelContext.insert(task)
+                            createdTasks.append(task)
+                            subscriptionManager.recordTaskCreation()
                             notificationManager.scheduleTaskReminder(
                                 taskId: task.id,
                                 taskName: trimmedName,
@@ -950,10 +1055,16 @@ struct AddTaskView: View {
                                 dueDate: date
                             )
                         }
+                        let familyCode = authManager.familyCode
+                        Task {
+                            for task in createdTasks {
+                                await cloudKitManager.pushTask(task, familyCode: familyCode)
+                            }
+                        }
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!isValid)
+                    .disabled(!isValid || !subscriptionManager.canCreateMoreTasks(allTasks: allTasks))
                 }
             }
         }
@@ -997,7 +1108,7 @@ struct AddTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.08),
+                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.15),
                                         in: Circle()
                                     )
                                     .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
@@ -1019,7 +1130,7 @@ struct AddTaskView: View {
                 }
                 .tint(.white)
                 .padding(12)
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1089,13 +1200,13 @@ struct AddTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.06),
+                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.08),
+                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -1108,6 +1219,8 @@ struct AddTaskView: View {
 struct EditTaskView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
     @Bindable var task: Item
     let children: [FamilyMember]
 
@@ -1151,7 +1264,7 @@ struct EditTaskView: View {
                                 .font(.body)
                                 .foregroundStyle(.white)
                                 .padding(14)
-                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
                                         .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1173,7 +1286,7 @@ struct EditTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1195,7 +1308,7 @@ struct EditTaskView: View {
                                     .keyboardType(.decimalPad)
                             }
                             .padding(14)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1247,6 +1360,8 @@ struct EditTaskView: View {
                             assignedTo: task.assignedTo,
                             dueDate: targetDate
                         )
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -1269,13 +1384,13 @@ struct EditTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.06),
+                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.08),
+                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -1289,6 +1404,8 @@ struct ChildrenManagementView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthManager.self) private var authManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
     @State private var newChildName = ""
     @State private var memberToRemove: FamilyMember?
@@ -1315,9 +1432,9 @@ struct ChildrenManagementView: View {
                             memberSection(title: "Parents (\(parents.count)/2)", members: parents, canRemove: false)
                         }
 
-                        memberSection(title: "Children (\(children.count)/10)", members: children, canRemove: true)
+                        memberSection(title: "Children (\(children.count)/\(subscriptionManager.maxMembers))", members: children, canRemove: true)
 
-                        if children.count < 10 {
+                        if subscriptionManager.canAddMember(currentCount: allMembers.count) {
                             addChildSection
                         }
                     }
@@ -1340,7 +1457,9 @@ struct ChildrenManagementView: View {
                 Button("Cancel", role: .cancel) { memberToRemove = nil }
                 Button("Remove", role: .destructive) {
                     if let member = memberToRemove {
+                        let memberID = member.id
                         modelContext.delete(member)
+                        Task { await cloudKitManager.deleteRemoteMember(memberID) }
                         memberToRemove = nil
                     }
                 }
@@ -1380,7 +1499,7 @@ struct ChildrenManagementView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(20)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1443,10 +1562,10 @@ struct ChildrenManagementView: View {
                         }
                     }
                     .padding(14)
-                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
                     )
                 }
             }
@@ -1464,7 +1583,7 @@ struct ChildrenManagementView: View {
                     .font(.body)
                     .foregroundStyle(.white)
                     .padding(12)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
                             .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1473,13 +1592,15 @@ struct ChildrenManagementView: View {
                 Button {
                     let child = FamilyMember(name: newChildName.trimmingCharacters(in: .whitespaces))
                     modelContext.insert(child)
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                     newChildName = ""
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.title2)
                         .foregroundStyle(.blue)
                 }
-                .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || children.count >= 10)
+                .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || !subscriptionManager.canAddMember(currentCount: allMembers.count))
             }
         }
     }
@@ -1491,6 +1612,8 @@ struct PendingApprovalsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
     @Query(filter: #Predicate<Item> { $0.status == "inReview" }, sort: \Item.targetDate)
     private var pendingTasks: [Item]
     @Query private var children: [FamilyMember]
@@ -1548,10 +1671,14 @@ struct PendingApprovalsView: View {
                             if task.reward > 0 && !task.assignedTo.isEmpty {
                                 if let child = children.first(where: { $0.name == task.assignedTo }) {
                                     child.totalEarned += task.reward
+                                    let familyCode = authManager.familyCode
+                                    Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                                 }
                             }
                             onApproved?(task.reward)
                         }
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                         if !task.assignedTo.isEmpty {
                             notificationManager.sendTaskApprovedNotification(
                                 taskName: task.name,
@@ -1612,6 +1739,8 @@ struct PendingApprovalsView: View {
                     withAnimation(.snappy) {
                         task.status = "open"
                     }
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                     if !task.assignedTo.isEmpty {
                         notificationManager.sendTaskRejectedNotification(
                             taskName: task.name,
@@ -1654,7 +1783,7 @@ struct PendingApprovalsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
@@ -1667,6 +1796,8 @@ struct PendingApprovalsView: View {
 struct ParentOnboardingView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
     var onComplete: () -> Void
 
@@ -1705,7 +1836,7 @@ struct ParentOnboardingView: View {
 
                         if !children.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Children (\(children.count)/10)")
+                                Text("Children (\(children.count)/\(subscriptionManager.maxMembers))")
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.5))
 
@@ -1723,16 +1854,16 @@ struct ParentOnboardingView: View {
                                         Spacer()
                                     }
                                     .padding(14)
-                                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
                                     )
                                 }
                             }
                         }
 
-                        if children.count < 10 {
+                        if subscriptionManager.canAddMember(currentCount: allMembers.count) {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Add Child")
                                     .font(.caption)
@@ -1743,7 +1874,7 @@ struct ParentOnboardingView: View {
                                         .font(.body)
                                         .foregroundStyle(.white)
                                         .padding(12)
-                                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                                        .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
                                                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1752,13 +1883,15 @@ struct ParentOnboardingView: View {
                                     Button {
                                         let child = FamilyMember(name: newChildName.trimmingCharacters(in: .whitespaces))
                                         modelContext.insert(child)
+                                        let familyCode = authManager.familyCode
+                                        Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                                         newChildName = ""
                                     } label: {
                                         Image(systemName: "plus.circle.fill")
                                             .font(.title2)
                                             .foregroundStyle(.blue)
                                     }
-                                    .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || children.count >= 10)
+                                    .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || !subscriptionManager.canAddMember(currentCount: allMembers.count))
                                 }
                             }
                         }
@@ -1810,7 +1943,7 @@ struct ParentOnboardingView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(20)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -1823,4 +1956,6 @@ struct ParentOnboardingView: View {
         .modelContainer(for: [Item.self, FamilyMember.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
+        .environment(SubscriptionManager())
+        .environment(CloudKitManager())
 }

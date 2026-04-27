@@ -13,8 +13,12 @@ final class AuthManager {
         didSet { UserDefaults.standard.set(isLoggedIn, forKey: "isLoggedIn") }
     }
 
-    var phoneNumber: String {
-        didSet { UserDefaults.standard.set(phoneNumber, forKey: "phoneNumber") }
+    var appleUserID: String {
+        didSet { UserDefaults.standard.set(appleUserID, forKey: "appleUserID") }
+    }
+
+    var email: String {
+        didSet { UserDefaults.standard.set(email, forKey: "userEmail") }
     }
 
     // "parent", "child", or "" (not yet selected)
@@ -38,12 +42,10 @@ final class AuthManager {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
     }
 
-    // In production, replace with Firebase Auth phone verification.
-    private(set) var generatedOTP: String = ""
-
     init() {
         self.isLoggedIn = UserDefaults.standard.bool(forKey: "isLoggedIn")
-        self.phoneNumber = UserDefaults.standard.string(forKey: "phoneNumber") ?? ""
+        self.appleUserID = UserDefaults.standard.string(forKey: "appleUserID") ?? ""
+        self.email = UserDefaults.standard.string(forKey: "userEmail") ?? ""
         self.role = UserDefaults.standard.string(forKey: "userRole") ?? ""
         self.userName = UserDefaults.standard.string(forKey: "userName") ?? ""
         self.familyCode = UserDefaults.standard.string(forKey: "familyCode") ?? ""
@@ -51,14 +53,15 @@ final class AuthManager {
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     }
 
-    func sendOTP(to phone: String) {
-        self.phoneNumber = phone
-        self.generatedOTP = String(format: "%06d", Int.random(in: 0...999999))
-        print("[Taskee] OTP for \(phone): \(generatedOTP)")
-    }
-
-    func verifyOTP(_ code: String) -> Bool {
-        code == generatedOTP
+    func handleAppleSignIn(userID: String, fullName: PersonNameComponents?, email: String?) {
+        self.appleUserID = userID
+        if let name = fullName, let given = name.givenName {
+            self.userName = [given, name.familyName].compactMap { $0 }.joined(separator: " ")
+        }
+        if let email {
+            self.email = email
+        }
+        self.isLoggedIn = true
     }
 
     func generateFamilyCode() {
@@ -68,7 +71,8 @@ final class AuthManager {
 
     func logout() {
         isLoggedIn = false
-        phoneNumber = ""
+        appleUserID = ""
+        email = ""
         role = ""
         userName = ""
         familyCode = ""

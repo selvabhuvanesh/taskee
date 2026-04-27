@@ -98,6 +98,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
+    func sendPickupNotification(childName: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Pickup Request!"
+        content.body = "\(childName) wants to be picked up in 5 minutes!"
+        content.sound = .default
+        content.categoryIdentifier = "PICKUP_REQUEST"
+
+        let request = UNNotificationRequest(
+            identifier: "pickup-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,

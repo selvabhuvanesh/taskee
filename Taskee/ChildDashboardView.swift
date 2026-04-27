@@ -12,6 +12,8 @@ struct ChildDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AuthManager.self) private var authManager
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allMembers: [FamilyMember]
     @State private var showOpenOnly = false
@@ -21,6 +23,10 @@ struct ChildDashboardView: View {
     @State private var celebrationTitle = ""
     @State private var celebrationSubtitle = ""
     @State private var taskToComplete: Item?
+    @State private var showPickupSent = false
+    @State private var showPickupLimit = false
+    @State private var pickupPosition: CGPoint = .zero
+    @State private var pickupInitialized = false
 
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
@@ -73,6 +79,8 @@ struct ChildDashboardView: View {
                     subtitle: celebrationSubtitle,
                     rewardAmount: 0
                 )
+
+                pickupFloatingButton
             }
             .toolbarColorScheme(.dark, for: .navigationBar)
             .navigationTitle("\(authManager.userName)'s Tasks")
@@ -83,7 +91,9 @@ struct ChildDashboardView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Text(authManager.userName)
-                        Text(authManager.phoneNumber)
+                        if !authManager.email.isEmpty {
+                            Text(authManager.email)
+                        }
                         Divider()
                         Button(role: .destructive) {
                             authManager.logout()
@@ -127,6 +137,18 @@ struct ChildDashboardView: View {
                     }
                 }
             }
+            .alert("Pickup Request Sent!", isPresented: $showPickupSent) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Your parents have been notified that you want to be picked up in 5 minutes.")
+            }
+            .alert("Pickup Limit Reached", isPresented: $showPickupLimit) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                if let limit = subscriptionManager.maxPickupsPerDay {
+                    Text("You've used all \(limit) pickup requests for today. Try again tomorrow!")
+                }
+            }
             .onAppear {
                 archiveOldTasks()
             }
@@ -155,12 +177,96 @@ struct ChildDashboardView: View {
                 taskName: task.name,
                 childName: authManager.userName
             )
+            let taskName = task.name
+            let childName = authManager.userName
+            Task {
+                await cloudKitManager.sendRemoteNotification(
+                    familyCode: authManager.familyCode,
+                    title: "Task Submitted for Review",
+                    body: "\(childName) completed \"\(taskName)\"",
+                    category: "TASK_REVIEW"
+                )
+            }
             celebrationTitle = "Submitted for Review!"
             celebrationSubtitle = "Waiting for parent approval"
         }
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
         showCelebration = true
+    }
+
+    private var pickupFloatingButton: some View {
+        GeometryReader { geo in
+            Button {
+                guard subscriptionManager.canSendPickup() else {
+                    showPickupLimit = true
+                    return
+                }
+                subscriptionManager.recordPickup()
+                notificationManager.sendPickupNotification(childName: authManager.userName)
+                Task {
+                    await cloudKitManager.sendRemoteNotification(
+                        familyCode: authManager.familyCode,
+                        title: "Pickup Request!",
+                        body: "\(authManager.userName) wants to be picked up in 5 minutes!",
+                        category: "PICKUP_REQUEST"
+                    )
+                }
+                showPickupSent = true
+            } label: {
+                ZStack {
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                        .offset(x: -2, y: -4)
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.yellow)
+                        .offset(x: 14, y: 10)
+                }
+                .frame(width: 64, height: 64)
+                .background(.blue, in: Circle())
+                .shadow(color: .blue.opacity(0.5), radius: 10, y: 4)
+            }
+            .position(pickupPosition)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        pickupPosition = clampPosition(
+                            CGPoint(x: value.location.x, y: value.location.y),
+                            in: geo.size
+                        )
+                    }
+                    .onEnded { _ in
+                        UserDefaults.standard.set(Float(pickupPosition.x), forKey: "pickupButtonX")
+                        UserDefaults.standard.set(Float(pickupPosition.y), forKey: "pickupButtonY")
+                    }
+            )
+            .onAppear {
+                guard !pickupInitialized else { return }
+                pickupInitialized = true
+                let savedX = UserDefaults.standard.float(forKey: "pickupButtonX")
+                let savedY = UserDefaults.standard.float(forKey: "pickupButtonY")
+                if savedX != 0 || savedY != 0 {
+                    pickupPosition = CGPoint(x: CGFloat(savedX), y: CGFloat(savedY))
+                } else {
+                    pickupPosition = CGPoint(
+                        x: geo.size.width - 52,
+                        y: geo.size.height - 90
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(true)
+    }
+
+    private func clampPosition(_ point: CGPoint, in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, 40), size.width - 40),
+            y: min(max(point.y, 40), size.height - 40)
+        )
     }
 
     private var addTaskButton: some View {
@@ -196,7 +302,7 @@ struct ChildDashboardView: View {
                 .foregroundStyle(.yellow.opacity(0.7))
         }
         .padding(18)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.green.opacity(0.2), lineWidth: 1)
@@ -218,20 +324,27 @@ struct ChildDashboardView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
-                .font(.system(size: 56))
-                .foregroundStyle(.white.opacity(0.3))
-            Text(showOpenOnly ? "All done!" : "No tasks yet")
-                .font(.title3)
-                .foregroundStyle(.white.opacity(0.7))
-            Text(showOpenOnly ? "You've completed all your tasks." : "Your parent hasn't assigned any tasks yet.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
+        ScrollView {
+            VStack(spacing: 12) {
+                Spacer().frame(height: 80)
+                Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.white.opacity(0.3))
+                Text(showOpenOnly ? "All done!" : "No tasks yet")
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(showOpenOnly ? "You've completed all your tasks." : "Your parent hasn't assigned any tasks yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable {
+            guard !authManager.familyCode.isEmpty else { return }
+            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode)
+        }
     }
 
     private var taskList: some View {
@@ -252,6 +365,10 @@ struct ChildDashboardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+        }
+        .refreshable {
+            guard !authManager.familyCode.isEmpty else { return }
+            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode)
         }
     }
 
@@ -319,11 +436,11 @@ struct ChildDashboardView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .opacity(task.isApproved ? 0.7 : 1)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.08),
+                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.15),
                     lineWidth: 1
                 )
         )
@@ -336,6 +453,10 @@ struct AddChildTaskView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
     let childName: String
     let parents: [FamilyMember]
 
@@ -368,6 +489,29 @@ struct AddChildTaskView: View {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
 
+                        if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
+                            HStack(spacing: 8) {
+                                Image(systemName: remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                    .foregroundStyle(remaining <= 10 ? .orange : .cyan)
+                                Text("\(remaining) tasks remaining this month")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(
+                                (remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
                                 .font(.caption)
@@ -377,7 +521,7 @@ struct AddChildTaskView: View {
                                 .font(.body)
                                 .foregroundStyle(.white)
                                 .padding(14)
-                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
                                         .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -400,7 +544,7 @@ struct AddChildTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -443,9 +587,12 @@ struct AddChildTaskView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
+                        guard subscriptionManager.canCreateTask,
+                              subscriptionManager.canCreateMoreTasks(allTasks: allTasks) else { return }
                         let dates = generateTaskDates()
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
                         let target = assignedTo.isEmpty ? childName : assignedTo
+                        var createdTasks: [Item] = []
                         for date in dates {
                             let task = Item(
                                 name: trimmedName,
@@ -455,6 +602,8 @@ struct AddChildTaskView: View {
                                 createdByChild: true
                             )
                             modelContext.insert(task)
+                            createdTasks.append(task)
+                            subscriptionManager.recordTaskCreation()
                             notificationManager.scheduleTaskReminder(
                                 taskId: task.id,
                                 taskName: trimmedName,
@@ -462,10 +611,16 @@ struct AddChildTaskView: View {
                                 dueDate: date
                             )
                         }
+                        let familyCode = authManager.familyCode
+                        Task {
+                            for task in createdTasks {
+                                await cloudKitManager.pushTask(task, familyCode: familyCode)
+                            }
+                        }
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!isValid)
+                    .disabled(!isValid || !subscriptionManager.canCreateMoreTasks(allTasks: allTasks))
                 }
             }
         }
@@ -509,7 +664,7 @@ struct AddChildTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.08),
+                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.15),
                                         in: Circle()
                                     )
                                     .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
@@ -531,7 +686,7 @@ struct AddChildTaskView: View {
                 }
                 .tint(.white)
                 .padding(12)
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(.white.opacity(0.1), lineWidth: 1)
@@ -601,13 +756,13 @@ struct AddChildTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.06),
+                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.08),
+                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -620,4 +775,6 @@ struct AddChildTaskView: View {
         .modelContainer(for: [Item.self, FamilyMember.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
+        .environment(SubscriptionManager())
+        .environment(CloudKitManager())
 }
