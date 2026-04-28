@@ -16,21 +16,44 @@ struct ChildDashboardView: View {
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allMembers: [FamilyMember]
-    @State private var showOpenOnly = false
+    @State private var showAll = false
     @State private var showAddTask = false
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
     @State private var celebrationTitle = ""
     @State private var celebrationSubtitle = ""
     @State private var taskToComplete: Item?
+    @State private var showTooEarlyAlert = false
+    @State private var tooEarlyTask: Item?
     @State private var showPickupSent = false
     @State private var showPickupLimit = false
     @State private var pickupPosition: CGPoint = .zero
     @State private var pickupInitialized = false
+    @State private var showNotificationCenter = false
+    @State private var showRedeemSheet = false
+    @State private var showRewardsHistory = false
+    @State private var showEditProfile = false
+    @Query private var allRedemptions: [RewardRedemption]
+
+    private var myRedemptions: [RewardRedemption] {
+        allRedemptions.filter { $0.childName == authManager.userName }
+    }
+
+    private var pendingRedemptionCoins: Int {
+        myRedemptions.filter { $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+    }
+
+    private var redeemedCoins: Int {
+        myRedemptions.filter { $0.isApproved || $0.isFulfilled || $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+    }
+
+    private var collectableCoins: Int {
+        max(0, Int(totalEarned) - redeemedCoins)
+    }
 
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
-        return showOpenOnly ? assigned.filter { $0.isOpen } : assigned
+        return showAll ? assigned : assigned.filter { !$0.isApproved }
     }
 
     private var totalEarned: Double {
@@ -89,22 +112,49 @@ struct ChildDashboardView: View {
                     filterToggle
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Text(authManager.userName)
-                        if !authManager.email.isEmpty {
-                            Text(authManager.email)
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            authManager.logout()
+                    HStack(spacing: 12) {
+                        Button {
+                            showNotificationCenter = true
                         } label: {
-                            Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                            Image(systemName: "bell.fill")
+                                .font(.subheadline)
                         }
-                    } label: {
-                        Image(systemName: "person.circle")
-                            .font(.title3)
+
+                        Menu {
+                            Text(authManager.userName)
+                            if !authManager.email.isEmpty {
+                                Text(authManager.email)
+                            }
+                            Divider()
+                            Button {
+                                showEditProfile = true
+                            } label: {
+                                Label("Edit Profile", systemImage: "pencil.circle")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                authManager.logout()
+                            } label: {
+                                Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
+                        } label: {
+                            Image(systemName: authManager.avatar.isEmpty ? "star.fill" : authManager.avatar)
+                                .font(.title3)
+                        }
                     }
                 }
+            }
+            .sheet(isPresented: $showEditProfile) {
+                EditProfileView()
+            }
+            .sheet(isPresented: $showNotificationCenter) {
+                NotificationCenterView()
+            }
+            .sheet(isPresented: $showRedeemSheet) {
+                RedeemRewardsView(availableCoins: collectableCoins, childName: authManager.userName)
+            }
+            .sheet(isPresented: $showRewardsHistory) {
+                RewardsHistoryView(redemptions: myRedemptions)
             }
             .sheet(isPresented: $showAddTask) {
                 AddChildTaskView(
@@ -146,7 +196,14 @@ struct ChildDashboardView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 if let limit = subscriptionManager.maxPickupsPerDay {
-                    Text("You've used all \(limit) pickup requests for today. Try again tomorrow!")
+                    Text("You've used all \(limit) pickup requests for today. Ask your parent to upgrade the plan for more pickups, or try again tomorrow!")
+                }
+            }
+            .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
+                Button("Got It", role: .cancel) { tooEarlyTask = nil }
+            } message: {
+                if let task = tooEarlyTask {
+                    Text("This task is scheduled for \(task.dueDateLabel). You can complete it when the day arrives!")
                 }
             }
             .onAppear {
@@ -164,15 +221,11 @@ struct ChildDashboardView: View {
 
     private func completeTask(_ task: Item) {
         if task.createdByChild {
-            withAnimation(.snappy) {
-                task.status = "approved"
-            }
+            task.status = "approved"
             celebrationTitle = "Task Complete!"
             celebrationSubtitle = ""
         } else {
-            withAnimation(.snappy) {
-                task.status = "inReview"
-            }
+            task.status = "inReview"
             notificationManager.sendTaskReviewNotification(
                 taskName: task.name,
                 childName: authManager.userName
@@ -184,14 +237,16 @@ struct ChildDashboardView: View {
                     familyCode: authManager.familyCode,
                     title: "Task Submitted for Review",
                     body: "\(childName) completed \"\(taskName)\"",
-                    category: "TASK_REVIEW"
+                    category: "TASK_REVIEW",
+                    senderAvatar: authManager.avatar
                 )
             }
             celebrationTitle = "Submitted for Review!"
             celebrationSubtitle = "Waiting for parent approval"
         }
+        let snapshot = CloudKitManager.TaskSnapshot(task)
         let familyCode = authManager.familyCode
-        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
         showCelebration = true
@@ -211,7 +266,8 @@ struct ChildDashboardView: View {
                         familyCode: authManager.familyCode,
                         title: "Pickup Request!",
                         body: "\(authManager.userName) wants to be picked up in 5 minutes!",
-                        category: "PICKUP_REQUEST"
+                        category: "PICKUP_REQUEST",
+                        senderAvatar: authManager.avatar
                     )
                 }
                 showPickupSent = true
@@ -227,8 +283,8 @@ struct ChildDashboardView: View {
                         .offset(x: 14, y: 10)
                 }
                 .frame(width: 64, height: 64)
-                .background(.blue, in: Circle())
-                .shadow(color: .blue.opacity(0.5), radius: 10, y: 4)
+                .background(calmAccent, in: Circle())
+                .shadow(color: calmAccent.opacity(0.5), radius: 10, y: 4)
             }
             .position(pickupPosition)
             .gesture(
@@ -280,26 +336,83 @@ struct ChildDashboardView: View {
                 .background(.white.opacity(0.2), in: Capsule())
                 .foregroundStyle(.white)
         }
-        .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
     }
 
     private var earningsCard: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Total Earned")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+        VStack(spacing: 12) {
+            HStack(spacing: 0) {
+                VStack(spacing: 4) {
+                    Image(systemName: "star.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.green)
+                    Text("\(collectableCoins)")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                    Text("Ready to Redeem")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
 
-                Text("$\(totalEarned, specifier: "%.2f")")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(.green)
+                Rectangle()
+                    .fill(.white.opacity(0.15))
+                    .frame(width: 1, height: 50)
+
+                VStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.title2)
+                        .foregroundStyle(.orange)
+                    Text("\(pendingRedemptionCoins)")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                    Text("Awaiting Approval")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
             }
 
-            Spacer()
+            HStack(spacing: 12) {
+                Button {
+                    showRedeemSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gift.fill")
+                            .font(.caption)
+                        Text("Collect Rewards")
+                            .font(.caption.weight(.semibold))
+                        if collectableCoins > 0 {
+                            Text("\(collectableCoins)")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.white.opacity(0.2), in: Capsule())
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(collectableCoins > 0 ? .orange : .white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(collectableCoins <= 0)
 
-            Image(systemName: "star.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(.yellow.opacity(0.7))
+                Button {
+                    showRewardsHistory = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.caption)
+                        Text("History")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
         }
         .padding(18)
         .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
@@ -312,12 +425,12 @@ struct ChildDashboardView: View {
     private var filterToggle: some View {
         Button {
             withAnimation(.snappy) {
-                showOpenOnly.toggle()
+                showAll.toggle()
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                Text(showOpenOnly ? "Open Tasks" : "All Tasks")
+                Image(systemName: showAll ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                Text(showAll ? "All Tasks" : "Active")
                     .font(.subheadline)
             }
         }
@@ -327,13 +440,13 @@ struct ChildDashboardView: View {
         ScrollView {
             VStack(spacing: 12) {
                 Spacer().frame(height: 80)
-                Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
+                Image(systemName: showAll ? "tray" : "checkmark.circle")
                     .font(.system(size: 56))
                     .foregroundStyle(.white.opacity(0.3))
-                Text(showOpenOnly ? "All done!" : "No tasks yet")
+                Text(showAll ? "No tasks yet" : "All done!")
                     .font(.title3)
                     .foregroundStyle(.white.opacity(0.7))
-                Text(showOpenOnly ? "You've completed all your tasks." : "Your parent hasn't assigned any tasks yet.")
+                Text(showAll ? "Your parent hasn't assigned any tasks yet." : "You've completed all your active tasks.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.4))
                     .multilineTextAlignment(.center)
@@ -372,27 +485,55 @@ struct ChildDashboardView: View {
         }
     }
 
-    private var statusIcon: (Item) -> String {{ task in
-        if task.isApproved { return "checkmark.circle.fill" }
-        if task.isInReview { return "clock.fill" }
-        return "circle"
-    }}
-
-    private var statusColor: (Item) -> Color {{ task in
+    private func statusColor(for task: Item) -> Color {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
-        return .white.opacity(0.35)
-    }}
+        return .white.opacity(0.4)
+    }
+
+    private func statusLabel(for task: Item) -> String {
+        if task.isApproved { return "Done" }
+        if task.isInReview { return "Review" }
+        return "To Do"
+    }
 
     private func childTaskRow(task: Item) -> some View {
         HStack(spacing: 14) {
             Button {
                 guard task.isOpen else { return }
-                taskToComplete = task
+                if !task.canComplete {
+                    tooEarlyTask = task
+                    showTooEarlyAlert = true
+                } else {
+                    taskToComplete = task
+                }
             } label: {
-                Image(systemName: statusIcon(task))
-                    .font(.title3)
-                    .foregroundStyle(statusColor(task))
+                VStack(spacing: 3) {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(statusColor(for: task), lineWidth: 2)
+                            .frame(width: 32, height: 32)
+
+                        if task.isApproved {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                        } else if task.isInReview {
+                            Circle()
+                                .fill(.orange)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "clock")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    Text(statusLabel(for: task))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(statusColor(for: task))
+                }
             }
             .buttonStyle(.plain)
             .disabled(!task.isOpen)
@@ -422,11 +563,11 @@ struct ChildDashboardView: View {
                         Text("•")
                             .foregroundStyle(.white.opacity(0.3))
                         Label(
-                            task.isApproved ? "Earned $\(task.reward, specifier: "%.2f")" : "$\(task.reward, specifier: "%.2f")",
-                            systemImage: "dollarsign.circle.fill"
+                            task.isApproved ? "Earned \(Int(task.reward)) coins" : "\(Int(task.reward)) coins",
+                            systemImage: "star.circle.fill"
                         )
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(task.isApproved ? .green : .green.opacity(0.7))
+                        .foregroundStyle(task.isApproved ? .yellow : .yellow.opacity(0.7))
                     }
                 }
             }
@@ -464,8 +605,9 @@ struct AddChildTaskView: View {
     @State private var targetDate = Date()
     @State private var assignedTo = ""
     @State private var recurrenceType: RecurrenceType = .none
-    @State private var occurrences = 4
+    @State private var occurrences = 10
     @State private var selectedWeekdays: Set<Int> = []
+    @State private var selectedTemplate: TaskTemplate?
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -480,6 +622,32 @@ struct AddChildTaskView: View {
         }
     }
 
+    private var stepperMax: Int {
+        switch recurrenceType {
+        case .daily: return 90
+        case .weekly: return 52
+        case .monthly: return 12
+        case .none: return 52
+        }
+    }
+
+    private func applyTemplate(_ template: TaskTemplate) {
+        selectedTemplate = template
+        taskName = template.name
+        recurrenceType = template.suggestedRecurrence
+        switch template.suggestedRecurrence {
+        case .daily: occurrences = 10
+        case .weekly:
+            occurrences = 4
+            if selectedWeekdays.isEmpty {
+                let weekday = Calendar.current.component(.weekday, from: targetDate)
+                selectedWeekdays.insert(weekday)
+            }
+        case .monthly: occurrences = 4
+        case .none: break
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -489,24 +657,35 @@ struct AddChildTaskView: View {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
 
+                        templatePicker
+
                         if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
-                            HStack(spacing: 8) {
-                                Image(systemName: remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
-                                    .foregroundStyle(remaining <= 10 ? .orange : .cyan)
-                                Text("\(remaining) tasks remaining this month")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.7))
-                                Spacer()
+                            VStack(spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: remaining == 0 ? "xmark.circle.fill" : remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                        .foregroundStyle(remaining == 0 ? .red : remaining <= 10 ? .orange : .cyan)
+                                    Text(remaining == 0 ? "Task limit reached" : "\(remaining) tasks remaining this month")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                    Spacer()
+                                }
+
+                                if remaining <= 10 {
+                                    Text(remaining == 0 ? "Ask your parent to upgrade the plan to add more tasks." : "Running low — ask your parent to upgrade for more tasks.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange.opacity(0.8))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
                             .padding(12)
                             .background(
-                                (remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
+                                (remaining == 0 ? Color.red.opacity(0.1) : remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
                                 in: RoundedRectangle(cornerRadius: 12)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(
-                                        remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
+                                        remaining == 0 ? .red.opacity(0.2) : remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
                                         lineWidth: 1
                                     )
                             )
@@ -544,10 +723,10 @@ struct AddChildTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
                             )
                         }
 
@@ -592,6 +771,7 @@ struct AddChildTaskView: View {
                         let dates = generateTaskDates()
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
                         let target = assignedTo.isEmpty ? childName : assignedTo
+                        let recurring = recurrenceType != .none
                         var createdTasks: [Item] = []
                         for date in dates {
                             let task = Item(
@@ -599,7 +779,8 @@ struct AddChildTaskView: View {
                                 targetDate: date,
                                 assignedTo: target,
                                 reward: 0,
-                                createdByChild: true
+                                createdByChild: true,
+                                isRecurring: recurring
                             )
                             modelContext.insert(task)
                             createdTasks.append(task)
@@ -612,10 +793,19 @@ struct AddChildTaskView: View {
                             )
                         }
                         let familyCode = authManager.familyCode
+                        let senderName = childName
+                        let taskCount = createdTasks.count
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
                             }
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: familyCode,
+                                title: "New Task Created",
+                                body: "\(senderName) created \"\(trimmedName)\"" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                category: "TASK_CREATED",
+                                senderAvatar: authManager.avatar
+                            )
                         }
                         dismiss()
                     }
@@ -625,6 +815,46 @@ struct AddChildTaskView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var templatePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Quick Templates")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.7))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(taskTemplates) { template in
+                        Button {
+                            applyTemplate(template)
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: template.icon)
+                                    .font(.title3)
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : template.color)
+                                Text(template.name)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : .white.opacity(0.7))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 90, height: 70)
+                            .background(
+                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : .white.opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        selectedTemplate?.name == template.name ? template.color : .white.opacity(0.1),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var childRecurrenceSection: some View {
@@ -641,9 +871,16 @@ struct AddChildTaskView: View {
             .pickerStyle(.segmented)
             .colorScheme(.dark)
             .onChange(of: recurrenceType) { _, newValue in
-                if newValue == .weekly && selectedWeekdays.isEmpty {
-                    let weekday = Calendar.current.component(.weekday, from: targetDate)
-                    selectedWeekdays.insert(weekday)
+                switch newValue {
+                case .daily: occurrences = 10
+                case .weekly:
+                    occurrences = 4
+                    if selectedWeekdays.isEmpty {
+                        let weekday = Calendar.current.component(.weekday, from: targetDate)
+                        selectedWeekdays.insert(weekday)
+                    }
+                case .monthly: occurrences = 4
+                case .none: break
                 }
             }
 
@@ -664,7 +901,7 @@ struct AddChildTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.15),
+                                        selectedWeekdays.contains(day) ? calmAccent : .white.opacity(0.15),
                                         in: Circle()
                                     )
                                     .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
@@ -674,7 +911,7 @@ struct AddChildTaskView: View {
                     .frame(maxWidth: .infinity)
                 }
 
-                Stepper(value: $occurrences, in: 2...52) {
+                Stepper(value: $occurrences, in: 2...stepperMax) {
                     HStack {
                         Text("Repeat for")
                             .foregroundStyle(.white)
@@ -748,7 +985,7 @@ struct AddChildTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .blue : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
                     .foregroundStyle(.white)
@@ -756,13 +993,13 @@ struct AddChildTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -770,9 +1007,421 @@ struct AddChildTaskView: View {
     }
 }
 
+// MARK: - Redeem Rewards View
+
+struct RedeemRewardsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    let availableCoins: Int
+    let childName: String
+
+    @State private var selectedType = "toy"
+    @State private var coinAmount = ""
+    @State private var description = ""
+
+    private var amount: Int {
+        Int(coinAmount) ?? 0
+    }
+
+    private var isValid: Bool {
+        amount > 0 && amount <= availableCoins && !description.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer().frame(height: 12)
+
+                        VStack(spacing: 8) {
+                            Image(systemName: "star.circle.fill")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.yellow)
+
+                            Text("\(availableCoins) coins available")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.white)
+
+                            Text("Choose how you'd like to use your coins!")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("What would you like?")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
+                                ForEach(redemptionTypes, id: \.0) { type in
+                                    Button {
+                                        selectedType = type.0
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: type.2)
+                                                .font(.title3)
+                                            Text(type.1)
+                                                .font(.caption2.weight(.medium))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            selectedType == type.0 ? .orange.opacity(0.2) : .white.opacity(0.1),
+                                            in: RoundedRectangle(cornerRadius: 10)
+                                        )
+                                        .foregroundStyle(selectedType == type.0 ? .orange : .white.opacity(0.6))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .strokeBorder(
+                                                    selectedType == type.0 ? .orange.opacity(0.5) : .white.opacity(0.1),
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("How many coins?")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            HStack(spacing: 10) {
+                                Image(systemName: "star.circle.fill")
+                                    .foregroundStyle(.yellow)
+
+                                TextField("0", text: $coinAmount)
+                                    .font(.body)
+                                    .foregroundStyle(.white)
+                                    .keyboardType(.numberPad)
+
+                                Spacer()
+
+                                Button("Use all") {
+                                    coinAmount = "\(availableCoins)"
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            }
+                            .padding(14)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if amount > availableCoins {
+                                Text("You don't have enough coins")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Describe what you want")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            TextField("e.g., LEGO Star Wars set", text: $description)
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .padding(14)
+                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("Collect Rewards")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") {
+                        let redemption = RewardRedemption(
+                            childName: childName,
+                            coinAmount: amount,
+                            redemptionType: selectedType,
+                            itemDescription: description.trimmingCharacters(in: .whitespaces)
+                        )
+                        modelContext.insert(redemption)
+                        let familyCode = authManager.familyCode
+                        Task {
+                            _ = await cloudKitManager.pushRedemption(redemption, familyCode: familyCode)
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: familyCode,
+                                title: "Reward Request!",
+                                body: "\(childName) wants to redeem \(amount) coins for: \(description.trimmingCharacters(in: .whitespaces))",
+                                category: "REWARD_REQUEST",
+                                senderAvatar: authManager.avatar
+                            )
+                        }
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!isValid)
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+// MARK: - Rewards History View
+
+struct RewardsHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    let redemptions: [RewardRedemption]
+    var isParent: Bool = false
+    @State private var confirmFulfill: RewardRedemption?
+
+    private var sorted: [RewardRedemption] {
+        redemptions.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private var awaitingAcknowledgement: [RewardRedemption] {
+        sorted.filter { $0.isApproved }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                if sorted.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "gift")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("No rewards yet")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text(isParent ? "No reward requests from children yet." : "Complete tasks and redeem your coins!")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            if isParent && !awaitingAcknowledgement.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "exclamationmark.circle.fill")
+                                            .foregroundStyle(calmAccent)
+                                        Text("Pending Acknowledgement (\(awaitingAcknowledgement.count))")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(calmAccent)
+                                    }
+                                    .padding(.horizontal, 4)
+
+                                    ForEach(awaitingAcknowledgement) { redemption in
+                                        redemptionRow(redemption)
+                                    }
+                                }
+                                .padding(.bottom, 8)
+
+                                if sorted.count > awaitingAcknowledgement.count {
+                                    Text("All Requests")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white.opacity(0.7))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 4)
+                                }
+                            }
+
+                            ForEach(isParent ? sorted.filter { !$0.isApproved } : sorted) { redemption in
+                                redemptionRow(redemption)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    }
+                }
+            }
+            .navigationTitle("Rewards History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Confirm Receipt?", isPresented: Binding(
+                get: { confirmFulfill != nil },
+                set: { if !$0 { confirmFulfill = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { confirmFulfill = nil }
+                Button("I Received It") {
+                    if let r = confirmFulfill {
+                        r.status = "fulfilled"
+                        r.resolvedAt = Date()
+                        let familyCode = authManager.familyCode
+                        let desc = r.itemDescription
+                        let childName = r.childName
+                        Task {
+                            _ = await cloudKitManager.pushRedemption(r, familyCode: familyCode)
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: familyCode,
+                                title: "Reward Received",
+                                body: "\(childName) confirmed receiving: \"\(desc)\"",
+                                category: "REWARD_FULFILLED",
+                                senderAvatar: authManager.avatar
+                            )
+                        }
+                    }
+                    confirmFulfill = nil
+                }
+            } message: {
+                if let r = confirmFulfill {
+                    Text("Confirm you received \"\(r.itemDescription)\"? This will close the request permanently.")
+                }
+            }
+        }
+    }
+
+    private func redemptionRow(_ r: RewardRedemption) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: r.typeIcon)
+                    .font(.title3)
+                    .foregroundStyle(statusColor(r))
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(r.itemDescription)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    HStack(spacing: 6) {
+                        if isParent {
+                            Label(r.childName, systemImage: "person.fill")
+                                .font(.caption)
+                                .foregroundStyle(calmAccent.opacity(0.8))
+
+                            Text("•")
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+
+                        Label("\(r.coinAmount) coins", systemImage: "star.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.yellow.opacity(0.85))
+
+                        Text("•")
+                            .foregroundStyle(.white.opacity(0.5))
+
+                        Text(r.typeLabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+
+                    HStack(spacing: 6) {
+                        statusBadge(r)
+
+                        Text(r.createdAt, format: .relative(presentation: .named))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+
+                    if r.isRejected && !r.rejectReason.isEmpty {
+                        Text("Reason: \(r.rejectReason)")
+                            .font(.caption2)
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                }
+
+                Spacer()
+            }
+
+            if !isParent && r.isApproved {
+                Button {
+                    confirmFulfill = r
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.caption)
+                        Text("I Received This")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.green, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.top, 10)
+            }
+
+            if r.isFulfilled, let resolvedAt = r.resolvedAt {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Text("Closed on \(resolvedAt.formatted(.dateTime.month(.abbreviated).day().year()))")
+                        .font(.caption2)
+                        .foregroundStyle(.green.opacity(0.8))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+            }
+
+            if isParent && r.isApproved {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.badge.exclamationmark.fill")
+                        .font(.caption)
+                        .foregroundStyle(calmAccent)
+                    Text("Waiting for \(r.childName) to acknowledge receipt")
+                        .font(.caption2)
+                        .foregroundStyle(calmAccent.opacity(0.8))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+            }
+        }
+        .padding(14)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(statusColor(r).opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func statusBadge(_ r: RewardRedemption) -> some View {
+        let label = r.isFulfilled ? "Closed" : r.status.capitalized
+        return Text(label)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(statusColor(r))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(statusColor(r).opacity(0.15), in: Capsule())
+    }
+
+    private func statusColor(_ r: RewardRedemption) -> Color {
+        if r.isFulfilled { return .green }
+        if r.isApproved { return calmAccent }
+        if r.isRejected { return .red }
+        return .orange
+    }
+}
+
 #Preview {
     ChildDashboardView()
-        .modelContainer(for: [Item.self, FamilyMember.self], inMemory: true)
+        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
         .environment(SubscriptionManager())

@@ -49,7 +49,7 @@ final class AuthManager {
         self.role = UserDefaults.standard.string(forKey: "userRole") ?? ""
         self.userName = UserDefaults.standard.string(forKey: "userName") ?? ""
         self.familyCode = UserDefaults.standard.string(forKey: "familyCode") ?? ""
-        self.avatar = UserDefaults.standard.string(forKey: "userAvatar") ?? "person.circle.fill"
+        self.avatar = UserDefaults.standard.string(forKey: "userAvatar") ?? "star.fill"
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     }
 
@@ -76,7 +76,7 @@ final class AuthManager {
         role = ""
         userName = ""
         familyCode = ""
-        avatar = "person.circle.fill"
+        avatar = "star.fill"
         hasCompletedOnboarding = false
     }
 }

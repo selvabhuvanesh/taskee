@@ -35,6 +35,7 @@ struct TaskeeApp: App {
         let schema = Schema([
             Item.self,
             FamilyMember.self,
+            RewardRedemption.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

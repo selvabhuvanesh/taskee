@@ -55,8 +55,8 @@ final class SubscriptionManager {
 
     var maxPickupsPerDay: Int? {
         switch tier {
-        case .free:   return 3
-        case .family: return 10
+        case .free:   return 20
+        case .family: return 30
         case .pro:    return nil
         }
     }

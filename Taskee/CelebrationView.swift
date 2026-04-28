@@ -63,9 +63,9 @@ struct CelebrationOverlay: View {
                         }
 
                         if rewardAmount > 0 {
-                            Text("+$\(rewardAmount, specifier: "%.2f") earned!")
+                            Text("+\(Int(rewardAmount)) coins earned!")
                                 .font(.headline)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.yellow)
                         }
                     }
                     .padding(28)

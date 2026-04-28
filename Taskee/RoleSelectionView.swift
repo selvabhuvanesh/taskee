@@ -16,7 +16,7 @@ struct RoleSelectionView: View {
     @State private var selectedRole = ""
     @State private var name = ""
     @State private var inviteCode = ""
-    @State private var selectedAvatar = "person.circle.fill"
+    @State private var selectedAvatar = "star.fill"
     @State private var joinExisting = false
     @State private var isValidating = false
     @State private var showInvalidCode = false
@@ -54,19 +54,48 @@ struct RoleSelectionView: View {
 
     private var header: some View {
         VStack(spacing: 10) {
-            Image(systemName: "person.2.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(.blue)
+            if selectedRole.isEmpty {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(calmAccent)
 
-            Text("Choose Your Role")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+                Text("Welcome to Taskee!")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
 
-            Text("Are you setting up tasks or completing them?")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
+                Text("Let's get you set up. Are you a parent managing tasks or a child completing them?")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            } else if selectedRole == "parent" {
+                Image(systemName: "person.badge.shield.checkmark.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(calmAccent)
+
+                Text("Parent Setup")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+
+                Text("Create your family or join an existing one. Once set up, you'll get an invite code to share with your family members so they can join too!")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            } else {
+                Image(systemName: "figure.child")
+                    .font(.system(size: 52))
+                    .foregroundStyle(calmAccent)
+
+                Text("Join Your Family")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+
+                Text("Enter your name and the invite code from your parent to join your family and start completing tasks!")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            }
         }
+        .animation(.snappy, value: selectedRole)
     }
 
     private var roleCards: some View {
@@ -96,7 +125,7 @@ struct RoleSelectionView: View {
             HStack(spacing: 16) {
                 Image(systemName: icon)
                     .font(.title)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(calmAccent)
                     .frame(width: 44)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -136,17 +165,17 @@ struct RoleSelectionView: View {
                         selectedAvatar = avatar
                     } label: {
                         Image(systemName: avatar)
-                            .font(.system(size: 28))
-                            .frame(width: 48, height: 48)
+                            .font(.system(size: 32))
+                            .frame(width: 54, height: 54)
                             .background(
-                                selectedAvatar == avatar ? .blue.opacity(0.3) : .white.opacity(0.15),
+                                selectedAvatar == avatar ? avatarColor(for: avatar).opacity(0.3) : .white.opacity(0.15),
                                 in: Circle()
                             )
-                            .foregroundStyle(selectedAvatar == avatar ? .blue : .white.opacity(0.6))
+                            .foregroundStyle(selectedAvatar == avatar ? avatarColor(for: avatar) : .white.opacity(0.6))
                             .overlay(
                                 Circle()
                                     .strokeBorder(
-                                        selectedAvatar == avatar ? .blue : .clear,
+                                        selectedAvatar == avatar ? avatarColor(for: avatar) : .clear,
                                         lineWidth: 2
                                     )
                             )
@@ -182,7 +211,7 @@ struct RoleSelectionView: View {
                 } label: {
                     HStack {
                         Image(systemName: joinExisting ? "circle" : "checkmark.circle.fill")
-                            .foregroundStyle(joinExisting ? .white.opacity(0.3) : .blue)
+                            .foregroundStyle(joinExisting ? .white.opacity(0.3) : calmAccent)
                         Text("Create New Family")
                             .foregroundStyle(.white)
                         Spacer()
@@ -197,7 +226,7 @@ struct RoleSelectionView: View {
                 } label: {
                     HStack {
                         Image(systemName: joinExisting ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(joinExisting ? .blue : .white.opacity(0.3))
+                            .foregroundStyle(joinExisting ? calmAccent : .white.opacity(0.3))
                         Text("Join Existing Family")
                             .foregroundStyle(.white)
                         Spacer()
@@ -281,7 +310,7 @@ struct RoleSelectionView: View {
                 .padding(.vertical, 14)
                 .background(
                     isParentFormValid && !isValidating
-                        ? AnyShapeStyle(.blue)
+                        ? AnyShapeStyle(calmAccent)
                         : AnyShapeStyle(.white.opacity(0.1)),
                     in: RoundedRectangle(cornerRadius: 16)
                 )
@@ -438,7 +467,7 @@ struct RoleSelectionView: View {
                 .padding(.vertical, 14)
                 .background(
                     isChildFormValid && !isValidating
-                        ? AnyShapeStyle(.blue)
+                        ? AnyShapeStyle(calmAccent)
                         : AnyShapeStyle(.white.opacity(0.1)),
                     in: RoundedRectangle(cornerRadius: 16)
                 )

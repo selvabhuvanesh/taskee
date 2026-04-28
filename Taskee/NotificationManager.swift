@@ -9,14 +9,52 @@ import UserNotifications
 @Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     var showPendingApprovals = false
+    private static let snoozeActionID = "SNOOZE_ACTION"
+    private static let dismissActionID = "DISMISS_ACTION"
+    private static let taskReminderCategoryID = "TASK_REMINDER"
+    private static let snoozeDuration: TimeInterval = 5 * 60
 
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+        registerCategories()
     }
 
     func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    private func registerCategories() {
+        let snooze = UNNotificationAction(
+            identifier: Self.snoozeActionID,
+            title: "Snooze (5 min)",
+            options: []
+        )
+        let dismiss = UNNotificationAction(
+            identifier: Self.dismissActionID,
+            title: "Dismiss",
+            options: .destructive
+        )
+
+        let taskReminder = UNNotificationCategory(
+            identifier: Self.taskReminderCategoryID,
+            actions: [snooze, dismiss],
+            intentIdentifiers: []
+        )
+
+        let taskReview = UNNotificationCategory(
+            identifier: "TASK_REVIEW",
+            actions: [],
+            intentIdentifiers: []
+        )
+
+        let pickup = UNNotificationCategory(
+            identifier: "PICKUP_REQUEST",
+            actions: [],
+            intentIdentifiers: []
+        )
+
+        UNUserNotificationCenter.current().setNotificationCategories([taskReminder, taskReview, pickup])
     }
 
     func scheduleTaskReminder(taskId: UUID, taskName: String, assignedTo: String, dueDate: Date) {
@@ -72,7 +110,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = "Task Approved!"
         content.body = reward > 0
-            ? "Your task \"\(taskName)\" was approved! You earned $\(String(format: "%.2f", reward))."
+            ? "Your task \"\(taskName)\" was approved! You earned \(Int(reward)) coins."
             : "Your task \"\(taskName)\" was approved!"
         content.sound = .default
 
@@ -118,11 +156,33 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.notification.request.content.categoryIdentifier == "TASK_REVIEW" {
+        let category = response.notification.request.content.categoryIdentifier
+
+        if category == "TASK_REVIEW" {
             DispatchQueue.main.async {
                 self.showPendingApprovals = true
             }
         }
+
+        if response.actionIdentifier == Self.snoozeActionID {
+            let original = response.notification.request
+            let content = original.content.mutableCopy() as! UNMutableNotificationContent
+            content.title = "Reminder (Snoozed)"
+
+            let trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: Self.snoozeDuration,
+                repeats: false
+            )
+
+            let request = UNNotificationRequest(
+                identifier: "snooze-\(original.identifier)-\(UUID().uuidString)",
+                content: content,
+                trigger: trigger
+            )
+
+            UNUserNotificationCenter.current().add(request)
+        }
+
         completionHandler()
     }
 

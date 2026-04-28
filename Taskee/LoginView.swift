@@ -52,16 +52,17 @@ struct LoginView: View {
         VStack(spacing: 14) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 72))
-                .foregroundStyle(.blue)
+                .foregroundStyle(calmAccent)
 
             Text("Taskee")
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(.white)
 
-            Text("Sign in to manage your family's tasks")
+            Text("Welcome! The fun way for families to manage tasks, earn coins, and celebrate together.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
         }
     }
 

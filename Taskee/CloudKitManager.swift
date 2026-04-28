@@ -134,7 +134,7 @@ final class CloudKitManager {
             return ExistingMemberInfo(
                 name: record["name"] as? String ?? "",
                 memberRole: record["memberRole"] as? String ?? "child",
-                avatar: record["avatar"] as? String ?? "person.circle.fill",
+                avatar: record["avatar"] as? String ?? "star.fill",
                 familyCode: record["familyCode"] as? String ?? "",
                 totalEarned: (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0,
                 memberID: recordID.recordName
@@ -146,34 +146,52 @@ final class CloudKitManager {
 
     // MARK: - Push Task
 
+    struct TaskSnapshot {
+        let id: String
+        let name: String
+        let targetDate: Date
+        let assignedTo: String
+        let reward: Double
+        let status: String
+        let createdByChild: Bool
+        let isArchived: Bool
+        let isRecurring: Bool
+
+        init(_ task: Item) {
+            self.id = task.id.uuidString
+            self.name = task.name
+            self.targetDate = task.targetDate
+            self.assignedTo = task.assignedTo
+            self.reward = task.reward
+            self.status = task.status
+            self.createdByChild = task.createdByChild
+            self.isArchived = task.isArchived
+            self.isRecurring = task.isRecurring
+        }
+    }
+
     @discardableResult
     func pushTask(_ task: Item, familyCode: String) async -> Bool {
+        await pushTaskSnapshot(TaskSnapshot(task), familyCode: familyCode)
+    }
+
+    @discardableResult
+    func pushTaskSnapshot(_ snap: TaskSnapshot, familyCode: String) async -> Bool {
         guard !familyCode.isEmpty else { return false }
 
-        let recordID = CKRecord.ID(recordName: task.id.uuidString)
-        let record: CKRecord
-        do {
-            record = try await database.record(for: recordID)
-        } catch {
-            record = CKRecord(recordType: "TaskRecord", recordID: recordID)
-        }
-
+        let recordID = CKRecord.ID(recordName: snap.id)
+        let record = CKRecord(recordType: "TaskRecord", recordID: recordID)
         record["familyCode"] = familyCode
-        record["name"] = task.name
-        record["targetDate"] = task.targetDate as NSDate
-        record["assignedTo"] = task.assignedTo
-        record["reward"] = NSNumber(value: task.reward)
-        record["status"] = task.status
-        record["createdByChild"] = NSNumber(value: task.createdByChild ? 1 : 0)
-        record["isArchived"] = NSNumber(value: task.isArchived ? 1 : 0)
+        record["name"] = snap.name
+        record["targetDate"] = snap.targetDate as NSDate
+        record["assignedTo"] = snap.assignedTo
+        record["reward"] = NSNumber(value: snap.reward)
+        record["status"] = snap.status
+        record["createdByChild"] = NSNumber(value: snap.createdByChild ? 1 : 0)
+        record["isArchived"] = NSNumber(value: snap.isArchived ? 1 : 0)
+        record["isRecurring"] = NSNumber(value: snap.isRecurring ? 1 : 0)
 
-        do {
-            try await database.save(record)
-            return true
-        } catch {
-            lastSyncError = error.localizedDescription
-            return false
-        }
+        return await saveRecord(record)
     }
 
     // MARK: - Push Member
@@ -182,26 +200,50 @@ final class CloudKitManager {
     func pushMember(_ member: FamilyMember, familyCode: String) async -> Bool {
         guard !familyCode.isEmpty else { return false }
 
-        let recordID = CKRecord.ID(recordName: member.id.uuidString)
-        let record: CKRecord
-        do {
-            record = try await database.record(for: recordID)
-        } catch {
-            record = CKRecord(recordType: "MemberRecord", recordID: recordID)
-        }
+        let id = member.id.uuidString
+        let name = member.name
+        let role = member.memberRole
+        let avatar = member.avatar
+        let earned = member.totalEarned
+        let appleID = member.appleUserID
 
+        let recordID = CKRecord.ID(recordName: id)
+        let record = CKRecord(recordType: "MemberRecord", recordID: recordID)
         record["familyCode"] = familyCode
-        record["name"] = member.name
-        record["memberRole"] = member.memberRole
-        record["avatar"] = member.avatar
-        record["totalEarned"] = NSNumber(value: member.totalEarned)
-        record["appleUserID"] = member.appleUserID
+        record["name"] = name
+        record["memberRole"] = role
+        record["avatar"] = avatar
+        record["totalEarned"] = NSNumber(value: earned)
+        record["appleUserID"] = appleID
+
+        return await saveRecord(record)
+    }
+
+    var lastPushResult: String = ""
+
+    private func saveRecord(_ record: CKRecord) async -> Bool {
+        let status = record["status"] as? String ?? "n/a"
+        let type = record.recordType
+        let id = record.recordID.recordName
 
         do {
-            try await database.save(record)
+            let (saveResults, _) = try await database.modifyRecords(
+                saving: [record],
+                deleting: [],
+                savePolicy: .allKeys
+            )
+            for (_, result) in saveResults {
+                if case .failure(let error) = result {
+                    lastSyncError = error.localizedDescription
+                    lastPushResult = "FAIL \(type) \(id) status=\(status): \(error.localizedDescription)"
+                    return false
+                }
+            }
+            lastPushResult = "OK \(type) \(id) status=\(status)"
             return true
         } catch {
             lastSyncError = error.localizedDescription
+            lastPushResult = "ERROR \(type) \(id) status=\(status): \(error.localizedDescription)"
             return false
         }
     }
@@ -234,6 +276,7 @@ final class CloudKitManager {
 
         await syncTasks(context: context, familyCode: familyCode)
         await syncMembers(context: context, familyCode: familyCode)
+        await syncRedemptions(context: context, familyCode: familyCode)
         try? context.save()
     }
 
@@ -276,6 +319,7 @@ final class CloudKitManager {
                 local.status = record["status"] as? String ?? local.status
                 local.createdByChild = ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1
                 local.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+                local.isRecurring = ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
             } else if let uuid = UUID(uuidString: idStr) {
                 let item = Item(
                     id: uuid,
@@ -284,7 +328,8 @@ final class CloudKitManager {
                     assignedTo: record["assignedTo"] as? String ?? "",
                     reward: (record["reward"] as? NSNumber)?.doubleValue ?? 0,
                     status: record["status"] as? String ?? "open",
-                    createdByChild: ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1
+                    createdByChild: ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1,
+                    isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
                 )
                 item.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 context.insert(item)
@@ -292,7 +337,7 @@ final class CloudKitManager {
         }
 
         for task in localTasks where !remoteIDs.contains(task.id.uuidString) {
-            await pushTask(task, familyCode: familyCode)
+            context.delete(task)
         }
     }
 
@@ -317,7 +362,7 @@ final class CloudKitManager {
                     id: uuid,
                     name: record["name"] as? String ?? "",
                     memberRole: record["memberRole"] as? String ?? "child",
-                    avatar: record["avatar"] as? String ?? "person.circle.fill",
+                    avatar: record["avatar"] as? String ?? "star.fill",
                     appleUserID: record["appleUserID"] as? String ?? ""
                 )
                 member.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0
@@ -326,13 +371,196 @@ final class CloudKitManager {
         }
 
         for member in localMembers where !remoteIDs.contains(member.id.uuidString) {
-            await pushMember(member, familyCode: familyCode)
+            context.delete(member)
+        }
+    }
+
+    // MARK: - Redemptions
+
+    func pushRedemption(_ redemption: RewardRedemption, familyCode: String) async -> Bool {
+        let id = redemption.id.uuidString
+        let childName = redemption.childName
+        let coinAmount = redemption.coinAmount
+        let type = redemption.redemptionType
+        let desc = redemption.itemDescription
+        let status = redemption.status
+        let rejectReason = redemption.rejectReason
+        let createdAt = redemption.createdAt
+        let resolvedAt = redemption.resolvedAt
+
+        let recordID = CKRecord.ID(recordName: id)
+        let record = CKRecord(recordType: "RedemptionRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["childName"] = childName
+        record["coinAmount"] = coinAmount as NSNumber
+        record["redemptionType"] = type
+        record["itemDescription"] = desc
+        record["status"] = status
+        record["rejectReason"] = rejectReason
+        record["createdAt"] = createdAt as NSDate
+        if let resolved = resolvedAt {
+            record["resolvedAt"] = resolved as NSDate
+        }
+        return await saveRecord(record)
+    }
+
+    private func syncRedemptions(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "RedemptionRecord", familyCode: familyCode)
+
+        let descriptor = FetchDescriptor<RewardRedemption>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.childName = record["childName"] as? String ?? existing.childName
+                existing.coinAmount = (record["coinAmount"] as? NSNumber)?.intValue ?? existing.coinAmount
+                existing.redemptionType = record["redemptionType"] as? String ?? existing.redemptionType
+                existing.itemDescription = record["itemDescription"] as? String ?? existing.itemDescription
+                existing.status = record["status"] as? String ?? existing.status
+                existing.rejectReason = record["rejectReason"] as? String ?? existing.rejectReason
+                existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+                existing.resolvedAt = record["resolvedAt"] as? Date
+            } else if let uuid = UUID(uuidString: idStr) {
+                let r = RewardRedemption(
+                    id: uuid,
+                    childName: record["childName"] as? String ?? "",
+                    coinAmount: (record["coinAmount"] as? NSNumber)?.intValue ?? 0,
+                    redemptionType: record["redemptionType"] as? String ?? "other",
+                    itemDescription: record["itemDescription"] as? String ?? "",
+                    status: record["status"] as? String ?? "pending"
+                )
+                r.rejectReason = record["rejectReason"] as? String ?? ""
+                r.createdAt = record["createdAt"] as? Date ?? Date()
+                r.resolvedAt = record["resolvedAt"] as? Date
+                context.insert(r)
+            }
+        }
+
+        for item in local where !remoteIDs.contains(item.id.uuidString) {
+            context.delete(item)
+        }
+    }
+
+    // MARK: - Fetch Notifications
+
+    struct NotificationItem: Identifiable {
+        let id: String
+        let title: String
+        let body: String
+        let category: String
+        let senderAvatar: String
+        let createdAt: Date
+    }
+
+    struct NotificationFetchResult {
+        let notifications: [NotificationItem]
+        let error: String?
+        let debugInfo: String
+    }
+
+    func fetchNotifications(familyCode: String, limit: Int = 50) async -> NotificationFetchResult {
+        guard !familyCode.isEmpty else {
+            return NotificationFetchResult(notifications: [], error: "Family code is empty", debugInfo: "code: (empty)")
+        }
+
+        let predicate = NSPredicate(format: "familyCode == %@", familyCode)
+        let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
+
+        do {
+            var allRecords: [CKRecord] = []
+            var (results, cursor) = try await database.records(matching: query)
+            allRecords.append(contentsOf: results.compactMap { try? $0.1.get() })
+
+            while let c = cursor {
+                let (more, next) = try await database.records(continuingMatchFrom: c)
+                allRecords.append(contentsOf: more.compactMap { try? $0.1.get() })
+                cursor = next
+            }
+
+            let items = allRecords
+                .compactMap { record in
+                    NotificationItem(
+                        id: record.recordID.recordName,
+                        title: record["title"] as? String ?? "",
+                        body: record["body"] as? String ?? "",
+                        category: record["category"] as? String ?? "",
+                        senderAvatar: record["senderAvatar"] as? String ?? "",
+                        createdAt: record["createdAt"] as? Date ?? Date()
+                    )
+                }
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(limit)
+                .map { $0 }
+
+            return NotificationFetchResult(
+                notifications: items,
+                error: nil,
+                debugInfo: "code: \(familyCode) | found: \(allRecords.count)"
+            )
+        } catch {
+            return NotificationFetchResult(
+                notifications: [],
+                error: error.localizedDescription,
+                debugInfo: "code: \(familyCode) | error"
+            )
+        }
+    }
+
+    func deleteNotification(id: String) async -> Bool {
+        let recordID = CKRecord.ID(recordName: id)
+        do {
+            try await database.deleteRecord(withID: recordID)
+            return true
+        } catch {
+            lastSyncError = error.localizedDescription
+            return false
+        }
+    }
+
+    func deleteAllNotifications(familyCode: String) async -> Int {
+        guard !familyCode.isEmpty else { return 0 }
+
+        let predicate = NSPredicate(format: "familyCode == %@", familyCode)
+        let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
+
+        do {
+            var idsToDelete: [CKRecord.ID] = []
+            var (results, cursor) = try await database.records(matching: query)
+            idsToDelete.append(contentsOf: results.compactMap { try? $0.1.get() }.map { $0.recordID })
+
+            while let c = cursor {
+                let (more, next) = try await database.records(continuingMatchFrom: c)
+                idsToDelete.append(contentsOf: more.compactMap { try? $0.1.get() }.map { $0.recordID })
+                cursor = next
+            }
+
+            guard !idsToDelete.isEmpty else { return 0 }
+
+            let batchSize = 400
+            for batch in stride(from: 0, to: idsToDelete.count, by: batchSize) {
+                let end = min(batch + batchSize, idsToDelete.count)
+                let batchIDs = Array(idsToDelete[batch..<end])
+                let (_, deleteResults) = try await database.modifyRecords(saving: [], deleting: batchIDs)
+                for (_, result) in deleteResults {
+                    if case .failure(let error) = result {
+                        lastSyncError = error.localizedDescription
+                    }
+                }
+            }
+
+            return idsToDelete.count
+        } catch {
+            lastSyncError = error.localizedDescription
+            return 0
         }
     }
 
     // MARK: - Remote Notifications
 
-    func sendRemoteNotification(familyCode: String, title: String, body: String, category: String = "") async {
+    func sendRemoteNotification(familyCode: String, title: String, body: String, category: String = "", senderAvatar: String = "") async {
         guard !familyCode.isEmpty else { return }
 
         let record = CKRecord(recordType: "NotificationRecord")
@@ -340,6 +568,7 @@ final class CloudKitManager {
         record["title"] = title
         record["body"] = body
         record["category"] = category
+        record["senderAvatar"] = senderAvatar
         record["createdAt"] = Date() as NSDate
 
         do {

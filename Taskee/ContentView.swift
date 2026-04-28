@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import StoreKit
 
 // Shared gradient background used across all screens.
 struct AppBackground: View {
@@ -33,13 +34,13 @@ struct UserAvatarHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: avatar.isEmpty ? "person.circle.fill" : avatar)
-                .font(.system(size: 32))
-                .foregroundStyle(.blue)
-                .frame(width: 44, height: 44)
-                .background(.blue.opacity(0.15), in: Circle())
+            Image(systemName: avatar.isEmpty ? "star.fill" : avatar)
+                .font(.system(size: 36))
+                .foregroundStyle(avatarColor(for: avatar))
+                .frame(width: 50, height: 50)
+                .background(avatarColor(for: avatar).opacity(0.15), in: Circle())
                 .overlay(
-                    Circle().strokeBorder(.blue.opacity(0.5), lineWidth: 2)
+                    Circle().strokeBorder(avatarColor(for: avatar).opacity(0.5), lineWidth: 2)
                 )
 
             Text("Hi, \(name)")
@@ -73,13 +74,24 @@ struct ContentView: View {
     @State private var showOpenOnly = false
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
+    @State private var showNotificationCenter = false
+    @State private var showSubscription = false
+    @State private var showRedemptionApprovals = false
+    @State private var showRewardsHistory = false
+    @State private var showEditProfile = false
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Query private var allRedemptions: [RewardRedemption]
+
+    private var pendingRedemptions: [RewardRedemption] {
+        allRedemptions.filter { $0.isPending }
+    }
 
     private var activeTasks: [Item] {
         tasks.filter { !$0.isArchived }
     }
 
     private var myTasks: [Item] {
-        activeTasks.filter { $0.assignedTo == authManager.userName || $0.assignedTo.isEmpty }
+        activeTasks.filter { $0.assignedTo == authManager.userName || $0.assignedTo.isEmpty || $0.isInReview }
     }
 
     private var filteredTasks: [Item] {
@@ -116,6 +128,12 @@ struct ContentView: View {
                     }
                     .padding(.top, 8)
 
+                    if subscriptionManager.tier != .pro {
+                        tierBanner
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 6)
+                    }
+
                     ScrollView {
                         if filteredTasks.isEmpty {
                             emptyState
@@ -129,7 +147,7 @@ struct ContentView: View {
                     }
 
                     addTaskButton
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 8)
                 }
 
                 CelebrationOverlay(
@@ -158,10 +176,34 @@ struct ContentView: View {
                                     .background(.orange, in: Capsule())
                             }
                         }
+
+                        if !pendingRedemptions.isEmpty {
+                            Button {
+                                showRedemptionApprovals = true
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "gift.fill")
+                                        .font(.caption2)
+                                    Text("\(pendingRedemptions.count)")
+                                }
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.purple, in: Capsule())
+                            }
+                        }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
+                        Button {
+                            showNotificationCenter = true
+                        } label: {
+                            Image(systemName: "bell.fill")
+                                .font(.subheadline)
+                        }
+
                         Button {
                             showingChildren = true
                         } label: {
@@ -175,13 +217,29 @@ struct ContentView: View {
                                 Text(authManager.email)
                             }
                             Divider()
+                            Button {
+                                showEditProfile = true
+                            } label: {
+                                Label("Edit Profile", systemImage: "pencil.circle")
+                            }
+                            Button {
+                                showSubscription = true
+                            } label: {
+                                Label("Subscription", systemImage: "crown.fill")
+                            }
+                            Button {
+                                showRewardsHistory = true
+                            } label: {
+                                Label("Rewards History", systemImage: "gift.fill")
+                            }
+                            Divider()
                             Button(role: .destructive) {
                                 authManager.logout()
                             } label: {
                                 Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
                             }
                         } label: {
-                            Image(systemName: "person.circle")
+                            Image(systemName: authManager.avatar.isEmpty ? "star.fill" : authManager.avatar)
                                 .font(.title3)
                         }
                     }
@@ -192,6 +250,21 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingChildren) {
                 ChildrenManagementView()
+            }
+            .sheet(isPresented: $showNotificationCenter) {
+                NotificationCenterView()
+            }
+            .sheet(isPresented: $showEditProfile) {
+                EditProfileView()
+            }
+            .sheet(isPresented: $showSubscription) {
+                SubscriptionView()
+            }
+            .sheet(isPresented: $showRedemptionApprovals) {
+                RedemptionApprovalsView()
+            }
+            .sheet(isPresented: $showRewardsHistory) {
+                RewardsHistoryView(redemptions: allRedemptions.sorted { $0.createdAt > $1.createdAt }, isParent: true)
             }
             .sheet(isPresented: $showPendingApprovals) {
                 PendingApprovalsView { reward in
@@ -228,13 +301,13 @@ struct ContentView: View {
                         allChildren: children
                     )) {
                         VStack(spacing: 4) {
-                            Image(systemName: child.avatar.isEmpty ? "person.circle.fill" : child.avatar)
-                                .font(.system(size: 22))
-                                .foregroundStyle(.yellow)
-                                .frame(width: 40, height: 40)
-                                .background(.yellow.opacity(0.2), in: Circle())
+                            Image(systemName: child.avatar.isEmpty ? "star.fill" : child.avatar)
+                                .font(.system(size: 26))
+                                .foregroundStyle(avatarColor(for: child.avatar))
+                                .frame(width: 44, height: 44)
+                                .background(avatarColor(for: child.avatar).opacity(0.2), in: Circle())
                                 .overlay(
-                                    Circle().strokeBorder(.yellow.opacity(0.5), lineWidth: 1.5)
+                                    Circle().strokeBorder(avatarColor(for: child.avatar).opacity(0.5), lineWidth: 1.5)
                                 )
 
                             Text(child.name)
@@ -300,6 +373,39 @@ struct ContentView: View {
         .padding(.top, 8)
     }
 
+    private var tierBanner: some View {
+        Button {
+            showSubscription = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: subscriptionManager.tier == .family ? "house.fill" : "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(subscriptionManager.tier == .family ? calmAccent : .orange)
+
+                Text(subscriptionManager.tier == .free ? "Free Plan" : "Family Plan")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+
+                Spacer()
+
+                Text("Upgrade")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.orange)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.orange.opacity(0.6))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+
     private var addTaskButton: some View {
         Button {
             showingAddTask = true
@@ -311,7 +417,7 @@ struct ContentView: View {
                 .background(.white.opacity(0.2), in: Capsule())
                 .foregroundStyle(.white)
         }
-        .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
     }
 }
 
@@ -363,6 +469,8 @@ struct DateTasksView: View {
     @State private var taskToEdit: Item?
     @State private var taskToApprove: Item?
     @State private var showingAddTask = false
+    @State private var showTooEarlyAlert = false
+    @State private var tooEarlyTask: Item?
 
     var body: some View {
         ZStack {
@@ -376,7 +484,12 @@ struct DateTasksView: View {
                             task: task,
                             showAssignee: true,
                             onApprove: {
-                                taskToApprove = task
+                                if !task.canComplete {
+                                    tooEarlyTask = task
+                                    showTooEarlyAlert = true
+                                } else {
+                                    taskToApprove = task
+                                }
                             },
                             onEdit: { taskToEdit = task },
                             onDelete: { taskToDelete = task }
@@ -404,7 +517,7 @@ struct DateTasksView: View {
                         .background(.white.opacity(0.2), in: Capsule())
                         .foregroundStyle(.white)
                 }
-                .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
+                .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
                 .padding(.bottom, 16)
             }
         }
@@ -465,10 +578,18 @@ struct DateTasksView: View {
                 }
             }
         }
+        .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
+            Button("Got It", role: .cancel) { tooEarlyTask = nil }
+        } message: {
+            if let task = tooEarlyTask {
+                Text("This task is scheduled for \(task.dueDateLabel). It can be completed when the day arrives!")
+            }
+        }
     }
 
     private func handleApproval(task: Item) {
         task.status = "approved"
+        let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 && !task.assignedTo.isEmpty {
             if let child = children.first(where: { $0.name == task.assignedTo }) {
                 child.totalEarned += task.reward
@@ -484,7 +605,22 @@ struct DateTasksView: View {
             )
         }
         let familyCode = authManager.familyCode
-        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        let taskName = task.name
+        let childName = task.assignedTo
+        let reward = task.reward
+        Task {
+            await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+            if !childName.isEmpty {
+                let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                await cloudKitManager.sendRemoteNotification(
+                    familyCode: familyCode,
+                    title: "Task Approved!",
+                    body: "\"\(taskName)\" has been approved.\(rewardText)",
+                    category: "TASK_APPROVED",
+                    senderAvatar: authManager.avatar
+                )
+            }
+        }
         SoundManager.shared.playApplause()
         onTaskCompleted?(task.reward)
     }
@@ -507,6 +643,8 @@ struct ChildTasksView: View {
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
     @State private var showingAddTask = false
+    @State private var showTooEarlyAlert = false
+    @State private var tooEarlyTask: Item?
 
     private var filteredTasks: [Item] {
         showOpenOnly ? tasks.filter { !$0.isApproved } : tasks
@@ -553,7 +691,14 @@ struct ChildTasksView: View {
                                     ForEach(group.tasks) { task in
                                         TaskRow(
                                             task: task,
-                                            onApprove: { taskToApprove = task },
+                                            onApprove: {
+                                                if !task.canComplete {
+                                                    tooEarlyTask = task
+                                                    showTooEarlyAlert = true
+                                                } else {
+                                                    taskToApprove = task
+                                                }
+                                            },
                                             onEdit: { taskToEdit = task },
                                             onDelete: { taskToDelete = task }
                                         )
@@ -584,8 +729,8 @@ struct ChildTasksView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(.blue, in: RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .blue.opacity(0.4), radius: 8, y: 4)
+                        .background(calmAccent, in: RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: calmAccent.opacity(0.4), radius: 8, y: 4)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -644,6 +789,7 @@ struct ChildTasksView: View {
             Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
                 if let task = taskToApprove {
                     task.status = "approved"
+                    let snapshot = CloudKitManager.TaskSnapshot(task)
                     if task.reward > 0 {
                         child.totalEarned += task.reward
                     }
@@ -653,9 +799,19 @@ struct ChildTasksView: View {
                         reward: task.reward
                     )
                     let familyCode = authManager.familyCode
+                    let taskName = task.name
+                    let reward = task.reward
                     Task {
-                        await cloudKitManager.pushTask(task, familyCode: familyCode)
+                        await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
                         await cloudKitManager.pushMember(child, familyCode: familyCode)
+                        let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                        await cloudKitManager.sendRemoteNotification(
+                            familyCode: familyCode,
+                            title: "Task Approved!",
+                            body: "\"\(taskName)\" has been approved.\(rewardText)",
+                            category: "TASK_APPROVED",
+                            senderAvatar: authManager.avatar
+                        )
                     }
                     SoundManager.shared.playApplause()
                     celebrationReward = task.reward
@@ -678,17 +834,24 @@ struct ChildTasksView: View {
         .sheet(isPresented: $showingAddTask) {
             AddTaskView(children: allChildren, preselectedChild: child.name)
         }
+        .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
+            Button("Got It", role: .cancel) { tooEarlyTask = nil }
+        } message: {
+            if let task = tooEarlyTask {
+                Text("This task is scheduled for \(task.dueDateLabel). It can be completed when the day arrives!")
+            }
+        }
     }
 
     private var childHeader: some View {
         HStack(spacing: 14) {
-            Image(systemName: child.avatar.isEmpty ? "person.circle.fill" : child.avatar)
-                .font(.system(size: 36))
-                .foregroundStyle(.blue)
-                .frame(width: 52, height: 52)
-                .background(.blue.opacity(0.15), in: Circle())
+            Image(systemName: child.avatar.isEmpty ? "star.fill" : child.avatar)
+                .font(.system(size: 40))
+                .foregroundStyle(avatarColor(for: child.avatar))
+                .frame(width: 56, height: 56)
+                .background(avatarColor(for: child.avatar).opacity(0.15), in: Circle())
                 .overlay(
-                    Circle().strokeBorder(.blue.opacity(0.5), lineWidth: 2)
+                    Circle().strokeBorder(avatarColor(for: child.avatar).opacity(0.5), lineWidth: 2)
                 )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -696,9 +859,9 @@ struct ChildTasksView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
 
-                Text("Earned: $\(child.totalEarned, specifier: "%.2f")")
+                Text("Earned: \(Int(child.totalEarned)) coins")
                     .font(.caption)
-                    .foregroundStyle(.green.opacity(0.85))
+                    .foregroundStyle(.yellow.opacity(0.85))
             }
 
             Spacer()
@@ -726,16 +889,16 @@ struct TaskRow: View {
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
 
-    private var statusIcon: String {
-        if task.isApproved { return "checkmark.circle.fill" }
-        if task.isInReview { return "clock.fill" }
-        return "circle"
-    }
-
     private var statusColor: Color {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
-        return .white.opacity(0.35)
+        return .white.opacity(0.4)
+    }
+
+    private var statusLabel: String {
+        if task.isApproved { return "Done" }
+        if task.isInReview { return "Review" }
+        return "To Do"
     }
 
     var body: some View {
@@ -746,9 +909,32 @@ struct TaskRow: View {
                     onApprove?()
                 }
             } label: {
-                Image(systemName: statusIcon)
-                    .font(.title3)
-                    .foregroundStyle(statusColor)
+                VStack(spacing: 3) {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(statusColor, lineWidth: 2)
+                            .frame(width: 32, height: 32)
+
+                        if task.isApproved {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                        } else if task.isInReview {
+                            Circle()
+                                .fill(.orange)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "clock")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    Text(statusLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(statusColor)
+                }
             }
             .buttonStyle(.plain)
             .disabled(task.isApproved)
@@ -778,11 +964,11 @@ struct TaskRow: View {
                         Text("•")
                             .foregroundStyle(.white.opacity(0.3))
                         Label(
-                            task.isApproved ? "Earned $\(task.reward, specifier: "%.2f")" : "$\(task.reward, specifier: "%.2f")",
-                            systemImage: "dollarsign.circle.fill"
+                            task.isApproved ? "Earned \(Int(task.reward)) coins" : "\(Int(task.reward)) coins",
+                            systemImage: "star.circle.fill"
                         )
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(task.isApproved ? .green : .green.opacity(0.85))
+                        .foregroundStyle(task.isApproved ? .yellow : .yellow.opacity(0.85))
                     }
 
                     if showAssignee && !task.assignedTo.isEmpty {
@@ -790,7 +976,7 @@ struct TaskRow: View {
                             .foregroundStyle(.white.opacity(0.3))
                         Label(task.assignedTo, systemImage: "person.fill")
                             .font(.caption)
-                            .foregroundStyle(.blue.opacity(0.8))
+                            .foregroundStyle(calmAccent.opacity(0.8))
                     }
                 }
             }
@@ -803,9 +989,12 @@ struct TaskRow: View {
                         Button {
                             onEdit()
                         } label: {
-                            Image(systemName: "pencil.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.blue.opacity(0.7))
+                            Image(systemName: "pencil")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(calmAccent.opacity(0.6), in: Circle())
+                                .overlay(Circle().strokeBorder(calmAccent.opacity(0.4), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                     }
@@ -814,9 +1003,12 @@ struct TaskRow: View {
                         Button {
                             onDelete()
                         } label: {
-                            Image(systemName: "trash.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.red.opacity(0.6))
+                            Image(systemName: "trash")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.red.opacity(0.5), in: Circle())
+                                .overlay(Circle().strokeBorder(.red.opacity(0.4), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                     }
@@ -839,21 +1031,10 @@ struct TaskRow: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
-            .tint(.blue)
+            .tint(calmAccent)
         }
     }
 }
-
-// MARK: - Recurrence
-
-enum RecurrenceType: String, CaseIterable {
-    case none = "None"
-    case daily = "Daily"
-    case weekly = "Weekly"
-    case monthly = "Monthly"
-}
-
-let weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 
 // MARK: - Add Task View (Parent)
 
@@ -873,8 +1054,9 @@ struct AddTaskView: View {
     @State private var selectedChild = ""
     @State private var rewardText = ""
     @State private var recurrenceType: RecurrenceType = .none
-    @State private var occurrences = 4
+    @State private var occurrences = 10
     @State private var selectedWeekdays: Set<Int> = []
+    @State private var selectedTemplate: TaskTemplate?
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -893,6 +1075,33 @@ struct AddTaskView: View {
         }
     }
 
+    private var stepperMax: Int {
+        switch recurrenceType {
+        case .daily: return 90
+        case .weekly: return 52
+        case .monthly: return 12
+        case .none: return 52
+        }
+    }
+
+    private func applyTemplate(_ template: TaskTemplate) {
+        selectedTemplate = template
+        taskName = template.name
+        rewardText = "\(template.suggestedReward)"
+        recurrenceType = template.suggestedRecurrence
+        switch template.suggestedRecurrence {
+        case .daily: occurrences = 10
+        case .weekly:
+            occurrences = 4
+            if selectedWeekdays.isEmpty {
+                let weekday = Calendar.current.component(.weekday, from: targetDate)
+                selectedWeekdays.insert(weekday)
+            }
+        case .monthly: occurrences = 4
+        case .none: break
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -902,30 +1111,53 @@ struct AddTaskView: View {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
 
+                        templatePicker
+
                         if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
-                            HStack(spacing: 8) {
-                                Image(systemName: remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
-                                    .foregroundStyle(remaining <= 10 ? .orange : .cyan)
-                                Text("\(remaining) tasks remaining this month")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.7))
-                                Spacer()
-                                Text(subscriptionManager.tier.rawValue.capitalized)
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.white.opacity(0.5))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(.white.opacity(0.1), in: Capsule())
+                            VStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: remaining == 0 ? "xmark.circle.fill" : remaining <= 10 ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                        .foregroundStyle(remaining == 0 ? .red : remaining <= 10 ? .orange : .cyan)
+                                    Text(remaining == 0 ? "Task limit reached" : "\(remaining) tasks remaining this month")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.7))
+                                    Spacer()
+                                    Text(subscriptionManager.tier.rawValue.capitalized)
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(.white.opacity(0.1), in: Capsule())
+                                }
+
+                                if remaining <= 10 {
+                                    NavigationLink {
+                                        SubscriptionView()
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "crown.fill")
+                                                .font(.caption)
+                                            Text(remaining == 0 ? "Upgrade to add more tasks" : "Upgrade for more tasks")
+                                                .font(.caption.weight(.semibold))
+                                            Spacer()
+                                            Image(systemName: "chevron.right")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundStyle(.orange)
+                                        .padding(10)
+                                        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
                             }
                             .padding(12)
                             .background(
-                                (remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
+                                (remaining == 0 ? Color.red.opacity(0.1) : remaining <= 10 ? Color.orange.opacity(0.1) : Color.cyan.opacity(0.08)),
                                 in: RoundedRectangle(cornerRadius: 12)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(
-                                        remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
+                                        remaining == 0 ? .red.opacity(0.2) : remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
                                         lineWidth: 1
                                     )
                             )
@@ -963,25 +1195,25 @@ struct AddTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
                             )
                         }
 
                         recurrenceSection
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Reward ($)")
+                            Text("Reward (coins)")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.5))
 
                             HStack(spacing: 10) {
-                                Image(systemName: "dollarsign.circle.fill")
-                                    .foregroundStyle(.green)
+                                Image(systemName: "star.circle.fill")
+                                    .foregroundStyle(.yellow)
 
-                                TextField("0.00", text: $rewardText)
+                                TextField("0", text: $rewardText)
                                     .font(.body)
                                     .foregroundStyle(.white)
                                     .keyboardType(.decimalPad)
@@ -1038,12 +1270,14 @@ struct AddTaskView: View {
                         let dates = generateTaskDates()
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
                         var createdTasks: [Item] = []
+                        let recurring = recurrenceType != .none
                         for date in dates {
                             let task = Item(
                                 name: trimmedName,
                                 targetDate: date,
                                 assignedTo: selectedChild,
-                                reward: rewardValue
+                                reward: rewardValue,
+                                isRecurring: recurring
                             )
                             modelContext.insert(task)
                             createdTasks.append(task)
@@ -1056,9 +1290,21 @@ struct AddTaskView: View {
                             )
                         }
                         let familyCode = authManager.familyCode
+                        let childName = selectedChild
+                        let parentName = authManager.userName
+                        let taskCount = createdTasks.count
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
+                            }
+                            if !childName.isEmpty {
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "New Task Assigned",
+                                    body: "\(parentName) assigned \"\(trimmedName)\" to \(childName)" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                    category: "TASK_ASSIGNED",
+                                    senderAvatar: authManager.avatar
+                                )
                             }
                         }
                         dismiss()
@@ -1069,6 +1315,46 @@ struct AddTaskView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var templatePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Quick Templates")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.7))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(taskTemplates) { template in
+                        Button {
+                            applyTemplate(template)
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: template.icon)
+                                    .font(.title3)
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : template.color)
+                                Text(template.name)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : .white.opacity(0.7))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 90, height: 70)
+                            .background(
+                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : .white.opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        selectedTemplate?.name == template.name ? template.color : .white.opacity(0.1),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var recurrenceSection: some View {
@@ -1085,9 +1371,16 @@ struct AddTaskView: View {
             .pickerStyle(.segmented)
             .colorScheme(.dark)
             .onChange(of: recurrenceType) { _, newValue in
-                if newValue == .weekly && selectedWeekdays.isEmpty {
-                    let weekday = Calendar.current.component(.weekday, from: targetDate)
-                    selectedWeekdays.insert(weekday)
+                switch newValue {
+                case .daily: occurrences = 10
+                case .weekly:
+                    occurrences = 4
+                    if selectedWeekdays.isEmpty {
+                        let weekday = Calendar.current.component(.weekday, from: targetDate)
+                        selectedWeekdays.insert(weekday)
+                    }
+                case .monthly: occurrences = 4
+                case .none: break
                 }
             }
 
@@ -1108,7 +1401,7 @@ struct AddTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? .blue : .white.opacity(0.15),
+                                        selectedWeekdays.contains(day) ? calmAccent : .white.opacity(0.15),
                                         in: Circle()
                                     )
                                     .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
@@ -1118,7 +1411,7 @@ struct AddTaskView: View {
                     .frame(maxWidth: .infinity)
                 }
 
-                Stepper(value: $occurrences, in: 2...52) {
+                Stepper(value: $occurrences, in: 2...stepperMax) {
                     HStack {
                         Text("Repeat for")
                             .foregroundStyle(.white)
@@ -1192,7 +1485,7 @@ struct AddTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .blue : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
                     .foregroundStyle(.white)
@@ -1200,13 +1493,13 @@ struct AddTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -1286,23 +1579,23 @@ struct EditTaskView: View {
                             .colorScheme(.dark)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
                             )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Reward ($)")
+                            Text("Reward (coins)")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.5))
 
                             HStack(spacing: 10) {
-                                Image(systemName: "dollarsign.circle.fill")
-                                    .foregroundStyle(.green)
+                                Image(systemName: "star.circle.fill")
+                                    .foregroundStyle(.yellow)
 
-                                TextField("0.00", text: $rewardText)
+                                TextField("0", text: $rewardText)
                                     .font(.body)
                                     .foregroundStyle(.white)
                                     .keyboardType(.decimalPad)
@@ -1376,7 +1669,7 @@ struct EditTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .blue : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
                     .foregroundStyle(.white)
@@ -1384,13 +1677,13 @@ struct EditTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? .blue.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? .blue.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -1407,7 +1700,6 @@ struct ChildrenManagementView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
-    @State private var newChildName = ""
     @State private var memberToRemove: FamilyMember?
 
     private var parents: [FamilyMember] {
@@ -1434,8 +1726,8 @@ struct ChildrenManagementView: View {
 
                         memberSection(title: "Children (\(children.count)/\(subscriptionManager.maxMembers))", members: children, canRemove: true)
 
-                        if subscriptionManager.canAddMember(currentCount: allMembers.count) {
-                            addChildSection
+                        if !subscriptionManager.canAddMember(currentCount: allMembers.count) {
+                            memberLimitUpgrade
                         }
                     }
                     .padding(.horizontal, 24)
@@ -1482,7 +1774,7 @@ struct ChildrenManagementView: View {
                 .foregroundStyle(.white)
                 .tracking(6)
 
-            Text("Share this code with family members to join")
+            Text("New members can use this code to join your family")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.35))
 
@@ -1493,7 +1785,7 @@ struct ChildrenManagementView: View {
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(.blue, in: Capsule())
+                    .background(calmAccent, in: Capsule())
                     .foregroundStyle(.white)
             }
         }
@@ -1529,10 +1821,10 @@ struct ChildrenManagementView: View {
             } else {
                 ForEach(members) { member in
                     HStack {
-                        Image(systemName: member.avatar.isEmpty ? "person.circle.fill" : member.avatar)
-                            .font(.title3)
-                            .foregroundStyle(.blue)
-                            .frame(width: 32)
+                        Image(systemName: member.avatar.isEmpty ? "star.fill" : member.avatar)
+                            .font(.title2)
+                            .foregroundStyle(avatarColor(for: member.avatar))
+                            .frame(width: 36)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(member.name)
@@ -1540,9 +1832,9 @@ struct ChildrenManagementView: View {
                                 .foregroundStyle(.white)
 
                             if member.isChild {
-                                Text("Earned: $\(member.totalEarned, specifier: "%.2f")")
+                                Text("Earned: \(Int(member.totalEarned)) coins")
                                     .font(.caption)
-                                    .foregroundStyle(.green.opacity(0.8))
+                                    .foregroundStyle(.yellow.opacity(0.8))
                             } else {
                                 Text("Parent")
                                     .font(.caption)
@@ -1572,37 +1864,48 @@ struct ChildrenManagementView: View {
         }
     }
 
-    private var addChildSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Add Child")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+    private var memberLimitUpgrade: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle.badge.exclamationmark.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
 
-            HStack(spacing: 10) {
-                TextField("Child's name", text: $newChildName)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .padding(12)
-                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
-                    )
-
-                Button {
-                    let child = FamilyMember(name: newChildName.trimmingCharacters(in: .whitespaces))
-                    modelContext.insert(child)
-                    let familyCode = authManager.familyCode
-                    Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
-                    newChildName = ""
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Member limit reached")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("Your \(subscriptionManager.tier.rawValue.capitalized) plan allows up to \(subscriptionManager.maxMembers) members.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
                 }
-                .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || !subscriptionManager.canAddMember(currentCount: allMembers.count))
+
+                Spacer()
+            }
+
+            NavigationLink {
+                SubscriptionView()
+            } label: {
+                HStack {
+                    Image(systemName: "crown.fill")
+                        .font(.caption)
+                    Text("Upgrade to add more members")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(.orange, in: RoundedRectangle(cornerRadius: 12))
             }
         }
+        .padding(16)
+        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+        )
     }
 }
 
@@ -1666,8 +1969,9 @@ struct PendingApprovalsView: View {
                 }
                 Button("Approve") {
                     if let task = taskToApprove {
+                        task.status = "approved"
+                        let snapshot = CloudKitManager.TaskSnapshot(task)
                         withAnimation(.snappy) {
-                            task.status = "approved"
                             if task.reward > 0 && !task.assignedTo.isEmpty {
                                 if let child = children.first(where: { $0.name == task.assignedTo }) {
                                     child.totalEarned += task.reward
@@ -1678,7 +1982,22 @@ struct PendingApprovalsView: View {
                             onApproved?(task.reward)
                         }
                         let familyCode = authManager.familyCode
-                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                        let taskName = task.name
+                        let childName = task.assignedTo
+                        let reward = task.reward
+                        Task {
+                            await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+                            if !childName.isEmpty {
+                                let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "Task Approved!",
+                                    body: "\"\(taskName)\" has been approved.\(rewardText)",
+                                    category: "TASK_APPROVED",
+                                    senderAvatar: authManager.avatar
+                                )
+                            }
+                        }
                         if !task.assignedTo.isEmpty {
                             notificationManager.sendTaskApprovedNotification(
                                 taskName: task.name,
@@ -1714,7 +2033,7 @@ struct PendingApprovalsView: View {
                         if !task.assignedTo.isEmpty {
                             Label(task.assignedTo, systemImage: "person.fill")
                                 .font(.caption)
-                                .foregroundStyle(.blue.opacity(0.8))
+                                .foregroundStyle(calmAccent.opacity(0.8))
                         }
 
                         Text(task.dueDateLabel)
@@ -1724,9 +2043,9 @@ struct PendingApprovalsView: View {
                         if task.reward > 0 {
                             Text("•")
                                 .foregroundStyle(.white.opacity(0.3))
-                            Label("$\(task.reward, specifier: "%.2f")", systemImage: "dollarsign.circle.fill")
+                            Label("\(Int(task.reward)) coins", systemImage: "star.circle.fill")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.green.opacity(0.85))
+                                .foregroundStyle(.yellow.opacity(0.85))
                         }
                     }
                 }
@@ -1736,11 +2055,23 @@ struct PendingApprovalsView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    withAnimation(.snappy) {
-                        task.status = "open"
-                    }
+                    task.status = "open"
+                    let snapshot = CloudKitManager.TaskSnapshot(task)
                     let familyCode = authManager.familyCode
-                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                    let taskName = task.name
+                    let childName = task.assignedTo
+                    Task {
+                        await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+                        if !childName.isEmpty {
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: familyCode,
+                                title: "Task Needs Redo",
+                                body: "\"\(taskName)\" was sent back. Please try again.",
+                                category: "TASK_REJECTED",
+                                senderAvatar: authManager.avatar
+                            )
+                        }
+                    }
                     if !task.assignedTo.isEmpty {
                         notificationManager.sendTaskRejectedNotification(
                             taskName: task.name,
@@ -1818,15 +2149,15 @@ struct ParentOnboardingView: View {
                         Spacer().frame(height: 20)
 
                         VStack(spacing: 12) {
-                            Image(systemName: "person.2.fill")
+                            Image(systemName: "party.popper.fill")
                                 .font(.system(size: 52))
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(.yellow)
 
-                            Text("Set Up Your Family")
+                            Text("You're all set, \(authManager.userName)!")
                                 .font(.title2.weight(.bold))
                                 .foregroundStyle(.white)
 
-                            Text("Add your children and share the invite code so other family members can join.")
+                            Text("Share the invite code below with your family members so they can join. You can also add children here to get started right away!")
                                 .font(.subheadline)
                                 .foregroundStyle(.white.opacity(0.5))
                                 .multilineTextAlignment(.center)
@@ -1842,10 +2173,10 @@ struct ParentOnboardingView: View {
 
                                 ForEach(children) { child in
                                     HStack {
-                                        Image(systemName: child.avatar.isEmpty ? "person.circle.fill" : child.avatar)
-                                            .font(.title3)
-                                            .foregroundStyle(.blue)
-                                            .frame(width: 32)
+                                        Image(systemName: child.avatar.isEmpty ? "star.fill" : child.avatar)
+                                            .font(.title2)
+                                            .foregroundStyle(avatarColor(for: child.avatar))
+                                            .frame(width: 36)
 
                                         Text(child.name)
                                             .font(.body)
@@ -1889,11 +2220,25 @@ struct ParentOnboardingView: View {
                                     } label: {
                                         Image(systemName: "plus.circle.fill")
                                             .font(.title2)
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(calmAccent)
                                     }
                                     .disabled(newChildName.trimmingCharacters(in: .whitespaces).isEmpty || !subscriptionManager.canAddMember(currentCount: allMembers.count))
                                 }
                             }
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: "crown.fill")
+                                    .foregroundStyle(.orange)
+                                Text("Upgrade your plan to add more members")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                            .padding(12)
+                            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+                            )
                         }
 
                         Spacer().frame(height: 10)
@@ -1917,8 +2262,8 @@ struct ParentOnboardingView: View {
 
     private var inviteCodeCard: some View {
         VStack(spacing: 12) {
-            Text("Family Invite Code")
-                .font(.caption)
+            Text("Your Family Invite Code")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.5))
 
             Text(authManager.familyCode)
@@ -1926,9 +2271,10 @@ struct ParentOnboardingView: View {
                 .foregroundStyle(.white)
                 .tracking(6)
 
-            Text("Share this code with family members to join")
+            Text("Send this code to your children and other family members so they can join from their own device")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.35))
+                .multilineTextAlignment(.center)
 
             ShareLink(
                 item: "Join my family on Taskee! Use invite code: \(authManager.familyCode)"
@@ -1937,7 +2283,7 @@ struct ParentOnboardingView: View {
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(.blue, in: Capsule())
+                    .background(calmAccent, in: Capsule())
                     .foregroundStyle(.white)
             }
         }
@@ -1951,9 +2297,818 @@ struct ParentOnboardingView: View {
     }
 }
 
+// MARK: - Edit Profile View
+
+struct EditProfileView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Query private var allMembers: [FamilyMember]
+
+    @State private var name = ""
+    @State private var selectedAvatar = ""
+
+    private var myMember: FamilyMember? {
+        allMembers.first { $0.appleUserID == authManager.appleUserID }
+    }
+
+    private var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer().frame(height: 12)
+
+                        Image(systemName: selectedAvatar.isEmpty ? "star.fill" : selectedAvatar)
+                            .font(.system(size: 72))
+                            .foregroundStyle(avatarColor(for: selectedAvatar))
+                            .frame(width: 90, height: 90)
+                            .background(avatarColor(for: selectedAvatar).opacity(0.15), in: Circle())
+                            .overlay(
+                                Circle().strokeBorder(avatarColor(for: selectedAvatar).opacity(0.5), lineWidth: 2)
+                            )
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Choose Avatar")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
+                                ForEach(avatarOptions, id: \.self) { avatar in
+                                    Button {
+                                        selectedAvatar = avatar
+                                    } label: {
+                                        Image(systemName: avatar)
+                                            .font(.system(size: 32))
+                                            .frame(width: 54, height: 54)
+                                            .background(
+                                                selectedAvatar == avatar ? avatarColor(for: avatar).opacity(0.3) : .white.opacity(0.15),
+                                                in: Circle()
+                                            )
+                                            .foregroundStyle(selectedAvatar == avatar ? avatarColor(for: avatar) : .white.opacity(0.6))
+                                            .overlay(
+                                                Circle()
+                                                    .strokeBorder(
+                                                        selectedAvatar == avatar ? avatarColor(for: avatar) : .clear,
+                                                        lineWidth: 2
+                                                    )
+                                            )
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Your Name")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            TextField("Enter your name", text: $name)
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .padding(14)
+                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("Edit Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+                        authManager.userName = trimmedName
+                        authManager.avatar = selectedAvatar
+                        if let member = myMember {
+                            member.name = trimmedName
+                            member.avatar = selectedAvatar
+                            let familyCode = authManager.familyCode
+                            Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
+                        }
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!isValid)
+                }
+            }
+            .onAppear {
+                name = authManager.userName
+                selectedAvatar = authManager.avatar
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+// MARK: - Redemption Approvals View (Parent)
+
+struct RedemptionApprovalsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @Environment(NotificationManager.self) private var notificationManager
+    @Query(filter: #Predicate<RewardRedemption> { $0.status == "pending" }, sort: \RewardRedemption.createdAt)
+    private var pendingRedemptions: [RewardRedemption]
+    @State private var rejectTarget: RewardRedemption?
+    @State private var rejectReason = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                if pendingRedemptions.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "gift")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("No pending requests")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text("All reward requests have been handled.")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(pendingRedemptions) { redemption in
+                                redemptionApprovalRow(redemption)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    }
+                }
+            }
+            .navigationTitle("Reward Requests")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Reject Request", isPresented: Binding(
+                get: { rejectTarget != nil },
+                set: { if !$0 { rejectTarget = nil; rejectReason = "" } }
+            )) {
+                TextField("Reason (optional)", text: $rejectReason)
+                Button("Cancel", role: .cancel) {
+                    rejectTarget = nil
+                    rejectReason = ""
+                }
+                Button("Reject", role: .destructive) {
+                    if let redemption = rejectTarget {
+                        redemption.status = "rejected"
+                        redemption.rejectReason = rejectReason
+                        redemption.resolvedAt = Date()
+                        let familyCode = authManager.familyCode
+                        let desc = redemption.itemDescription
+                        Task {
+                            _ = await cloudKitManager.pushRedemption(redemption, familyCode: familyCode)
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: familyCode,
+                                title: "Reward Request Declined",
+                                body: "Your request for \"\(desc)\" was declined." + (rejectReason.isEmpty ? "" : " Reason: \(rejectReason)"),
+                                category: "REWARD_REJECTED",
+                                senderAvatar: authManager.avatar
+                            )
+                        }
+                    }
+                    rejectTarget = nil
+                    rejectReason = ""
+                }
+            } message: {
+                if let r = rejectTarget {
+                    Text("Reject \(r.childName)'s request for \"\(r.itemDescription)\"?")
+                }
+            }
+        }
+    }
+
+    private func redemptionApprovalRow(_ r: RewardRedemption) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: r.typeIcon)
+                    .font(.title2)
+                    .foregroundStyle(.purple)
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(r.itemDescription)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.white)
+
+                    HStack(spacing: 6) {
+                        Label(r.childName, systemImage: "person.fill")
+                            .font(.caption)
+                            .foregroundStyle(calmAccent.opacity(0.8))
+
+                        Text("•")
+                            .foregroundStyle(.white.opacity(0.5))
+
+                        Label("\(r.coinAmount) coins", systemImage: "star.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.yellow.opacity(0.85))
+
+                        Text("•")
+                            .foregroundStyle(.white.opacity(0.5))
+
+                        Text(r.typeLabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+
+                    Text(r.createdAt, format: .relative(presentation: .named))
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    rejectTarget = r
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark")
+                        Text("Reject")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.red.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                    .foregroundStyle(.red)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(.red.opacity(0.3), lineWidth: 1)
+                    )
+                }
+
+                Button {
+                    approveRedemption(r)
+                } label: {
+                    HStack {
+                        Image(systemName: "checkmark")
+                        Text("Approve")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.green.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                    .foregroundStyle(.green)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(.green.opacity(0.3), lineWidth: 1)
+                    )
+                }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.purple.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func approveRedemption(_ r: RewardRedemption) {
+        r.status = "approved"
+        r.resolvedAt = Date()
+        let familyCode = authManager.familyCode
+        let desc = r.itemDescription
+        let coins = r.coinAmount
+        Task {
+            _ = await cloudKitManager.pushRedemption(r, familyCode: familyCode)
+            await cloudKitManager.sendRemoteNotification(
+                familyCode: familyCode,
+                title: "Reward Approved!",
+                body: "Your request for \"\(desc)\" (\(coins) coins) was approved!",
+                category: "REWARD_APPROVED",
+                senderAvatar: authManager.avatar
+            )
+        }
+    }
+}
+
+// MARK: - Subscription View
+
+struct SubscriptionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @State private var isPurchasing = false
+
+    private struct PlanFeature {
+        let text: String
+        let included: Bool
+    }
+
+    private struct PlanInfo {
+        let tier: SubscriptionManager.Tier
+        let name: String
+        let icon: String
+        let color: Color
+        let price: String
+        let period: String
+        let features: [PlanFeature]
+        let monthlyID: String?
+        let annualID: String?
+    }
+
+    private var plans: [PlanInfo] {
+        [
+            PlanInfo(
+                tier: .free,
+                name: "Free",
+                icon: "person.2.fill",
+                color: .gray,
+                price: "$0",
+                period: "forever",
+                features: [
+                    PlanFeature(text: "Up to 4 family members", included: true),
+                    PlanFeature(text: "100 tasks per month", included: true),
+                    PlanFeature(text: "20 pickup requests per day", included: true),
+                    PlanFeature(text: "Basic notifications", included: true),
+                    PlanFeature(text: "Priority support", included: false),
+                ],
+                monthlyID: nil,
+                annualID: nil
+            ),
+            PlanInfo(
+                tier: .family,
+                name: "Family",
+                icon: "house.fill",
+                color: calmAccent,
+                price: "$4.99",
+                period: "/month",
+                features: [
+                    PlanFeature(text: "Up to 6 family members", included: true),
+                    PlanFeature(text: "250 tasks per month", included: true),
+                    PlanFeature(text: "30 pickup requests per day", included: true),
+                    PlanFeature(text: "All notifications", included: true),
+                    PlanFeature(text: "Priority support", included: false),
+                ],
+                monthlyID: SubscriptionManager.familyMonthly,
+                annualID: SubscriptionManager.familyAnnual
+            ),
+            PlanInfo(
+                tier: .pro,
+                name: "Pro",
+                icon: "crown.fill",
+                color: .orange,
+                price: "$9.99",
+                period: "/month",
+                features: [
+                    PlanFeature(text: "Up to 10 family members", included: true),
+                    PlanFeature(text: "Unlimited tasks", included: true),
+                    PlanFeature(text: "Unlimited pickup requests", included: true),
+                    PlanFeature(text: "All notifications", included: true),
+                    PlanFeature(text: "Priority support", included: true),
+                ],
+                monthlyID: SubscriptionManager.proMonthly,
+                annualID: SubscriptionManager.proAnnual
+            ),
+        ]
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        currentPlanBadge
+
+                        ForEach(plans, id: \.name) { plan in
+                            planCard(plan)
+                        }
+
+                        restoreButton
+
+                        if let error = subscriptionManager.purchaseError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 16)
+                        }
+
+                        Spacer().frame(height: 20)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Subscription")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task {
+                await subscriptionManager.loadProducts()
+            }
+        }
+    }
+
+    private var currentPlanBadge: some View {
+        HStack(spacing: 10) {
+            Image(systemName: subscriptionManager.tier == .pro ? "crown.fill" : subscriptionManager.tier == .family ? "house.fill" : "person.2.fill")
+                .font(.title3)
+                .foregroundStyle(subscriptionManager.tier == .pro ? .orange : subscriptionManager.tier == .family ? calmAccent : .gray)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Current Plan")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(subscriptionManager.tier.rawValue.capitalized)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+
+            Spacer()
+
+            Text(subscriptionManager.tier == .free ? "Free" : "Active")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    (subscriptionManager.tier == .free ? Color.gray : Color.green).opacity(0.3),
+                    in: Capsule()
+                )
+        }
+        .padding(16)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func planCard(_ plan: PlanInfo) -> some View {
+        let isCurrent = subscriptionManager.tier == plan.tier
+        let isUpgrade = plan.tier > subscriptionManager.tier
+
+        return VStack(spacing: 16) {
+            HStack {
+                Image(systemName: plan.icon)
+                    .font(.title2)
+                    .foregroundStyle(plan.color)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plan.name)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(planPrice(plan))
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        if plan.tier != .free {
+                            Text(plan.period)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if isCurrent {
+                    Text("Current")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(plan.color)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(plan.color.opacity(0.15), in: Capsule())
+                }
+            }
+
+            VStack(spacing: 8) {
+                ForEach(plan.features, id: \.text) { feature in
+                    HStack(spacing: 10) {
+                        Image(systemName: feature.included ? "checkmark.circle.fill" : "xmark.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(feature.included ? .green : .white.opacity(0.25))
+
+                        Text(feature.text)
+                            .font(.subheadline)
+                            .foregroundStyle(feature.included ? .white.opacity(0.8) : .white.opacity(0.3))
+
+                        Spacer()
+                    }
+                }
+            }
+
+            if isUpgrade {
+                HStack(spacing: 8) {
+                    subscribeButton(plan: plan, isAnnual: false)
+                    subscribeButton(plan: plan, isAnnual: true)
+                }
+            }
+        }
+        .padding(18)
+        .background(
+            isCurrent ? plan.color.opacity(0.08) : .white.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    isCurrent ? plan.color.opacity(0.4) : .white.opacity(0.1),
+                    lineWidth: isCurrent ? 2 : 1
+                )
+        )
+    }
+
+    private func subscribeButton(plan: PlanInfo, isAnnual: Bool) -> some View {
+        let productID = isAnnual ? plan.annualID : plan.monthlyID
+        let product = subscriptionManager.products.first { $0.id == productID }
+        let label = isAnnual ? "Annual" : "Monthly"
+
+        return Button {
+            guard let product else { return }
+            isPurchasing = true
+            Task {
+                _ = await subscriptionManager.purchase(product)
+                isPurchasing = false
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                if let product {
+                    Text(product.displayPrice)
+                        .font(.subheadline.weight(.bold))
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                isAnnual ? plan.color : plan.color.opacity(0.4),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .foregroundStyle(.white)
+        }
+        .disabled(product == nil || isPurchasing)
+    }
+
+    private func planPrice(_ plan: PlanInfo) -> String {
+        if plan.tier == .free { return "$0" }
+        if let product = subscriptionManager.products.first(where: { $0.id == plan.monthlyID }) {
+            return product.displayPrice
+        }
+        return plan.price
+    }
+
+    private var restoreButton: some View {
+        Button {
+            Task {
+                await subscriptionManager.restorePurchases()
+            }
+        } label: {
+            Text("Restore Purchases")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.vertical, 8)
+        }
+    }
+}
+
+// MARK: - Notification Center View
+
+struct NotificationCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @State private var notifications: [CloudKitManager.NotificationItem] = []
+    @State private var isLoading = true
+    @State private var showClearAllConfirm = false
+    @State private var isClearingAll = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                } else if notifications.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("No notifications")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text("You're all caught up!")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else {
+                    List {
+                        ForEach(notifications) { notif in
+                            notificationRow(notif)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        }
+                        .onDelete { indexSet in
+                            deleteNotifications(at: indexSet)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .refreshable {
+                        await loadNotifications()
+                    }
+                }
+
+                if isClearingAll {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Clearing notifications...")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+            }
+            .navigationTitle("Notifications")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !notifications.isEmpty {
+                        Button(role: .destructive) {
+                            showClearAllConfirm = true
+                        } label: {
+                            Text("Clear All")
+                                .font(.subheadline)
+                                .foregroundStyle(.red)
+                        }
+                        .disabled(isClearingAll)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Clear All Notifications?", isPresented: $showClearAllConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    clearAllNotifications()
+                }
+            } message: {
+                Text("This will permanently delete all \(notifications.count) notifications from your family. This cannot be undone.")
+            }
+            .task {
+                await loadNotifications()
+            }
+        }
+    }
+
+    private func loadNotifications() async {
+        isLoading = notifications.isEmpty
+        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
+        notifications = result.notifications
+        isLoading = false
+    }
+
+    private func deleteNotifications(at offsets: IndexSet) {
+        let toDelete = offsets.map { notifications[$0] }
+        withAnimation {
+            notifications.remove(atOffsets: offsets)
+        }
+        Task {
+            for notif in toDelete {
+                _ = await cloudKitManager.deleteNotification(id: notif.id)
+            }
+        }
+    }
+
+    private func clearAllNotifications() {
+        isClearingAll = true
+        let familyCode = authManager.familyCode
+        Task {
+            _ = await cloudKitManager.deleteAllNotifications(familyCode: familyCode)
+            withAnimation {
+                notifications.removeAll()
+            }
+            isClearingAll = false
+        }
+    }
+
+    private func notificationRow(_ notif: CloudKitManager.NotificationItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: notif.senderAvatar.isEmpty ? "star.fill" : notif.senderAvatar)
+                    .font(.title)
+                    .foregroundStyle(colorForCategory(notif.category))
+                    .frame(width: 36, height: 36)
+                    .background(colorForCategory(notif.category).opacity(0.15), in: Circle())
+
+                Image(systemName: iconForCategory(notif.category))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 16, height: 16)
+                    .background(colorForCategory(notif.category), in: Circle())
+                    .offset(x: 2, y: 2)
+            }
+            .frame(width: 38)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notif.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Text(notif.body)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(3)
+
+                Text(notif.createdAt, format: .relative(presentation: .named))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(colorForCategory(notif.category).opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func iconForCategory(_ category: String) -> String {
+        switch category {
+        case "PICKUP_REQUEST": return "car.fill"
+        case "TASK_REVIEW": return "clock.fill"
+        case "TASK_APPROVED": return "checkmark.circle.fill"
+        case "TASK_REJECTED": return "xmark.circle.fill"
+        case "TASK_ASSIGNED": return "plus.circle.fill"
+        case "TASK_CREATED": return "pencil.circle.fill"
+        case "REWARD_REQUEST": return "gift.fill"
+        case "REWARD_APPROVED": return "gift.circle.fill"
+        case "REWARD_REJECTED": return "gift.circle"
+        case "REWARD_FULFILLED": return "checkmark.seal.fill"
+        default: return "bell.fill"
+        }
+    }
+
+    private func colorForCategory(_ category: String) -> Color {
+        switch category {
+        case "PICKUP_REQUEST": return calmAccent
+        case "TASK_REVIEW": return .orange
+        case "TASK_APPROVED": return .green
+        case "TASK_REJECTED": return .red
+        case "TASK_ASSIGNED": return .cyan
+        case "TASK_CREATED": return .purple
+        case "REWARD_REQUEST": return .purple
+        case "REWARD_APPROVED": return .green
+        case "REWARD_REJECTED": return .red
+        case "REWARD_FULFILLED": return .green
+        default: return .cyan
+        }
+    }
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: [Item.self, FamilyMember.self], inMemory: true)
+        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
         .environment(SubscriptionManager())
