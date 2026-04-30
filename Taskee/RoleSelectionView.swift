@@ -16,7 +16,7 @@ struct RoleSelectionView: View {
     @State private var selectedRole = ""
     @State private var name = ""
     @State private var inviteCode = ""
-    @State private var selectedAvatar = "star.fill"
+    @State private var selectedAvatar = "av01"
     @State private var joinExisting = false
     @State private var isValidating = false
     @State private var showInvalidCode = false
@@ -24,6 +24,11 @@ struct RoleSelectionView: View {
     @State private var showAlreadyHasFamily = false
     @State private var existingFamilyCode = ""
     @State private var showFamilyFull = false
+    @State private var parentalConsentPassed = false
+    @State private var gateAnswer = ""
+    @State private var gateA = Int.random(in: 6...12)
+    @State private var gateB = Int.random(in: 4...9)
+    @State private var showWrongAnswer = false
 
     var body: some View {
         ZStack {
@@ -41,6 +46,8 @@ struct RoleSelectionView: View {
                         roleCards
                     } else if selectedRole == "parent" {
                         parentSetup
+                    } else if !parentalConsentPassed {
+                        parentalGateView
                     } else {
                         childSetup
                     }
@@ -77,6 +84,19 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
 
                 Text("Create your family or join an existing one. Once set up, you'll get an invite code to share with your family members so they can join too!")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            } else if !parentalConsentPassed {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(.orange)
+
+                Text("Parent Verification")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+
+                Text("A parent or guardian must verify and consent before a child can use Taskee.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -154,30 +174,46 @@ struct RoleSelectionView: View {
     }
 
     private var avatarPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Choose Avatar")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.5))
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
-                ForEach(avatarOptions, id: \.self) { avatar in
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                ForEach(avatarPresets, id: \.id) { preset in
                     Button {
-                        selectedAvatar = avatar
+                        selectedAvatar = preset.id
                     } label: {
-                        Image(systemName: avatar)
-                            .font(.system(size: 32))
-                            .frame(width: 54, height: 54)
-                            .background(
-                                selectedAvatar == avatar ? avatarColor(for: avatar).opacity(0.3) : .white.opacity(0.15),
-                                in: Circle()
-                            )
-                            .foregroundStyle(selectedAvatar == avatar ? avatarColor(for: avatar) : .white.opacity(0.6))
+                        AvatarFaceView(config: preset, size: 54)
                             .overlay(
                                 Circle()
                                     .strokeBorder(
-                                        selectedAvatar == avatar ? avatarColor(for: avatar) : .clear,
-                                        lineWidth: 2
+                                        selectedAvatar == preset.id ? preset.bgColor : .clear,
+                                        lineWidth: 2.5
                                     )
+                                    .frame(width: 58, height: 58)
+                            )
+                    }
+                }
+            }
+
+            Text("Animals")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                ForEach(animalAvatarPresets, id: \.id) { preset in
+                    Button {
+                        selectedAvatar = preset.id
+                    } label: {
+                        AnimalAvatarFaceView(config: preset, size: 54)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(
+                                        selectedAvatar == preset.id ? preset.bgColor : .clear,
+                                        lineWidth: 2.5
+                                    )
+                                    .frame(width: 58, height: 58)
                             )
                     }
                 }
@@ -378,6 +414,120 @@ struct RoleSelectionView: View {
         }
     }
 
+    private var parentalGateView: some View {
+        VStack(spacing: 24) {
+            VStack(spacing: 16) {
+                Text("Please ask your parent or guardian to answer this question:")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+
+                Text("What is \(gateA) × \(gateB)?")
+                    .font(.title.weight(.bold))
+                    .foregroundStyle(.white)
+
+                TextField("Enter answer", text: $gateAnswer)
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .keyboardType(.numberPad)
+                    .padding(14)
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .frame(width: 160)
+            }
+            .padding(24)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(.orange.opacity(0.3), lineWidth: 1)
+            )
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Parent/Guardian Consent")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+
+                Text("By proceeding, you confirm that you are the parent or legal guardian of this child and consent to the following:")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    consentBullet("Your child's name and task activity will be stored securely in your family's private cloud space")
+                    consentBullet("Task data is shared only within your family group")
+                    consentBullet("No third-party tracking or advertising is used")
+                    consentBullet("You can delete your child's data at any time by removing them from the family")
+                }
+            }
+            .padding(18)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+            )
+
+            HStack(spacing: 12) {
+                Link("Privacy Policy", destination: privacyPolicyURL)
+                Text("·").foregroundStyle(.white.opacity(0.3))
+                Link("Terms of Use", destination: termsOfUseURL)
+            }
+            .font(.caption)
+            .tint(.white.opacity(0.5))
+
+            Button {
+                if Int(gateAnswer) == gateA * gateB {
+                    withAnimation(.snappy) { parentalConsentPassed = true }
+                } else {
+                    showWrongAnswer = true
+                    gateA = Int.random(in: 6...12)
+                    gateB = Int.random(in: 4...9)
+                    gateAnswer = ""
+                }
+            } label: {
+                Text("I Consent — Continue")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        gateAnswer.isEmpty
+                            ? AnyShapeStyle(.white.opacity(0.1))
+                            : AnyShapeStyle(.orange),
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+                    .foregroundStyle(.white)
+            }
+            .disabled(gateAnswer.isEmpty)
+
+            Button {
+                withAnimation(.snappy) { selectedRole = "" }
+            } label: {
+                Text("Back")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+        .alert("Incorrect Answer", isPresented: $showWrongAnswer) {
+            Button("Try Again", role: .cancel) { }
+        } message: {
+            Text("Please ask a parent or guardian to answer the question to continue.")
+        }
+    }
+
+    private func consentBullet(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+                .padding(.top, 1)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.7))
+        }
+    }
+
     private var childSetup: some View {
         VStack(spacing: 20) {
             avatarPicker
@@ -437,16 +587,24 @@ struct RoleSelectionView: View {
                             name: trimmedName,
                             memberRole: "child",
                             avatar: selectedAvatar,
+                            isAccepted: false,
                             appleUserID: authManager.appleUserID
                         )
                         modelContext.insert(member)
                         let pushed = await cloudKitManager.pushMember(member, familyCode: code)
                         if pushed {
                             authManager.userName = trimmedName
+                            authManager.isPendingApproval = true
                             authManager.role = "child"
                             authManager.familyCode = code
                             authManager.avatar = selectedAvatar
-                            await cloudKitManager.syncAll(context: modelContext, familyCode: code)
+                            await cloudKitManager.sendRemoteNotification(
+                                familyCode: code,
+                                title: "New Family Member Request",
+                                body: "\(trimmedName) wants to join your family. Tap to review.",
+                                category: "MEMBER_REQUEST",
+                                senderAvatar: selectedAvatar
+                            )
                             await cloudKitManager.setupSubscriptions(familyCode: code)
                         } else {
                             modelContext.delete(member)

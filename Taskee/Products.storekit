@@ -86,7 +86,7 @@
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Family plan with 6 members and 250 tasks/month",
+              "description" : "Family plan with 6 members and 350 tasks/month",
               "displayName" : "Family Monthly",
               "locale" : "en_US"
             }

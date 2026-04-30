@@ -33,6 +33,13 @@ struct ChildDashboardView: View {
     @State private var showRedeemSheet = false
     @State private var showRewardsHistory = false
     @State private var showEditProfile = false
+    @State private var showShareSheet = false
+    @State private var stickyNote: (message: String, color: Color)?
+    @State private var taskToDelete: Item?
+    @State private var flyingCoins: [FlyingCoin] = []
+    @State private var earningsCardCenter: CGPoint = .zero
+    @State private var lastCompletedTaskCenter: CGPoint = .zero
+    @State private var coinLandBounce = false
     @Query private var allRedemptions: [RewardRedemption]
 
     private var myRedemptions: [RewardRedemption] {
@@ -43,23 +50,40 @@ struct ChildDashboardView: View {
         myRedemptions.filter { $0.isPending }.reduce(0) { $0 + $1.coinAmount }
     }
 
+    private var inReviewCoins: Int {
+        allTasks
+            .filter { $0.assignedTo == authManager.userName && $0.isInReview && $0.reward > 0 }
+            .reduce(0) { $0 + Int($1.reward) }
+    }
+
+    private var awaitingApprovalCoins: Int {
+        pendingRedemptionCoins + inReviewCoins
+    }
+
     private var redeemedCoins: Int {
         myRedemptions.filter { $0.isApproved || $0.isFulfilled || $0.isPending }.reduce(0) { $0 + $1.coinAmount }
     }
 
+    private var totalEarnedCoins: Int {
+        allTasks
+            .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
+            .reduce(0) { $0 + Int($1.reward) }
+    }
+
     private var collectableCoins: Int {
-        max(0, Int(totalEarned) - redeemedCoins)
+        max(0, totalEarnedCoins - redeemedCoins)
+    }
+
+    private var todayOpenCount: Int {
+        allTasks.filter {
+            $0.assignedTo == authManager.userName && $0.isOpen && !$0.isArchived
+            && Calendar.current.isDateInToday($0.targetDate)
+        }.count
     }
 
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
         return showAll ? assigned : assigned.filter { !$0.isApproved }
-    }
-
-    private var totalEarned: Double {
-        allTasks
-            .filter { $0.assignedTo == authManager.userName && $0.isApproved }
-            .reduce(0) { $0 + $1.reward }
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -85,6 +109,18 @@ struct ChildDashboardView: View {
                     earningsCard
                         .padding(.horizontal, 16)
                         .padding(.top, 4)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: EarningsCardCenterKey.self,
+                                    value: CGPoint(
+                                        x: geo.frame(in: .named("childDashboard")).midX + geo.size.width * 0.25,
+                                        y: geo.frame(in: .named("childDashboard")).minY + geo.size.height * 0.35
+                                    )
+                                )
+                            }
+                        )
+                        .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
 
                     if myTasks.isEmpty {
                         emptyState
@@ -103,8 +139,23 @@ struct ChildDashboardView: View {
                     rewardAmount: 0
                 )
 
+                FlyingCoinsOverlay(coins: $flyingCoins)
+
                 pickupFloatingButton
+
+                if let note = stickyNote {
+                    VStack {
+                        Spacer()
+                        StickyNoteView(message: note.message, color: note.color) {
+                            withAnimation { stickyNote = nil }
+                        }
+                        .padding(.bottom, 80)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
+            .coordinateSpace(name: "childDashboard")
+            .onAppear { scheduleStickyNote(from: childTips) }
             .toolbarColorScheme(.dark, for: .navigationBar)
             .navigationTitle("\(authManager.userName)'s Tasks")
             .toolbar {
@@ -118,6 +169,16 @@ struct ChildDashboardView: View {
                         } label: {
                             Image(systemName: "bell.fill")
                                 .font(.subheadline)
+                                .overlay(alignment: .topTrailing) {
+                                    if todayOpenCount > 0 {
+                                        Text("\(todayOpenCount)")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .frame(minWidth: 14, minHeight: 14)
+                                            .background(.red, in: Circle())
+                                            .offset(x: 6, y: -6)
+                                    }
+                                }
                         }
 
                         Menu {
@@ -131,6 +192,11 @@ struct ChildDashboardView: View {
                             } label: {
                                 Label("Edit Profile", systemImage: "pencil.circle")
                             }
+                            Button {
+                                showShareSheet = true
+                            } label: {
+                                Label("Invite a Friend", systemImage: "person.badge.plus")
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 authManager.logout()
@@ -138,14 +204,16 @@ struct ChildDashboardView: View {
                                 Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
                             }
                         } label: {
-                            Image(systemName: authManager.avatar.isEmpty ? "star.fill" : authManager.avatar)
-                                .font(.title3)
+                            AvatarView(avatarId: authManager.avatar, size: 32)
                         }
                     }
                 }
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView()
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: [childShareMessage, appStoreURL])
             }
             .sheet(isPresented: $showNotificationCenter) {
                 NotificationCenterView()
@@ -206,7 +274,43 @@ struct ChildDashboardView: View {
                     Text("This task is scheduled for \(task.dueDateLabel). You can complete it when the day arrives!")
                 }
             }
-            .onAppear {
+            .alert("Delete Task?", isPresented: Binding(
+                get: { taskToDelete != nil },
+                set: { if !$0 { taskToDelete = nil } }
+            )) {
+                if let task = taskToDelete {
+                    if task.isRecurring {
+                        Button("Delete This Task Only", role: .destructive) {
+                            deleteTask(task)
+                            taskToDelete = nil
+                        }
+                        Button("Delete All Recurring", role: .destructive) {
+                            deleteAllRecurring(like: task)
+                            taskToDelete = nil
+                        }
+                        Button("Cancel", role: .cancel) { taskToDelete = nil }
+                    } else {
+                        Button("Delete", role: .destructive) {
+                            deleteTask(task)
+                            taskToDelete = nil
+                        }
+                        Button("Cancel", role: .cancel) { taskToDelete = nil }
+                    }
+                }
+            } message: {
+                if let task = taskToDelete {
+                    if task.isRecurring {
+                        let count = allTasks.filter {
+                            $0.name == task.name && $0.assignedTo == task.assignedTo
+                            && $0.createdByChild && $0.isOpen && $0.isRecurring && !$0.isArchived
+                        }.count
+                        Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+                    } else {
+                        Text("Are you sure you want to delete \"\(task.name)\"?")
+                    }
+                }
+            }
+            .task {
                 archiveOldTasks()
             }
         }
@@ -214,9 +318,34 @@ struct ChildDashboardView: View {
 
     private func archiveOldTasks() {
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        for task in allTasks where task.isApproved && !task.isArchived && task.targetDate < cutoff {
+        let toArchive = allTasks.filter { $0.isApproved && !$0.isArchived && $0.targetDate < cutoff }
+        guard !toArchive.isEmpty else { return }
+        for task in toArchive {
             task.isArchived = true
         }
+    }
+
+    private func deleteTask(_ task: Item) {
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        let taskId = task.id
+        modelContext.delete(task)
+        Task {
+            await cloudKitManager.deleteRemoteTask(taskId)
+        }
+    }
+
+    private func deleteAllRecurring(like task: Item) {
+        let matching = allTasks.filter {
+            $0.name == task.name && $0.assignedTo == task.assignedTo
+            && $0.createdByChild && $0.isOpen && $0.isRecurring && !$0.isArchived
+        }
+        var taskIDs: [UUID] = []
+        for t in matching {
+            notificationManager.cancelTaskReminder(taskId: t.id)
+            taskIDs.append(t.id)
+            modelContext.delete(t)
+        }
+        Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
     private func completeTask(_ task: Item) {
@@ -250,6 +379,53 @@ struct ChildDashboardView: View {
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
         showCelebration = true
+        launchFlyingCoins(count: Int(task.reward))
+    }
+
+    private func launchFlyingCoins(count: Int) {
+        guard count > 0 else { return }
+        let coinCount = min(count, 8)
+        let source = lastCompletedTaskCenter
+        let destination = earningsCardCenter
+
+        var newCoins: [FlyingCoin] = []
+        for i in 0..<coinCount {
+            let offset = CGFloat(i - coinCount / 2) * 14
+            let start = CGPoint(x: source.x + offset, y: source.y)
+            newCoins.append(FlyingCoin(
+                startPosition: start,
+                endPosition: destination,
+                delay: Double(i) * 0.25
+            ))
+        }
+        flyingCoins = newCoins
+
+        for (index, _) in newCoins.enumerated() {
+            let delay = newCoins[index].delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.15) {
+                withAnimation(.easeInOut(duration: 1.2)) {
+                    if index < flyingCoins.count {
+                        flyingCoins[index].arrived = true
+                    }
+                }
+            }
+        }
+
+        let totalFlyTime = Double(coinCount) * 0.25 + 1.2
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalFlyTime) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.4)) {
+                coinLandBounce = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+                    coinLandBounce = false
+                }
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalFlyTime + 0.8) {
+            flyingCoins.removeAll()
+        }
     }
 
     private var pickupFloatingButton: some View {
@@ -260,7 +436,6 @@ struct ChildDashboardView: View {
                     return
                 }
                 subscriptionManager.recordPickup()
-                notificationManager.sendPickupNotification(childName: authManager.userName)
                 Task {
                     await cloudKitManager.sendRemoteNotification(
                         familyCode: authManager.familyCode,
@@ -349,6 +524,7 @@ struct ChildDashboardView: View {
                     Text("\(collectableCoins)")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(.green)
+                        .contentTransition(.numericText())
                     Text("Ready to Redeem")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.7))
@@ -363,9 +539,12 @@ struct ChildDashboardView: View {
                     Image(systemName: "clock.fill")
                         .font(.title2)
                         .foregroundStyle(.orange)
-                    Text("\(pendingRedemptionCoins)")
+                        .scaleEffect(coinLandBounce ? 1.3 : 1.0)
+                    Text("\(awaitingApprovalCoins)")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(.orange)
+                        .scaleEffect(coinLandBounce ? 1.3 : 1.0)
+                        .contentTransition(.numericText())
                     Text("Awaiting Approval")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.7))
@@ -456,7 +635,11 @@ struct ChildDashboardView: View {
         }
         .refreshable {
             guard !authManager.familyCode.isEmpty else { return }
-            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode)
+            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode) { tasks in
+                for task in tasks {
+                    notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
+                }
+            }
         }
     }
 
@@ -481,7 +664,27 @@ struct ChildDashboardView: View {
         }
         .refreshable {
             guard !authManager.familyCode.isEmpty else { return }
-            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode)
+            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode) { tasks in
+                for task in tasks {
+                    notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
+                }
+            }
+        }
+    }
+
+    private func scheduleStickyNote(from tips: [String]) {
+        let delay = Double.random(in: 15...45)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard stickyNote == nil else { return }
+            let msg = tips.randomElement() ?? ""
+            let clr = stickyNoteColors.randomElement() ?? .yellow
+            withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
+                stickyNote = (message: msg, color: clr)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                withAnimation { stickyNote = nil }
+                scheduleStickyNote(from: tips)
+            }
         }
     }
 
@@ -531,8 +734,8 @@ struct ChildDashboardView: View {
                         }
                     }
                     Text(statusLabel(for: task))
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(statusColor(for: task))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
                 }
             }
             .buttonStyle(.plain)
@@ -556,34 +759,53 @@ struct ChildDashboardView: View {
                     }
 
                     Text(task.targetDate, format: .dateTime.hour().minute())
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white)
 
                     if task.reward > 0 {
                         Text("•")
                             .foregroundStyle(.white.opacity(0.3))
-                        Label(
-                            task.isApproved ? "Earned \(Int(task.reward)) coins" : "\(Int(task.reward)) coins",
-                            systemImage: "star.circle.fill"
-                        )
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(task.isApproved ? .yellow : .yellow.opacity(0.7))
+                        CoinDisplay(count: Int(task.reward), earned: task.isApproved)
                     }
                 }
             }
 
             Spacer()
+
+            if task.createdByChild && task.isOpen {
+                Button {
+                    taskToDelete = task
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(.red.opacity(0.7), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .opacity(task.isApproved ? 0.7 : 1)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.15),
+                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
                     lineWidth: 1
                 )
+        )
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onChange(of: taskToComplete?.id) { _, newId in
+                        if newId == task.id {
+                            let frame = geo.frame(in: .named("childDashboard"))
+                            lastCompletedTaskCenter = CGPoint(x: frame.midX, y: frame.midY)
+                        }
+                    }
+            }
         )
     }
 }
@@ -608,6 +830,10 @@ struct AddChildTaskView: View {
     @State private var occurrences = 10
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedTemplate: TaskTemplate?
+    @State private var useSmartScheduler = false
+    @State private var smartInput = ""
+    @State private var parsedTask: ParsedTask?
+    @State private var showQuotaAlert = false
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -656,6 +882,17 @@ struct AddChildTaskView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
+
+                        Picker("Mode", selection: $useSmartScheduler) {
+                            Text("Form").tag(false)
+                            Text("Smart Scheduler").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .colorScheme(.dark)
+
+                        if useSmartScheduler {
+                            smartSchedulerSection
+                        } else {
 
                         templatePicker
 
@@ -752,6 +989,8 @@ struct AddChildTaskView: View {
 
                         childRecurrenceSection
 
+                        } // end else (form mode)
+
                         Spacer()
                     }
                     .padding(.horizontal, 24)
@@ -766,8 +1005,10 @@ struct AddChildTaskView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        guard subscriptionManager.canCreateTask,
-                              subscriptionManager.canCreateMoreTasks(allTasks: allTasks) else { return }
+                        if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) || !subscriptionManager.canCreateTask {
+                            showQuotaAlert = true
+                            return
+                        }
                         let dates = generateTaskDates()
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
                         let target = assignedTo.isEmpty ? childName : assignedTo
@@ -810,11 +1051,22 @@ struct AddChildTaskView: View {
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!isValid || !subscriptionManager.canCreateMoreTasks(allTasks: allTasks))
+                    .disabled(!isValid)
                 }
             }
         }
         .presentationDetents([.large])
+        .alert("Task Limit Reached", isPresented: $showQuotaAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) {
+                if let limit = subscriptionManager.maxTasksPerMonth {
+                    Text("You've used all \(limit) tasks for this month. Ask your parent to upgrade the plan for more tasks, or wait until next month.")
+                }
+            } else {
+                Text("You're creating tasks too quickly. Please wait a moment and try again.")
+            }
+        }
     }
 
     private var templatePicker: some View {
@@ -935,6 +1187,158 @@ struct AddChildTaskView: View {
                     .foregroundStyle(.cyan.opacity(0.8))
             }
         }
+    }
+
+    private var smartSchedulerSection: some View {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.yellow)
+                    Text("Describe your task in plain English")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                TextField("e.g. Read a book tomorrow 4pm daily", text: $smartInput, axis: .vertical)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .lineLimit(3)
+                    .padding(14)
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .onSubmit { parseSmartInput() }
+
+                Button {
+                    parseSmartInput()
+                } label: {
+                    HStack {
+                        Image(systemName: "wand.and.stars")
+                        Text("Parse")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(smartInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if let parsed = parsedTask {
+                VStack(spacing: 0) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Parsed Result")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.green.opacity(0.1))
+
+                    VStack(spacing: 12) {
+                        smartRow(icon: "pencil.line", label: "Task", value: parsed.name.isEmpty ? "—" : parsed.name)
+                        smartRow(icon: "calendar", label: "Date", value: parsed.hasDate ? parsed.targetDate.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : "Not detected — defaults to now")
+                        smartRow(icon: "person.fill", label: "Assign To", value: parsed.assignedTo.isEmpty ? childName : parsed.assignedTo)
+                        smartRow(icon: "repeat", label: "Recurrence", value: parsed.recurrence.rawValue)
+                    }
+                    .padding(12)
+                }
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.green.opacity(0.2), lineWidth: 1)
+                )
+
+                Button {
+                    applyParsedTask(parsed)
+                } label: {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Create Task")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(parsed.name.isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(parsed.name.isEmpty)
+            }
+        }
+    }
+
+    private func smartRow(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(width: 20)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(width: 70, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            Spacer()
+        }
+    }
+
+    private func parseSmartInput() {
+        let memberNames = parents.map { $0.name }
+        let parser = SmartTaskParser(familyMembers: memberNames)
+        withAnimation { parsedTask = parser.parse(smartInput) }
+    }
+
+    private func applyParsedTask(_ parsed: ParsedTask) {
+        taskName = parsed.name
+        targetDate = parsed.targetDate
+        assignedTo = parsed.assignedTo
+        recurrenceType = parsed.recurrence
+
+        if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) || !subscriptionManager.canCreateTask {
+            showQuotaAlert = true
+            return
+        }
+
+        let dates = generateTaskDates()
+        let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
+        let recurring = recurrenceType != .none
+
+        for date in dates {
+            let task = Item(
+                name: trimmedName,
+                targetDate: date,
+                assignedTo: childName,
+                reward: 0,
+                status: "open",
+                createdByChild: true,
+                isRecurring: recurring
+            )
+            modelContext.insert(task)
+
+            notificationManager.scheduleTaskReminder(
+                taskId: task.id,
+                taskName: task.name,
+                assignedTo: task.assignedTo,
+                dueDate: task.targetDate
+            )
+
+            if !authManager.familyCode.isEmpty {
+                let snapshot = CloudKitManager.TaskSnapshot(task)
+                Task {
+                    await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: authManager.familyCode)
+                }
+            }
+        }
+
+        dismiss()
     }
 
     private func generateTaskDates() -> [Date] {
@@ -1416,6 +1820,40 @@ struct RewardsHistoryView: View {
         if r.isApproved { return calmAccent }
         if r.isRejected { return .red }
         return .orange
+    }
+}
+
+struct EarningsCardCenterKey: PreferenceKey {
+    static var defaultValue: CGPoint = .zero
+    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) {
+        value = nextValue()
+    }
+}
+
+struct FlyingCoin: Identifiable {
+    let id = UUID()
+    var startPosition: CGPoint
+    var endPosition: CGPoint
+    var delay: Double
+    var arrived = false
+}
+
+struct FlyingCoinsOverlay: View {
+    @Binding var coins: [FlyingCoin]
+
+    var body: some View {
+        ZStack {
+            ForEach(coins) { coin in
+                Image(systemName: "star.circle.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.0))
+                    .shadow(color: .yellow.opacity(0.6), radius: 4)
+                    .position(coin.arrived ? coin.endPosition : coin.startPosition)
+                    .scaleEffect(coin.arrived ? 0.5 : 1.2)
+                    .opacity(coin.arrived ? 0.0 : 1.0)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

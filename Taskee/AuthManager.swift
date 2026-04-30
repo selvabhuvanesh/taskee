@@ -42,6 +42,10 @@ final class AuthManager {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
     }
 
+    var isPendingApproval: Bool {
+        didSet { UserDefaults.standard.set(isPendingApproval, forKey: "isPendingApproval") }
+    }
+
     init() {
         self.isLoggedIn = UserDefaults.standard.bool(forKey: "isLoggedIn")
         self.appleUserID = UserDefaults.standard.string(forKey: "appleUserID") ?? ""
@@ -51,6 +55,7 @@ final class AuthManager {
         self.familyCode = UserDefaults.standard.string(forKey: "familyCode") ?? ""
         self.avatar = UserDefaults.standard.string(forKey: "userAvatar") ?? "star.fill"
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        self.isPendingApproval = UserDefaults.standard.bool(forKey: "isPendingApproval")
     }
 
     func handleAppleSignIn(userID: String, fullName: PersonNameComponents?, email: String?) {
@@ -78,5 +83,6 @@ final class AuthManager {
         familyCode = ""
         avatar = "star.fill"
         hasCompletedOnboarding = false
+        isPendingApproval = false
     }
 }

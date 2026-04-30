@@ -13,6 +13,32 @@ final class SoundManager {
         generateCheerWAV()
     }()
 
+    private lazy var tingURL: URL? = {
+        generateTingWAV()
+    }()
+
+    private lazy var pickupURL: URL? = {
+        generatePickupWAV()
+    }()
+
+    func installNotificationSound() {
+        let libDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
+        let soundsDir = libDir.appendingPathComponent("Sounds")
+        try? FileManager.default.createDirectory(at: soundsDir, withIntermediateDirectories: true)
+
+        if let src = tingURL {
+            let dest = soundsDir.appendingPathComponent("ting.wav")
+            if !FileManager.default.fileExists(atPath: dest.path) {
+                try? FileManager.default.copyItem(at: src, to: dest)
+            }
+        }
+        if let src = pickupURL {
+            let dest = soundsDir.appendingPathComponent("pickup.wav")
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.copyItem(at: src, to: dest)
+        }
+    }
+
     func playApplause() {
         guard let url = cheerURL else { return }
         do {
@@ -136,6 +162,167 @@ final class SoundManager {
         wav.append(audioData)
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("cheer.wav")
+        try? wav.write(to: url)
+        return url
+    }
+
+    private func bellTone(_ t: Double, freq: Double) -> Double {
+        let h1 = sin(2.0 * .pi * freq * t)
+        let h2 = 0.5 * sin(2.0 * .pi * freq * 2.0 * t)
+        let h3 = 0.25 * sin(2.0 * .pi * freq * 3.0 * t)
+        let h4 = 0.12 * sin(2.0 * .pi * freq * 4.5 * t)
+        let h5 = 0.06 * sin(2.0 * .pi * freq * 6.0 * t)
+        return (h1 + h2 + h3 + h4 + h5) / 1.93
+    }
+
+    private func bellEnvelope(t: Double, start: Double, duration: Double) -> Double {
+        let elapsed = t - start
+        guard elapsed >= 0, elapsed < duration else { return 0 }
+        let attack = 0.005
+        if elapsed < attack { return elapsed / attack }
+        return exp(-elapsed * 4.0 / duration)
+    }
+
+    private func generateTingWAV() -> URL? {
+        let sampleRate = 44100
+        let duration = 1.8
+        let numSamples = Int(Double(sampleRate) * duration)
+
+        struct Ting {
+            let freq: Double
+            let start: Double
+            let dur: Double
+            let vol: Double
+        }
+
+        // "tinggg — ti — tingggg" pattern
+        let tings: [Ting] = [
+            Ting(freq: 2093.0, start: 0.0,  dur: 0.6, vol: 0.7),   // C7 — long ting
+            Ting(freq: 2637.0, start: 0.0,  dur: 0.5, vol: 0.3),   // E7 shimmer
+            Ting(freq: 2093.0, start: 0.55, dur: 0.2, vol: 0.45),  // short ti
+            Ting(freq: 2637.0, start: 0.85, dur: 0.8, vol: 0.7),   // E7 — long ting
+            Ting(freq: 3136.0, start: 0.85, dur: 0.7, vol: 0.35),  // G7 shimmer
+        ]
+
+        var audioData = Data()
+        audioData.reserveCapacity(numSamples * 2)
+
+        for i in 0..<numSamples {
+            let t = Double(i) / Double(sampleRate)
+            var sample = 0.0
+
+            for ting in tings {
+                let env = bellEnvelope(t: t, start: ting.start, duration: ting.dur)
+                if env > 0.001 {
+                    sample += bellTone(t - ting.start, freq: ting.freq) * env * ting.vol
+                }
+            }
+
+            sample = max(-1.0, min(1.0, sample))
+            let value = Int16(clamping: Int(sample * 26000))
+            var le = value.littleEndian
+            audioData.append(Data(bytes: &le, count: 2))
+        }
+
+        var wav = Data()
+        let dataSize = UInt32(audioData.count)
+        let fileSize = UInt32(36 + audioData.count)
+
+        wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46])
+        appendLE(&wav, fileSize)
+        wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45])
+        wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20])
+        appendLE(&wav, UInt32(16))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt32(sampleRate))
+        appendLE(&wav, UInt32(sampleRate * 2))
+        appendLE(&wav, UInt16(2))
+        appendLE(&wav, UInt16(16))
+        wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61])
+        appendLE(&wav, dataSize)
+        wav.append(audioData)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ting.wav")
+        try? wav.write(to: url)
+        return url
+    }
+
+    private func generatePickupWAV() -> URL? {
+        let sampleRate = 44100
+        let duration = 2.5
+        let numSamples = Int(Double(sampleRate) * duration)
+
+        struct Beep {
+            let freq: Double
+            let start: Double
+            let dur: Double
+            let vol: Double
+        }
+
+        // Urgent two-tone pattern: high-low-high-low-high, getting louder
+        let beeps: [Beep] = [
+            Beep(freq: 1318.5, start: 0.0,  dur: 0.15, vol: 0.5),  // E6
+            Beep(freq: 987.8,  start: 0.18, dur: 0.15, vol: 0.5),  // B5
+            Beep(freq: 1318.5, start: 0.36, dur: 0.15, vol: 0.6),  // E6
+            Beep(freq: 987.8,  start: 0.54, dur: 0.15, vol: 0.6),  // B5
+            Beep(freq: 1318.5, start: 0.72, dur: 0.15, vol: 0.7),  // E6
+            Beep(freq: 987.8,  start: 0.90, dur: 0.15, vol: 0.7),  // B5
+            // Final sustained chord
+            Beep(freq: 1568.0, start: 1.15, dur: 0.5, vol: 0.75),  // G6
+            Beep(freq: 1318.5, start: 1.15, dur: 0.5, vol: 0.5),   // E6
+            Beep(freq: 987.8,  start: 1.15, dur: 0.45, vol: 0.35), // B5
+        ]
+
+        var audioData = Data()
+        audioData.reserveCapacity(numSamples * 2)
+
+        for i in 0..<numSamples {
+            let t = Double(i) / Double(sampleRate)
+            var sample = 0.0
+
+            for beep in beeps {
+                let elapsed = t - beep.start
+                guard elapsed >= 0, elapsed < beep.dur else { continue }
+                let attack = 0.008
+                let env: Double
+                if elapsed < attack {
+                    env = elapsed / attack
+                } else {
+                    env = exp(-elapsed * 3.0 / beep.dur)
+                }
+                let tone = sin(2.0 * .pi * beep.freq * elapsed)
+                    + 0.4 * sin(2.0 * .pi * beep.freq * 2.0 * elapsed)
+                    + 0.15 * sin(2.0 * .pi * beep.freq * 3.0 * elapsed)
+                sample += (tone / 1.55) * env * beep.vol
+            }
+
+            sample = max(-1.0, min(1.0, sample))
+            let value = Int16(clamping: Int(sample * 28000))
+            var le = value.littleEndian
+            audioData.append(Data(bytes: &le, count: 2))
+        }
+
+        var wav = Data()
+        let dataSize = UInt32(audioData.count)
+        let fileSize = UInt32(36 + audioData.count)
+
+        wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46])
+        appendLE(&wav, fileSize)
+        wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45])
+        wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20])
+        appendLE(&wav, UInt32(16))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt32(sampleRate))
+        appendLE(&wav, UInt32(sampleRate * 2))
+        appendLE(&wav, UInt16(2))
+        appendLE(&wav, UInt16(16))
+        wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61])
+        appendLE(&wav, dataSize)
+        wav.append(audioData)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pickup.wav")
         try? wav.write(to: url)
         return url
     }

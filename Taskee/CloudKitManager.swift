@@ -120,6 +120,22 @@ final class CloudKitManager {
         let memberID: String
     }
 
+    func checkMemberAccepted(appleUserID: String) async -> Bool {
+        guard !appleUserID.isEmpty else { return false }
+
+        let predicate = NSPredicate(format: "appleUserID == %@", appleUserID)
+        let query = CKQuery(recordType: "MemberRecord", predicate: predicate)
+
+        do {
+            let (results, _) = try await database.records(matching: query, resultsLimit: 1)
+            guard let (_, result) = results.first,
+                  let record = try? result.get() else { return false }
+            return ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1
+        } catch {
+            return false
+        }
+    }
+
     func lookupExistingMember(appleUserID: String) async -> ExistingMemberInfo? {
         guard !appleUserID.isEmpty else { return nil }
 
@@ -209,12 +225,15 @@ final class CloudKitManager {
 
         let recordID = CKRecord.ID(recordName: id)
         let record = CKRecord(recordType: "MemberRecord", recordID: recordID)
+        let accepted = member.isAccepted
+
         record["familyCode"] = familyCode
         record["name"] = name
         record["memberRole"] = role
         record["avatar"] = avatar
         record["totalEarned"] = NSNumber(value: earned)
         record["appleUserID"] = appleID
+        record["isAccepted"] = NSNumber(value: accepted ? 1 : 0)
 
         return await saveRecord(record)
     }
@@ -266,18 +285,50 @@ final class CloudKitManager {
         }
     }
 
+    func deleteRemoteTasks(_ taskIDs: [UUID]) async {
+        guard !taskIDs.isEmpty else { return }
+        let recordIDs = taskIDs.map { CKRecord.ID(recordName: $0.uuidString) }
+        do {
+            let (_, deleteResults) = try await database.modifyRecords(saving: [], deleting: recordIDs)
+            for (_, result) in deleteResults {
+                if case .failure(let error) = result {
+                    lastSyncError = error.localizedDescription
+                }
+            }
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
     // MARK: - Full Sync
 
-    func syncAll(context: ModelContext, familyCode: String) async {
-        guard !familyCode.isEmpty else { return }
+    private var syncInProgress = false
+
+    struct SyncedTask {
+        let id: UUID
+        let name: String
+        let targetDate: Date
+        let assignedTo: String
+    }
+
+    func syncAll(context: ModelContext, familyCode: String, onNewTasks: (([SyncedTask]) -> Void)? = nil) async {
+        guard !familyCode.isEmpty, !syncInProgress else { return }
+        syncInProgress = true
         isSyncing = true
         lastSyncError = nil
-        defer { isSyncing = false }
+        defer {
+            isSyncing = false
+            syncInProgress = false
+        }
 
-        await syncTasks(context: context, familyCode: familyCode)
+        let newTasks = await syncTasks(context: context, familyCode: familyCode)
         await syncMembers(context: context, familyCode: familyCode)
         await syncRedemptions(context: context, familyCode: familyCode)
         try? context.save()
+
+        if !newTasks.isEmpty {
+            onNewTasks?(newTasks)
+        }
     }
 
     private func fetchAllRecords(type: String, familyCode: String) async -> [CKRecord] {
@@ -301,13 +352,15 @@ final class CloudKitManager {
         return all
     }
 
-    private func syncTasks(context: ModelContext, familyCode: String) async {
+    @discardableResult
+    private func syncTasks(context: ModelContext, familyCode: String) async -> [SyncedTask] {
         let remoteRecords = await fetchAllRecords(type: "TaskRecord", familyCode: familyCode)
 
         let descriptor = FetchDescriptor<Item>()
         let localTasks = (try? context.fetch(descriptor)) ?? []
         let localByID = Dictionary(uniqueKeysWithValues: localTasks.map { ($0.id.uuidString, $0) })
         let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+        var newTasks: [SyncedTask] = []
 
         for record in remoteRecords {
             let idStr = record.recordID.recordName
@@ -321,24 +374,34 @@ final class CloudKitManager {
                 local.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 local.isRecurring = ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
             } else if let uuid = UUID(uuidString: idStr) {
+                let name = record["name"] as? String ?? ""
+                let targetDate = record["targetDate"] as? Date ?? Date()
+                let assignedTo = record["assignedTo"] as? String ?? ""
+                let status = record["status"] as? String ?? "open"
                 let item = Item(
                     id: uuid,
-                    name: record["name"] as? String ?? "",
-                    targetDate: record["targetDate"] as? Date ?? Date(),
-                    assignedTo: record["assignedTo"] as? String ?? "",
+                    name: name,
+                    targetDate: targetDate,
+                    assignedTo: assignedTo,
                     reward: (record["reward"] as? NSNumber)?.doubleValue ?? 0,
-                    status: record["status"] as? String ?? "open",
+                    status: status,
                     createdByChild: ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1,
                     isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
                 )
                 item.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 context.insert(item)
+
+                if status == "open" {
+                    newTasks.append(SyncedTask(id: uuid, name: name, targetDate: targetDate, assignedTo: assignedTo))
+                }
             }
         }
 
         for task in localTasks where !remoteIDs.contains(task.id.uuidString) {
             context.delete(task)
         }
+
+        return newTasks
     }
 
     private func syncMembers(context: ModelContext, familyCode: String) async {
@@ -357,12 +420,14 @@ final class CloudKitManager {
                 local.avatar = record["avatar"] as? String ?? local.avatar
                 local.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? local.totalEarned
                 local.appleUserID = record["appleUserID"] as? String ?? local.appleUserID
+                local.isAccepted = ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1
             } else if let uuid = UUID(uuidString: idStr) {
                 let member = FamilyMember(
                     id: uuid,
                     name: record["name"] as? String ?? "",
                     memberRole: record["memberRole"] as? String ?? "child",
                     avatar: record["avatar"] as? String ?? "star.fill",
+                    isAccepted: ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1,
                     appleUserID: record["appleUserID"] as? String ?? ""
                 )
                 member.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0
@@ -595,7 +660,14 @@ final class CloudKitManager {
         )
         await createAlertSubscription(
             id: "notif-changes-\(familyCode)",
-            familyCode: familyCode
+            familyCode: familyCode,
+            excludeCategory: "PICKUP_REQUEST"
+        )
+        await createAlertSubscription(
+            id: "pickup-notif-\(familyCode)",
+            familyCode: familyCode,
+            onlyCategory: "PICKUP_REQUEST",
+            soundName: "pickup.wav"
         )
     }
 
@@ -624,13 +696,20 @@ final class CloudKitManager {
         }
     }
 
-    private func createAlertSubscription(id: String, familyCode: String) async {
+    private func createAlertSubscription(id: String, familyCode: String, excludeCategory: String? = nil, onlyCategory: String? = nil, soundName: String = "default") async {
         do {
-            _ = try await database.subscription(for: id)
-            return
+            try await database.deleteSubscription(withID: id)
         } catch { }
 
-        let predicate = NSPredicate(format: "familyCode == %@", familyCode)
+        let predicate: NSPredicate
+        if let only = onlyCategory {
+            predicate = NSPredicate(format: "familyCode == %@ AND category == %@", familyCode, only)
+        } else if let exclude = excludeCategory {
+            predicate = NSPredicate(format: "familyCode == %@ AND category != %@", familyCode, exclude)
+        } else {
+            predicate = NSPredicate(format: "familyCode == %@", familyCode)
+        }
+
         let sub = CKQuerySubscription(
             recordType: "NotificationRecord",
             predicate: predicate,
@@ -643,7 +722,7 @@ final class CloudKitManager {
         info.titleLocalizationArgs = ["title"]
         info.alertLocalizationKey = "%1$@"
         info.alertLocalizationArgs = ["body"]
-        info.soundName = "default"
+        info.soundName = soundName
         info.shouldBadge = true
         sub.notificationInfo = info
 

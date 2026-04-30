@@ -30,6 +30,8 @@ struct TaskeeApp: App {
     @State private var cloudKitManager = CloudKitManager()
     @State private var showOnboarding = false
     @State private var isCheckingExistingUser = false
+    @State private var isCheckingAcceptance = false
+    @State private var pendingSyncTask: Task<Void, Never>?
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -56,7 +58,8 @@ struct TaskeeApp: App {
             do {
                 return try ModelContainer(for: schema, configurations: [modelConfiguration])
             } catch {
-                fatalError("Could not create ModelContainer: \(error)")
+                let inMemory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+                return try! ModelContainer(for: schema, configurations: [inMemory])
             }
         }
     }()
@@ -82,6 +85,10 @@ struct TaskeeApp: App {
                     RoleSelectionView()
                 } else if authManager.role == "parent" {
                     ContentView()
+                } else if authManager.isPendingApproval {
+                    PendingApprovalView(isCheckingAcceptance: $isCheckingAcceptance) {
+                        Task { await checkChildAcceptance() }
+                    }
                 } else {
                     ChildDashboardView()
                 }
@@ -92,10 +99,15 @@ struct TaskeeApp: App {
             .environment(cloudKitManager)
             .onAppear {
                 notificationManager.requestPermission()
+                SoundManager.shared.installNotificationSound()
+                UNUserNotificationCenter.current().setBadgeCount(0)
                 Task {
                     await subscriptionManager.refreshTier()
                     await subscriptionManager.loadProducts()
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                UNUserNotificationCenter.current().setBadgeCount(0)
             }
             .task {
                 await subscriptionManager.listenForTransactions()
@@ -106,14 +118,19 @@ struct TaskeeApp: App {
 
                 guard !authManager.familyCode.isEmpty else { return }
                 let context = ModelContext(sharedModelContainer)
-                await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode)
+                await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
                 await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode)
+                await checkChildAcceptance()
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
                 guard !authManager.familyCode.isEmpty else { return }
-                Task {
+                pendingSyncTask?.cancel()
+                pendingSyncTask = Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled else { return }
                     let context = ModelContext(sharedModelContainer)
-                    await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode)
+                    await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+                    await checkChildAcceptance()
                 }
             }
             .sheet(isPresented: $showOnboarding) {
@@ -147,6 +164,22 @@ struct TaskeeApp: App {
         .modelContainer(sharedModelContainer)
     }
 
+    private func checkChildAcceptance() async {
+        guard authManager.isPendingApproval, !authManager.appleUserID.isEmpty else { return }
+
+        isCheckingAcceptance = true
+        let accepted = await cloudKitManager.checkMemberAccepted(appleUserID: authManager.appleUserID)
+        isCheckingAcceptance = false
+
+        if accepted {
+            authManager.isPendingApproval = false
+            if !authManager.familyCode.isEmpty {
+                let context = ModelContext(sharedModelContainer)
+                await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+            }
+        }
+    }
+
     private func restoreUserIfNeeded() async {
         guard authManager.isLoggedIn, authManager.role.isEmpty, !authManager.appleUserID.isEmpty else { return }
 
@@ -161,8 +194,88 @@ struct TaskeeApp: App {
             authManager.role = existing.memberRole
 
             let context = ModelContext(sharedModelContainer)
-            await cloudKitManager.syncAll(context: context, familyCode: existing.familyCode)
+            await cloudKitManager.syncAll(context: context, familyCode: existing.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
             await cloudKitManager.setupSubscriptions(familyCode: existing.familyCode)
+        }
+    }
+
+    private func scheduleRemindersForSyncedTasks(_ tasks: [CloudKitManager.SyncedTask]) {
+        for task in tasks {
+            notificationManager.scheduleTaskReminder(
+                taskId: task.id,
+                taskName: task.name,
+                assignedTo: task.assignedTo,
+                dueDate: task.targetDate
+            )
+        }
+    }
+}
+
+struct PendingApprovalView: View {
+    @Environment(AuthManager.self) private var authManager
+    @Binding var isCheckingAcceptance: Bool
+    var onRefresh: () -> Void
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+
+            VStack(spacing: 24) {
+                Spacer()
+
+                Image(systemName: "hourglass.circle.fill")
+                    .font(.system(size: 72))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse, options: .repeating)
+
+                Text("Waiting for Parent Approval")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+
+                Text("Your request to join the family has been sent. Ask your parent to open Taskee and approve your request.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+
+                Button {
+                    onRefresh()
+                } label: {
+                    HStack(spacing: 8) {
+                        if isCheckingAcceptance {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text("Check Again")
+                    }
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 14)
+                    .background(.orange, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .disabled(isCheckingAcceptance)
+
+                Spacer()
+
+                Button {
+                    authManager.logout()
+                } label: {
+                    Text("Sign Out")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .padding(.bottom, 32)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                onRefresh()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            onRefresh()
         }
     }
 }

@@ -21,7 +21,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge, .providesAppNotificationSettings]) { _, _ in }
     }
 
     private func registerCategories() {
@@ -66,8 +66,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = assignedTo.isEmpty
             ? "\"\(taskName)\" is due in 30 minutes"
             : "\"\(taskName)\" assigned to \(assignedTo) is due in 30 minutes"
-        content.sound = .default
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("ting.wav"))
         content.categoryIdentifier = "TASK_REMINDER"
+        content.interruptionLevel = .timeSensitive
 
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute],
@@ -140,8 +141,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = "Pickup Request!"
         content.body = "\(childName) wants to be picked up in 5 minutes!"
-        content.sound = .default
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("pickup.wav"))
         content.categoryIdentifier = "PICKUP_REQUEST"
+        content.interruptionLevel = .timeSensitive
 
         let request = UNNotificationRequest(
             identifier: "pickup-\(UUID().uuidString)",
@@ -168,6 +170,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             let original = response.notification.request
             let content = original.content.mutableCopy() as! UNMutableNotificationContent
             content.title = "Reminder (Snoozed)"
+            content.interruptionLevel = .timeSensitive
 
             let trigger = UNTimeIntervalNotificationTrigger(
                 timeInterval: Self.snoozeDuration,
@@ -191,6 +194,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler([.banner, .sound, .list])
     }
 }

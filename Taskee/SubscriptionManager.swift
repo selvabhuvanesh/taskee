@@ -47,8 +47,8 @@ final class SubscriptionManager {
 
     var maxTasksPerMonth: Int? {
         switch tier {
-        case .free:   return 100
-        case .family: return 250
+        case .free:   return 50
+        case .family: return 350
         case .pro:    return nil
         }
     }
