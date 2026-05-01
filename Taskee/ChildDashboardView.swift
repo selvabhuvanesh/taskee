@@ -268,7 +268,11 @@ struct ChildDashboardView: View {
                     childName: authManager.userName,
                     parents: {
                         var seen = Set<String>()
-                        return allMembers.filter { $0.isParent }.filter { seen.insert($0.name).inserted }
+                        return allMembers.filter { $0.isParent }.sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }.filter { seen.insert($0.name).inserted }
+                    }(),
+                    siblings: {
+                        var seen = Set<String>()
+                        return allMembers.filter { $0.isChild && $0.name != authManager.userName }.sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }.filter { seen.insert($0.name).inserted }
                     }(),
                     theme: childTheme
                 )
@@ -562,6 +566,7 @@ struct ChildDashboardView: View {
                         body: "\(authManager.userName) wants to be picked up in 5 minutes!",
                         category: "PICKUP_REQUEST",
                         senderAvatar: authManager.avatar,
+                        senderName: authManager.userName,
                         targetAppleUserID: "parents"
                     )
                 }
@@ -993,6 +998,7 @@ struct AddChildTaskView: View {
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     let childName: String
     let parents: [FamilyMember]
+    var siblings: [FamilyMember] = []
     var theme: ChildTheme = ChildTheme.load(for: "child")
 
     @State private var taskName = ""
@@ -1138,21 +1144,25 @@ struct AddChildTaskView: View {
                             )
                         }
 
-                        if !parents.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Assign To")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Assign To")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.5))
 
-                                VStack(spacing: 8) {
-                                    assignChip(name: "Myself", isSelected: assignedTo.isEmpty) {
-                                        assignedTo = ""
+                            VStack(spacing: 8) {
+                                assignChip(name: childName, isSelected: assignedTo.isEmpty || assignedTo == childName) {
+                                    assignedTo = ""
+                                }
+
+                                ForEach(parents) { parent in
+                                    assignChip(name: parent.name, isSelected: assignedTo == parent.name) {
+                                        assignedTo = parent.name
                                     }
+                                }
 
-                                    ForEach(parents) { parent in
-                                        assignChip(name: parent.name, isSelected: assignedTo == parent.name) {
-                                            assignedTo = parent.name
-                                        }
+                                ForEach(siblings) { sibling in
+                                    assignChip(name: sibling.name, isSelected: assignedTo == sibling.name) {
+                                        assignedTo = sibling.name
                                     }
                                 }
                             }
@@ -1209,18 +1219,45 @@ struct AddChildTaskView: View {
                         let familyCode = authManager.familyCode
                         let senderName = childName
                         let taskCount = createdTasks.count
+                        let isAssignedToSelf = target == childName
+                        let localTargetID = parents.first(where: { $0.name == target })?.appleUserID
+                            ?? siblings.first(where: { $0.name == target })?.appleUserID
+                            ?? ""
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
                             }
-                            await cloudKitManager.sendRemoteNotification(
-                                familyCode: familyCode,
-                                title: "New Task Created",
-                                body: "\(senderName) created \"\(trimmedName)\"" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
-                                category: "TASK_CREATED",
-                                senderAvatar: authManager.avatar,
-                                targetAppleUserID: "parents"
-                            )
+                            if isAssignedToSelf {
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "New Task Created",
+                                    body: "\(senderName) created \"\(trimmedName)\"" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                    category: "TASK_CREATED",
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: "parents"
+                                )
+                            } else {
+                                var targetID = localTargetID
+                                if targetID.isEmpty {
+                                    targetID = await cloudKitManager.lookupMemberAppleUserID(name: target, familyCode: familyCode) ?? ""
+                                }
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "New Task Assigned",
+                                    body: "\(senderName) assigned \"\(trimmedName)\" to you" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                    category: "TASK_ASSIGNED",
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: targetID
+                                )
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "New Task Created",
+                                    body: "\(senderName) assigned \"\(trimmedName)\" to \(target)" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                    category: "TASK_CREATED",
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: "parents"
+                                )
+                            }
                         }
                         dismiss()
                     }

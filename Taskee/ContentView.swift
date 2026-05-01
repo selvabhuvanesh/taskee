@@ -59,7 +59,10 @@ struct ContentView: View {
 
     private var children: [FamilyMember] {
         var seen = Set<String>()
-        return allMembers.filter { $0.isChild }.filter { seen.insert($0.name).inserted }
+        return allMembers
+            .filter { $0.isChild }
+            .sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }
+            .filter { seen.insert($0.name).inserted }
     }
     private var pendingChildren: [FamilyMember] {
         allMembers.filter { $0.isChild && !$0.isAccepted }
@@ -433,26 +436,51 @@ struct ContentView: View {
             Spacer()
             HStack(spacing: 14) {
                 if let parent = otherParent {
-                    NavigationLink(destination: DateTasksView(
-                        dateLabel: "\(parent.name)'s Tasks",
-                        tasks: activeTasks.filter { $0.assignedTo == parent.name },
-                        children: children,
-                        otherParent: parent,
-                        theme: parentTheme
-                    )) {
-                        VStack(spacing: 4) {
-                            AvatarView(avatarId: parent.avatar, size: 44)
-                                .overlay(alignment: .bottomTrailing) {
-                                    Image(systemName: "shield.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.cyan)
-                                        .offset(x: 2, y: 2)
-                                }
+                    VStack(spacing: 4) {
+                        NavigationLink(destination: DateTasksView(
+                            dateLabel: "\(parent.name)'s Tasks",
+                            tasks: activeTasks.filter { $0.assignedTo == parent.name },
+                            children: children,
+                            otherParent: parent,
+                            theme: parentTheme
+                        )) {
+                            VStack(spacing: 4) {
+                                AvatarView(avatarId: parent.avatar, size: 44)
+                                    .overlay(alignment: .bottomTrailing) {
+                                        Image(systemName: "shield.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.cyan)
+                                            .offset(x: 2, y: 2)
+                                    }
 
-                            Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .lineLimit(1)
+                                Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        let parentTodayCount = activeTasks.filter {
+                            $0.assignedTo == parent.name && $0.isOpen
+                            && Calendar.current.isDateInToday($0.targetDate)
+                        }.count
+
+                        if parentTodayCount > 0 {
+                            Button {
+                                sendReminder(to: parent)
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "bell.fill")
+                                        .font(.system(size: 8))
+                                    Text("Remind")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .fixedSize()
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.orange, in: Capsule())
+                            }
                         }
                     }
                     .frame(minWidth: 60)
@@ -527,19 +555,27 @@ struct ContentView: View {
             ? "Don't forget: \"\(taskList)\" is due today!"
             : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
 
-        let targetID = child.appleUserID
+        let localTargetID = child.appleUserID
+        let memberName = child.name
+        let familyCode = authManager.familyCode
+        let senderName = authManager.userName
+        let senderAvatar = authManager.avatar
         Task {
+            var targetID = localTargetID
+            if targetID.isEmpty {
+                targetID = await cloudKitManager.lookupMemberAppleUserID(name: memberName, familyCode: familyCode) ?? ""
+            }
             await cloudKitManager.sendRemoteNotification(
-                familyCode: authManager.familyCode,
-                title: "Reminder from \(authManager.userName)",
+                familyCode: familyCode,
+                title: "Reminder from \(senderName)",
                 body: body,
                 category: "TASK_REMINDER",
-                senderAvatar: authManager.avatar,
-                senderName: authManager.userName,
+                senderAvatar: senderAvatar,
+                senderName: senderName,
                 targetAppleUserID: targetID
             )
         }
-        reminderSentChildName = child.name
+        reminderSentChildName = memberName
         showReminderSent = true
     }
 
@@ -716,6 +752,7 @@ struct DateTasksView: View {
                     TaskRow(
                         task: task,
                         showAssignee: true,
+                        currentUserName: authManager.userName,
                         theme: theme,
                         onApprove: {
                             if !task.canComplete {
@@ -857,6 +894,14 @@ struct DateTasksView: View {
         Button("Cancel", role: .cancel) {
             taskToApprove = nil
         }
+        if taskToApprove?.isInReview == true {
+            Button("Reject", role: .destructive) {
+                if let task = taskToApprove {
+                    handleRejection(task: task)
+                }
+                taskToApprove = nil
+            }
+        }
         Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
             if let task = taskToApprove {
                 handleApproval(task: task)
@@ -869,7 +914,7 @@ struct DateTasksView: View {
     private var approveAlertMessageView: some View {
         if let task = taskToApprove {
             if task.isInReview {
-                Text("Approve \"\(task.name)\"? This cannot be undone.")
+                Text("\"\(task.name)\" is waiting for your approval.")
             } else {
                 Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
             }
@@ -978,6 +1023,34 @@ struct DateTasksView: View {
         celebrationReward = task.reward
         showCelebration = true
     }
+
+    private func handleRejection(task: Item) {
+        task.status = "open"
+        let snapshot = CloudKitManager.TaskSnapshot(task)
+        notificationManager.sendTaskRejectedNotification(
+            taskName: task.name,
+            childName: task.assignedTo
+        )
+        let familyCode = authManager.familyCode
+        let taskName = task.name
+        let assigneeName = task.assignedTo
+        let targetID = children.first(where: { $0.name == assigneeName })?.appleUserID ?? ""
+        Task {
+            await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+            var resolvedTargetID = targetID
+            if resolvedTargetID.isEmpty {
+                resolvedTargetID = await cloudKitManager.lookupMemberAppleUserID(name: assigneeName, familyCode: familyCode) ?? ""
+            }
+            await cloudKitManager.sendRemoteNotification(
+                familyCode: familyCode,
+                title: "Task Needs Redo",
+                body: "\"\(taskName)\" was sent back. Please try again.",
+                category: "TASK_REJECTED",
+                senderAvatar: authManager.avatar,
+                targetAppleUserID: resolvedTargetID
+            )
+        }
+    }
 }
 
 // MARK: - Child Tasks View
@@ -1049,6 +1122,7 @@ struct ChildTasksView: View {
                         ForEach(group.tasks) { task in
                             TaskRow(
                                 task: task,
+                                currentUserName: authManager.userName,
                                 theme: theme,
                                 onApprove: {
                                     if !task.canComplete {
@@ -1224,6 +1298,14 @@ struct ChildTasksView: View {
     @ViewBuilder
     private var childApproveAlertButtons: some View {
         Button("Cancel", role: .cancel) { taskToApprove = nil }
+        if taskToApprove?.isInReview == true {
+            Button("Reject", role: .destructive) {
+                if let task = taskToApprove {
+                    handleChildRejection(task: task)
+                }
+                taskToApprove = nil
+            }
+        }
         Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
             if let task = taskToApprove {
                 handleChildApproval(task: task)
@@ -1236,7 +1318,7 @@ struct ChildTasksView: View {
     private var childApproveAlertMessageView: some View {
         if let task = taskToApprove {
             if task.isInReview {
-                Text("Approve \"\(task.name)\"? This cannot be undone.")
+                Text("\"\(task.name)\" is waiting for your approval.")
             } else {
                 Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
             }
@@ -1391,6 +1473,33 @@ struct ChildTasksView: View {
         showCelebration = true
     }
 
+    private func handleChildRejection(task: Item) {
+        task.status = "open"
+        let snapshot = CloudKitManager.TaskSnapshot(task)
+        notificationManager.sendTaskRejectedNotification(
+            taskName: task.name,
+            childName: child.name
+        )
+        let familyCode = authManager.familyCode
+        let taskName = task.name
+        let targetID = child.appleUserID
+        Task {
+            await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+            var resolvedTargetID = targetID
+            if resolvedTargetID.isEmpty {
+                resolvedTargetID = await cloudKitManager.lookupMemberAppleUserID(name: child.name, familyCode: familyCode) ?? ""
+            }
+            await cloudKitManager.sendRemoteNotification(
+                familyCode: familyCode,
+                title: "Task Needs Redo",
+                body: "\"\(taskName)\" was sent back. Please try again.",
+                category: "TASK_REJECTED",
+                senderAvatar: authManager.avatar,
+                targetAppleUserID: resolvedTargetID
+            )
+        }
+    }
+
     private func deductCoinsIfNeeded(_ task: Item) {
         guard task.isApproved, task.reward > 0, !task.assignedTo.isEmpty else { return }
         if let member = allChildren.first(where: { $0.name == task.assignedTo }) {
@@ -1429,6 +1538,7 @@ struct ChildTasksView: View {
 struct TaskRow: View {
     @Bindable var task: Item
     var showAssignee: Bool = false
+    var currentUserName: String = ""
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onApprove: (() -> Void)?
     var onEdit: (() -> Void)?
@@ -1450,6 +1560,8 @@ struct TaskRow: View {
         HStack(spacing: 14) {
             Button {
                 guard task.isOpen || task.isInReview else { return }
+                let isMyTask = currentUserName.isEmpty || task.assignedTo == currentUserName
+                guard isMyTask || task.isInReview else { return }
                 onApprove?()
             } label: {
                 VStack(spacing: 3) {
@@ -1825,27 +1937,25 @@ struct AddTaskView: View {
                             }
                         }
 
-                        if !children.isEmpty || otherParent != nil {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Assign To")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Assign To")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.5))
 
-                                VStack(spacing: 8) {
-                                    childChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
-                                        selectedChild = authManager.userName
+                            VStack(spacing: 8) {
+                                childChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
+                                    selectedChild = authManager.userName
+                                }
+
+                                if let parent = otherParent {
+                                    childChip(name: parent.name, isSelected: selectedChild == parent.name) {
+                                        selectedChild = parent.name
                                     }
+                                }
 
-                                    if let parent = otherParent {
-                                        childChip(name: parent.name, isSelected: selectedChild == parent.name) {
-                                            selectedChild = parent.name
-                                        }
-                                    }
-
-                                    ForEach(children) { child in
-                                        childChip(name: child.name, isSelected: selectedChild == child.name) {
-                                            selectedChild = child.name
-                                        }
+                                ForEach(children) { child in
+                                    childChip(name: child.name, isSelected: selectedChild == child.name) {
+                                        selectedChild = child.name
                                     }
                                 }
                             }
@@ -1903,19 +2013,26 @@ struct AddTaskView: View {
                             )
                         }
                         let familyCode = authManager.familyCode
-                        let childName = selectedChild
+                        let assigneeName = selectedChild
                         let parentName = authManager.userName
                         let taskCount = createdTasks.count
-                        let targetID = children.first(where: { $0.name == selectedChild })?.appleUserID ?? ""
+                        let localTargetID = children.first(where: { $0.name == selectedChild })?.appleUserID
+                            ?? (otherParent?.name == selectedChild ? otherParent?.appleUserID : nil)
+                            ?? ""
+                        let isAssignedToSelf = selectedChild == authManager.userName
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
                             }
-                            if !childName.isEmpty {
+                            if !assigneeName.isEmpty && !isAssignedToSelf {
+                                var targetID = localTargetID
+                                if targetID.isEmpty {
+                                    targetID = await cloudKitManager.lookupMemberAppleUserID(name: assigneeName, familyCode: familyCode) ?? ""
+                                }
                                 await cloudKitManager.sendRemoteNotification(
                                     familyCode: familyCode,
                                     title: "New Task Assigned",
-                                    body: "\(parentName) assigned \"\(trimmedName)\" to \(childName)" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
+                                    body: "\(parentName) assigned \"\(trimmedName)\" to you" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
                                     category: "TASK_ASSIGNED",
                                     senderAvatar: authManager.avatar,
                                     targetAppleUserID: targetID
@@ -2443,27 +2560,25 @@ struct EditTaskView: View {
                             }
                         }
 
-                        if !children.isEmpty || otherParent != nil {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Assign To")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Assign To")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.5))
 
-                                VStack(spacing: 8) {
-                                    editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
-                                        selectedChild = authManager.userName
+                            VStack(spacing: 8) {
+                                editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
+                                    selectedChild = authManager.userName
+                                }
+
+                                if let parent = otherParent {
+                                    editChildChip(name: parent.name, isSelected: selectedChild == parent.name) {
+                                        selectedChild = parent.name
                                     }
+                                }
 
-                                    if let parent = otherParent {
-                                        editChildChip(name: parent.name, isSelected: selectedChild == parent.name) {
-                                            selectedChild = parent.name
-                                        }
-                                    }
-
-                                    ForEach(children) { child in
-                                        editChildChip(name: child.name, isSelected: selectedChild == child.name) {
-                                            selectedChild = child.name
-                                        }
+                                ForEach(children) { child in
+                                    editChildChip(name: child.name, isSelected: selectedChild == child.name) {
+                                        selectedChild = child.name
                                     }
                                 }
                             }
@@ -2483,6 +2598,7 @@ struct EditTaskView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        let previousAssignee = task.assignedTo
                         task.name = taskName.trimmingCharacters(in: .whitespaces)
                         task.targetDate = targetDate
                         task.assignedTo = selectedChild
@@ -2496,7 +2612,29 @@ struct EditTaskView: View {
                             dueDate: targetDate
                         )
                         let familyCode = authManager.familyCode
-                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                        let newAssignee = selectedChild
+                        let parentName = authManager.userName
+                        let trimmedName = task.name
+                        let localTargetID = children.first(where: { $0.name == newAssignee })?.appleUserID
+                            ?? (otherParent?.name == newAssignee ? otherParent?.appleUserID : nil)
+                            ?? ""
+                        Task {
+                            await cloudKitManager.pushTask(task, familyCode: familyCode)
+                            if newAssignee != previousAssignee && !newAssignee.isEmpty && newAssignee != parentName {
+                                var targetID = localTargetID
+                                if targetID.isEmpty {
+                                    targetID = await cloudKitManager.lookupMemberAppleUserID(name: newAssignee, familyCode: familyCode) ?? ""
+                                }
+                                await cloudKitManager.sendRemoteNotification(
+                                    familyCode: familyCode,
+                                    title: "New Task Assigned",
+                                    body: "\(parentName) assigned \"\(trimmedName)\" to you",
+                                    category: "TASK_ASSIGNED",
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: targetID
+                                )
+                            }
+                        }
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -2547,11 +2685,17 @@ struct ChildrenManagementView: View {
 
     private var parents: [FamilyMember] {
         var seen = Set<String>()
-        return allMembers.filter { $0.isParent }.filter { seen.insert($0.name).inserted }
+        return allMembers
+            .filter { $0.isParent }
+            .sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }
+            .filter { seen.insert($0.name).inserted }
     }
     private var children: [FamilyMember] {
         var seen = Set<String>()
-        return allMembers.filter { $0.isChild && $0.isAccepted }.filter { seen.insert($0.name).inserted }
+        return allMembers
+            .filter { $0.isChild && $0.isAccepted }
+            .sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }
+            .filter { seen.insert($0.name).inserted }
     }
     private var pendingMembers: [FamilyMember] {
         allMembers.filter { $0.isChild && !$0.isAccepted }
@@ -3061,7 +3205,10 @@ struct ParentOnboardingView: View {
 
     private var children: [FamilyMember] {
         var seen = Set<String>()
-        return allMembers.filter { $0.isChild }.filter { seen.insert($0.name).inserted }
+        return allMembers
+            .filter { $0.isChild }
+            .sorted { !$0.appleUserID.isEmpty && $1.appleUserID.isEmpty }
+            .filter { seen.insert($0.name).inserted }
     }
 
     @State private var newChildName = ""

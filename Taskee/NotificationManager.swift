@@ -137,6 +137,24 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
+    func sendTaskAssignedNotification(taskName: String, assignerName: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "New Task Assigned"
+        content.body = assignerName.isEmpty
+            ? taskName
+            : "\(assignerName) assigned \"\(taskName)\" to you"
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
+        content.categoryIdentifier = "TASK_ASSIGNED"
+        content.interruptionLevel = .timeSensitive
+
+        let request = UNNotificationRequest(
+            identifier: "assigned-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
     func sendPickupNotification(childName: String) {
         let content = UNMutableNotificationContent()
         content.title = "Pickup Request!"

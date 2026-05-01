@@ -115,6 +115,8 @@ struct TaskeeApp: App {
                 UNUserNotificationCenter.current().setBadgeCount(0)
                 guard !authManager.familyCode.isEmpty else { return }
                 Task {
+                    let context = ModelContext(sharedModelContainer)
+                    await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
                     if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
                         subscriptionManager.setFamilyTier(familyTier)
                     }
@@ -235,6 +237,7 @@ struct TaskeeApp: App {
     }
 
     private func scheduleRemindersForSyncedTasks(_ tasks: [CloudKitManager.SyncedTask]) {
+        let myName = authManager.userName
         for task in tasks {
             notificationManager.scheduleTaskReminder(
                 taskId: task.id,
@@ -242,6 +245,12 @@ struct TaskeeApp: App {
                 assignedTo: task.assignedTo,
                 dueDate: task.targetDate
             )
+            if task.assignedTo == myName {
+                notificationManager.sendTaskAssignedNotification(
+                    taskName: task.name,
+                    assignerName: task.createdBy
+                )
+            }
         }
     }
 }

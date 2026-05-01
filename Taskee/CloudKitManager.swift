@@ -399,6 +399,7 @@ final class CloudKitManager {
         let name: String
         let targetDate: Date
         let assignedTo: String
+        let createdBy: String
     }
 
     func syncAll(context: ModelContext, familyCode: String, onNewTasks: (([SyncedTask]) -> Void)? = nil) async {
@@ -492,7 +493,8 @@ final class CloudKitManager {
                 context.insert(item)
 
                 if status == "open" {
-                    newTasks.append(SyncedTask(id: uuid, name: name, targetDate: targetDate, assignedTo: assignedTo))
+                    let createdBy = record["createdBy"] as? String ?? ""
+                    newTasks.append(SyncedTask(id: uuid, name: name, targetDate: targetDate, assignedTo: assignedTo, createdBy: createdBy))
                 }
             }
         }
@@ -835,6 +837,48 @@ final class CloudKitManager {
         }
     }
 
+    func lookupMemberAppleUserID(name: String, familyCode: String) async -> String? {
+        guard !familyCode.isEmpty, !name.isEmpty else { return nil }
+
+        let predicate = NSPredicate(format: "familyCode == %@ AND name == %@", familyCode, name)
+        let query = CKQuery(recordType: "MemberRecord", predicate: predicate)
+
+        do {
+            let (results, _) = try await database.records(matching: query, resultsLimit: 5)
+            for (_, result) in results {
+                if let record = try? result.get(),
+                   let appleID = record["appleUserID"] as? String,
+                   !appleID.isEmpty {
+                    return appleID
+                }
+            }
+        } catch { }
+        return nil
+    }
+
+    func fetchRecentAssignedNotification(familyCode: String, appleUserID: String) async -> (title: String, body: String)? {
+        guard !familyCode.isEmpty, !appleUserID.isEmpty else { return nil }
+
+        let cutoff = Date().addingTimeInterval(-30)
+        let predicate = NSPredicate(
+            format: "familyCode == %@ AND targetAppleUserID == %@ AND category == %@ AND createdAt > %@",
+            familyCode, appleUserID, "TASK_ASSIGNED", cutoff as NSDate
+        )
+        let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+        do {
+            let (results, _) = try await database.records(matching: query, resultsLimit: 1)
+            guard let (_, result) = results.first,
+                  let record = try? result.get() else { return nil }
+            let title = record["title"] as? String ?? "New Task Assigned"
+            let body = record["body"] as? String ?? ""
+            return (title, body)
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Subscriptions
 
     func setupSubscriptions(familyCode: String, appleUserID: String = "", role: String = "") async {
@@ -866,13 +910,20 @@ final class CloudKitManager {
                 id: "targeted-notif-\(appleUserID)",
                 familyCode: familyCode,
                 targetAppleUserID: appleUserID,
-                excludeCategories: ["TASK_REMINDER"]
+                excludeCategories: ["TASK_REMINDER", "TASK_ASSIGNED"]
             )
             await createTargetedAlertSubscription(
                 id: "targeted-reminder-\(appleUserID)",
                 familyCode: familyCode,
                 targetAppleUserID: appleUserID,
                 onlyCategory: "TASK_REMINDER",
+                soundName: "reminder.wav"
+            )
+            await createTargetedAlertSubscription(
+                id: "targeted-assigned-\(appleUserID)",
+                familyCode: familyCode,
+                targetAppleUserID: appleUserID,
+                onlyCategory: "TASK_ASSIGNED",
                 soundName: "reminder.wav"
             )
         }
