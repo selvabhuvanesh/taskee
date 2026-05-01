@@ -159,6 +159,15 @@ final class SubscriptionManager {
         await refreshTier()
     }
 
+    private(set) var familyTier: Tier = .free
+
+    func setFamilyTier(_ tierString: String) {
+        familyTier = Tier(rawValue: tierString) ?? .free
+        tier = max(localTier, familyTier)
+    }
+
+    private var localTier: Tier = .free
+
     func refreshTier() async {
         var resolved: Tier = .free
 
@@ -172,13 +181,17 @@ final class SubscriptionManager {
             }
         }
 
-        tier = resolved
+        localTier = resolved
+        tier = max(localTier, familyTier)
     }
+
+    var onTierChanged: ((Tier) -> Void)?
 
     func listenForTransactions() async {
         for await result in Transaction.updates {
             if let _ = try? checkVerified(result) {
                 await refreshTier()
+                onTierChanged?(tier)
             }
         }
     }

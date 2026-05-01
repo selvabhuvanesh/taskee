@@ -32,14 +32,22 @@ struct ChildDashboardView: View {
     @State private var showNotificationCenter = false
     @State private var showRedeemSheet = false
     @State private var showRewardsHistory = false
+    @State private var showMyGifts = false
     @State private var showEditProfile = false
     @State private var showShareSheet = false
+    @State private var showThemePicker = false
+    @State private var childTheme = ChildTheme.load(for: "child")
     @State private var stickyNote: (message: String, color: Color)?
+    @State private var unreadNotifCount = 0
     @State private var taskToDelete: Item?
+    @State private var giftTaskToReveal: Item?
+    @Query private var allGifts: [SurpriseGift]
     @State private var flyingCoins: [FlyingCoin] = []
     @State private var earningsCardCenter: CGPoint = .zero
     @State private var lastCompletedTaskCenter: CGPoint = .zero
     @State private var coinLandBounce = false
+    @State private var showRecurringExtension = false
+    @State private var recurringGroups: [RecurringTaskGroup] = []
     @Query private var allRedemptions: [RewardRedemption]
 
     private var myRedemptions: [RewardRedemption] {
@@ -74,6 +82,10 @@ struct ChildDashboardView: View {
         max(0, totalEarnedCoins - redeemedCoins)
     }
 
+    private var myUnredeemedGifts: Int {
+        allGifts.filter { $0.childName == authManager.userName && !$0.isRedeemed }.count
+    }
+
     private var todayOpenCount: Int {
         allTasks.filter {
             $0.assignedTo == authManager.userName && $0.isOpen && !$0.isArchived
@@ -83,7 +95,8 @@ struct ChildDashboardView: View {
 
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
-        return showAll ? assigned : assigned.filter { !$0.isApproved }
+        if showAll { return assigned }
+        return assigned.filter { !$0.isApproved || ($0.hasGift && !$0.giftRevealed) }
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -100,7 +113,12 @@ struct ChildDashboardView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(
+                    colors: childTheme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     UserAvatarHeader(name: authManager.userName, avatar: authManager.avatar)
@@ -170,8 +188,9 @@ struct ChildDashboardView: View {
                             Image(systemName: "bell.fill")
                                 .font(.subheadline)
                                 .overlay(alignment: .topTrailing) {
-                                    if todayOpenCount > 0 {
-                                        Text("\(todayOpenCount)")
+                                    let badgeCount = unreadNotifCount + todayOpenCount
+                                    if badgeCount > 0 {
+                                        Text("\(badgeCount)")
                                             .font(.system(size: 9, weight: .bold))
                                             .foregroundStyle(.white)
                                             .frame(minWidth: 14, minHeight: 14)
@@ -190,12 +209,17 @@ struct ChildDashboardView: View {
                             Button {
                                 showEditProfile = true
                             } label: {
-                                Label("Edit Profile", systemImage: "pencil.circle")
+                                Label("Edit Profile", systemImage: "person.crop.circle.fill")
+                            }
+                            Button {
+                                showThemePicker = true
+                            } label: {
+                                Label("Customize Theme", systemImage: "paintpalette.fill")
                             }
                             Button {
                                 showShareSheet = true
                             } label: {
-                                Label("Invite a Friend", systemImage: "person.badge.plus")
+                                Label("Refer Your Friends", systemImage: "person.badge.plus")
                             }
                             Divider()
                             Button(role: .destructive) {
@@ -210,19 +234,34 @@ struct ChildDashboardView: View {
                 }
             }
             .sheet(isPresented: $showEditProfile) {
-                EditProfileView()
+                EditProfileView(theme: childTheme)
+            }
+            .sheet(isPresented: $showThemePicker) {
+                ChildThemePickerView(theme: $childTheme)
             }
             .sheet(isPresented: $showShareSheet) {
-                ShareSheet(items: [childShareMessage, appStoreURL])
+                ShareSheet(items: [ShareTextWithLink(text: childShareMessage, url: appStoreURL)])
             }
             .sheet(isPresented: $showNotificationCenter) {
-                NotificationCenterView()
+                NotificationCenterView(theme: childTheme)
+            }
+            .onChange(of: showNotificationCenter) { _, showing in
+                if !showing {
+                    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastNotifReadTime")
+                    unreadNotifCount = 0
+                }
+            }
+            .task {
+                await refreshUnreadCount()
             }
             .sheet(isPresented: $showRedeemSheet) {
-                RedeemRewardsView(availableCoins: collectableCoins, childName: authManager.userName)
+                RedeemRewardsView(availableCoins: collectableCoins, childName: authManager.userName, theme: childTheme)
             }
             .sheet(isPresented: $showRewardsHistory) {
-                RewardsHistoryView(redemptions: myRedemptions)
+                RewardsHistoryView(redemptions: myRedemptions, theme: childTheme)
+            }
+            .sheet(isPresented: $showMyGifts) {
+                MyGiftsView(childName: authManager.userName, theme: childTheme)
             }
             .sheet(isPresented: $showAddTask) {
                 AddChildTaskView(
@@ -230,8 +269,24 @@ struct ChildDashboardView: View {
                     parents: {
                         var seen = Set<String>()
                         return allMembers.filter { $0.isParent }.filter { seen.insert($0.name).inserted }
-                    }()
+                    }(),
+                    theme: childTheme
                 )
+            }
+            .fullScreenCover(item: $giftTaskToReveal) { task in
+                GiftRevealView(giftText: task.giftText) {
+                    task.giftRevealed = true
+                    let gift = SurpriseGift(
+                        childName: authManager.userName,
+                        giftDescription: task.giftText,
+                        taskName: task.name
+                    )
+                    modelContext.insert(gift)
+                    let snapshot = CloudKitManager.TaskSnapshot(task)
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
+                    giftTaskToReveal = nil
+                }
             }
             .alert("Mark as Complete?", isPresented: Binding(
                 get: { taskToComplete != nil },
@@ -312,16 +367,78 @@ struct ChildDashboardView: View {
             }
             .task {
                 archiveOldTasks()
+                checkRecurringExtension()
+            }
+            .sheet(isPresented: $showRecurringExtension) {
+                RecurringExtensionSheet(
+                    groups: recurringGroups,
+                    theme: childTheme,
+                    taskLimit: subscriptionManager.maxTasksPerMonth.map { max(0, $0 - subscriptionManager.tasksCreatedThisMonth(allTasks: allTasks)) },
+                    onConfirm: { extendChildRecurringTasks() },
+                    onDismiss: { RecurringTaskExtender.markDismissed() }
+                )
             }
         }
     }
 
+    private func checkRecurringExtension() {
+        guard RecurringTaskExtender.needsExtension() else { return }
+        let myRecurring = allTasks.filter { $0.assignedTo == authManager.userName && $0.createdByChild }
+        let groups = RecurringTaskExtender.findRecurringGroups(from: myRecurring)
+        guard !groups.isEmpty else { return }
+        recurringGroups = groups
+        showRecurringExtension = true
+    }
+
+    private func extendChildRecurringTasks() {
+        let remaining = subscriptionManager.maxTasksPerMonth.map {
+            max(0, $0 - subscriptionManager.tasksCreatedThisMonth(allTasks: allTasks))
+        }
+        var totalCreated = 0
+
+        for group in recurringGroups {
+            let perGroupLimit: Int? = remaining.map { max(0, $0 - totalCreated) }
+            if let limit = perGroupLimit, limit <= 0 { break }
+
+            let dates = RecurringTaskExtender.generateExtensionDates(for: group, taskLimit: perGroupLimit)
+            for date in dates {
+                let task = Item(
+                    name: group.name,
+                    targetDate: date,
+                    assignedTo: group.assignedTo,
+                    reward: group.reward,
+                    createdByChild: true,
+                    isRecurring: true,
+                    createdBy: authManager.userName,
+                    createdByID: authManager.appleUserID
+                )
+                modelContext.insert(task)
+                notificationManager.scheduleTaskReminder(
+                    taskId: task.id,
+                    taskName: group.name,
+                    assignedTo: group.assignedTo,
+                    dueDate: date
+                )
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                totalCreated += 1
+            }
+        }
+        RecurringTaskExtender.markExtended()
+    }
+
+    private func refreshUnreadCount() async {
+        let lastRead = UserDefaults.standard.double(forKey: "lastNotifReadTime")
+        let lastReadDate = lastRead > 0 ? Date(timeIntervalSince1970: lastRead) : Date.distantPast
+        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
+        let myName = authManager.userName
+        unreadNotifCount = result.notifications.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
+    }
+
     private func archiveOldTasks() {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let toArchive = allTasks.filter { $0.isApproved && !$0.isArchived && $0.targetDate < cutoff }
-        guard !toArchive.isEmpty else { return }
-        for task in toArchive {
-            task.isArchived = true
+        guard !authManager.familyCode.isEmpty else { return }
+        Task {
+            await cloudKitManager.archiveOldTasks(context: modelContext, familyCode: authManager.familyCode)
         }
     }
 
@@ -367,7 +484,9 @@ struct ChildDashboardView: View {
                     title: "Task Submitted for Review",
                     body: "\(childName) completed \"\(taskName)\"",
                     category: "TASK_REVIEW",
-                    senderAvatar: authManager.avatar
+                    senderAvatar: authManager.avatar,
+                    senderName: authManager.userName,
+                    targetAppleUserID: "parents"
                 )
             }
             celebrationTitle = "Submitted for Review!"
@@ -442,7 +561,8 @@ struct ChildDashboardView: View {
                         title: "Pickup Request!",
                         body: "\(authManager.userName) wants to be picked up in 5 minutes!",
                         category: "PICKUP_REQUEST",
-                        senderAvatar: authManager.avatar
+                        senderAvatar: authManager.avatar,
+                        targetAppleUserID: "parents"
                     )
                 }
                 showPickupSent = true
@@ -561,13 +681,6 @@ struct ChildDashboardView: View {
                             .font(.caption)
                         Text("Collect Rewards")
                             .font(.caption.weight(.semibold))
-                        if collectableCoins > 0 {
-                            Text("\(collectableCoins)")
-                                .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.white.opacity(0.2), in: Capsule())
-                        }
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -576,6 +689,29 @@ struct ChildDashboardView: View {
                     .background(collectableCoins > 0 ? .orange : .white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                 }
                 .disabled(collectableCoins <= 0)
+
+                Button {
+                    showMyGifts = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gift.fill")
+                            .font(.caption)
+                            .foregroundStyle(.pink)
+                        Text("Gifts")
+                            .font(.caption.weight(.semibold))
+                        if myUnredeemedGifts > 0 {
+                            Text("\(myUnredeemedGifts)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(minWidth: 16, minHeight: 16)
+                                .background(.pink, in: Circle())
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                }
 
                 Button {
                     showRewardsHistory = true
@@ -623,10 +759,10 @@ struct ChildDashboardView: View {
                     .font(.system(size: 56))
                     .foregroundStyle(.white.opacity(0.3))
                 Text(showAll ? "No tasks yet" : "All done!")
-                    .font(.title3)
+                    .font(childTheme.font(.title3))
                     .foregroundStyle(.white.opacity(0.7))
                 Text(showAll ? "Your parent hasn't assigned any tasks yet." : "You've completed all your active tasks.")
-                    .font(.subheadline)
+                    .font(childTheme.font(.subheadline))
                     .foregroundStyle(.white.opacity(0.4))
                     .multilineTextAlignment(.center)
             }
@@ -649,7 +785,7 @@ struct ChildDashboardView: View {
                 ForEach(groupedTasks, id: \.key) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(group.key)
-                            .font(.subheadline.weight(.semibold))
+                            .font(childTheme.font(.subheadline).weight(.semibold))
                             .foregroundStyle(.white.opacity(0.6))
                             .padding(.leading, 4)
 
@@ -669,6 +805,7 @@ struct ChildDashboardView: View {
                     notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
                 }
             }
+            await refreshUnreadCount()
         }
     }
 
@@ -743,7 +880,8 @@ struct ChildDashboardView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
-                    .font(.body)
+                    .font(childTheme.font(.body))
+                    .lineLimit(1)
                     .strikethrough(task.isApproved)
                     .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
 
@@ -767,10 +905,43 @@ struct ChildDashboardView: View {
                             .foregroundStyle(.white.opacity(0.3))
                         CoinDisplay(count: Int(task.reward), earned: task.isApproved)
                     }
+
+                    if task.hasGift {
+                        Image(systemName: task.giftRevealed ? "gift.circle.fill" : "gift.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(task.isApproved && !task.giftRevealed ? Color(red: 1.0, green: 0.2, blue: 0.5) : Color(red: 1.0, green: 0.2, blue: 0.5).opacity(0.7))
+                            .overlay(
+                                Image(systemName: task.giftRevealed ? "gift.circle" : "gift")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            )
+                            .symbolEffect(.pulse, options: .repeating, isActive: task.isApproved && !task.giftRevealed)
+                    }
                 }
             }
 
             Spacer()
+
+            if task.hasGift && task.isApproved && !task.giftRevealed {
+                Button {
+                    giftTaskToReveal = task
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("Open")
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        LinearGradient(colors: [.pink, .purple], startPoint: .leading, endPoint: .trailing),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+            }
 
             if task.createdByChild && task.isOpen {
                 Button {
@@ -822,9 +993,10 @@ struct AddChildTaskView: View {
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     let childName: String
     let parents: [FamilyMember]
+    var theme: ChildTheme = ChildTheme.load(for: "child")
 
     @State private var taskName = ""
-    @State private var targetDate = Date()
+    @State private var targetDate = roundedToNext5Minutes()
     @State private var assignedTo = ""
     @State private var recurrenceType: RecurrenceType = .none
     @State private var occurrences = 10
@@ -877,7 +1049,12 @@ struct AddChildTaskView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -949,17 +1126,11 @@ struct AddChildTaskView: View {
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.5))
 
-                            DatePicker(
-                                "",
-                                selection: $targetDate,
-                                in: Date()...,
-                                displayedComponents: [.date, .hourAndMinute]
-                            )
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .colorScheme(.dark)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            FiveMinuteDatePicker(selection: $targetDate, minimumDate: Date())
+                            .frame(height: 44)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
@@ -1021,7 +1192,9 @@ struct AddChildTaskView: View {
                                 assignedTo: target,
                                 reward: 0,
                                 createdByChild: true,
-                                isRecurring: recurring
+                                isRecurring: recurring,
+                                createdBy: childName,
+                                createdByID: authManager.appleUserID
                             )
                             modelContext.insert(task)
                             createdTasks.append(task)
@@ -1045,7 +1218,8 @@ struct AddChildTaskView: View {
                                 title: "New Task Created",
                                 body: "\(senderName) created \"\(trimmedName)\"" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
                                 category: "TASK_CREATED",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: "parents"
                             )
                         }
                         dismiss()
@@ -1319,7 +1493,9 @@ struct AddChildTaskView: View {
                 reward: 0,
                 status: "open",
                 createdByChild: true,
-                isRecurring: recurring
+                isRecurring: recurring,
+                createdBy: childName,
+                createdByID: authManager.appleUserID
             )
             modelContext.insert(task)
 
@@ -1420,6 +1596,7 @@ struct RedeemRewardsView: View {
     @Environment(AuthManager.self) private var authManager
     let availableCoins: Int
     let childName: String
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     @State private var selectedType = "toy"
     @State private var coinAmount = ""
@@ -1436,7 +1613,8 @@ struct RedeemRewardsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -1572,7 +1750,8 @@ struct RedeemRewardsView: View {
                                 title: "Reward Request!",
                                 body: "\(childName) wants to redeem \(amount) coins for: \(description.trimmingCharacters(in: .whitespaces))",
                                 category: "REWARD_REQUEST",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: "parents"
                             )
                         }
                         dismiss()
@@ -1594,6 +1773,7 @@ struct RewardsHistoryView: View {
     @Environment(AuthManager.self) private var authManager
     let redemptions: [RewardRedemption]
     var isParent: Bool = false
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var confirmFulfill: RewardRedemption?
 
     private var sorted: [RewardRedemption] {
@@ -1607,7 +1787,8 @@ struct RewardsHistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 if sorted.isEmpty {
                     VStack(spacing: 12) {
@@ -1686,7 +1867,8 @@ struct RewardsHistoryView: View {
                                 title: "Reward Received",
                                 body: "\(childName) confirmed receiving: \"\(desc)\"",
                                 category: "REWARD_FULFILLED",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: "parents"
                             )
                         }
                     }
@@ -1857,9 +2039,290 @@ struct FlyingCoinsOverlay: View {
     }
 }
 
+struct MyGiftsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query private var allGifts: [SurpriseGift]
+    let childName: String
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    private var myGifts: [SurpriseGift] {
+        allGifts.filter { $0.childName == childName }.sorted { $0.earnedDate > $1.earnedDate }
+    }
+
+    private var unredeemed: [SurpriseGift] { myGifts.filter { !$0.isRedeemed } }
+    private var redeemed: [SurpriseGift] { myGifts.filter { $0.isRedeemed } }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                if myGifts.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "gift")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.white.opacity(0.3))
+                        Text("No gifts yet")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text("Complete tasks with surprise gifts to see them here!")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.4))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            if !unredeemed.isEmpty {
+                                sectionHeader("Ready to Redeem", count: unredeemed.count)
+                                ForEach(unredeemed) { gift in
+                                    giftCard(gift, canRedeem: true)
+                                }
+                            }
+
+                            if !redeemed.isEmpty {
+                                sectionHeader("Redeemed", count: redeemed.count)
+                                    .padding(.top, unredeemed.isEmpty ? 0 : 8)
+                                ForEach(redeemed) { gift in
+                                    giftCard(gift, canRedeem: false)
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("My Gifts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text("\(count)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(.pink.opacity(0.3), in: Capsule())
+            Spacer()
+        }
+    }
+
+    private func giftCard(_ gift: SurpriseGift, canRedeem: Bool) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: gift.isRedeemed ? "checkmark.circle.fill" : "gift.fill")
+                .font(.title2)
+                .foregroundStyle(gift.isRedeemed ? .green : .pink)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(gift.giftDescription)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("From: \(gift.taskName)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                Text(gift.earnedDate, format: .dateTime.month().day())
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            Spacer()
+
+            if canRedeem {
+                Button {
+                    withAnimation { gift.isRedeemed = true }
+                } label: {
+                    Text("Redeem")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(.pink, in: Capsule())
+                }
+            } else {
+                Text("Redeemed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green.opacity(0.7))
+            }
+        }
+        .padding(14)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(gift.isRedeemed ? .green.opacity(0.2) : .pink.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Theme Picker
+
+struct ChildThemePickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var theme: ChildTheme
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 28) {
+                        Spacer().frame(height: 8)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Background")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                                ForEach(themePresets) { preset in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.4)) {
+                                            theme.themeId = preset.id
+                                            theme.save()
+                                        }
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .fill(
+                                                        LinearGradient(
+                                                            colors: preset.gradientColors,
+                                                            startPoint: .top,
+                                                            endPoint: .bottom
+                                                        )
+                                                    )
+                                                    .frame(height: 56)
+
+                                                Text(preset.emoji)
+                                                    .font(.title2)
+                                            }
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(
+                                                        theme.themeId == preset.id ? .white : .white.opacity(0.15),
+                                                        lineWidth: theme.themeId == preset.id ? 2.5 : 1
+                                                    )
+                                            )
+
+                                            Text(preset.name)
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(theme.themeId == preset.id ? .white : .white.opacity(0.6))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Font Style")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.7))
+
+                            ForEach(fontStylePresets) { preset in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        theme.fontId = preset.id
+                                        theme.save()
+                                    }
+                                } label: {
+                                    HStack(spacing: 14) {
+                                        Image(systemName: theme.fontId == preset.id ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(theme.fontId == preset.id ? .green : .white.opacity(0.3))
+                                            .font(.title3)
+
+                                        Text("The quick brown fox jumps")
+                                            .font(preset.fontName != nil ? .custom(preset.fontName!, size: 16) : .body)
+                                            .foregroundStyle(.white)
+
+                                        Spacer()
+
+                                        Text(preset.name)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
+                                    .padding(14)
+                                    .background(
+                                        theme.fontId == preset.id ? .white.opacity(0.15) : .white.opacity(0.08),
+                                        in: RoundedRectangle(cornerRadius: 12)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                theme.fontId == preset.id ? .white.opacity(0.4) : .white.opacity(0.1),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                }
+                            }
+                        }
+
+                        Text("Preview")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        HStack(spacing: 14) {
+                            Circle()
+                                .strokeBorder(.white.opacity(0.4), lineWidth: 2)
+                                .frame(width: 32, height: 32)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Clean my room")
+                                    .font(theme.font(.body))
+                                    .foregroundStyle(.white)
+                                Text("Today at 5:00 PM")
+                                    .font(theme.font(.caption))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            Spacer()
+                        }
+                        .padding(14)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                        )
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("Customize Theme")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
 #Preview {
     ChildDashboardView()
-        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self], inMemory: true)
+        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self, SurpriseGift.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
         .environment(SubscriptionManager())

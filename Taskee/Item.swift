@@ -21,8 +21,12 @@ final class Item {
     var createdByChild: Bool
     var isArchived: Bool
     var isRecurring: Bool
+    var giftText: String
+    var giftRevealed: Bool
+    var createdBy: String
+    var createdByID: String
 
-    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false) {
+    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "") {
         self.id = id
         self.name = name
         self.targetDate = targetDate
@@ -32,7 +36,13 @@ final class Item {
         self.createdByChild = createdByChild
         self.isArchived = false
         self.isRecurring = isRecurring
+        self.giftText = giftText
+        self.giftRevealed = false
+        self.createdBy = createdBy
+        self.createdByID = createdByID
     }
+
+    var hasGift: Bool { !giftText.isEmpty }
 
     var isOpen: Bool { status == "open" }
     var isInReview: Bool { status == "inReview" }
@@ -134,6 +144,25 @@ final class RewardRedemption {
     }
 }
 
+@Model
+final class SurpriseGift {
+    var id: UUID
+    var childName: String
+    var giftDescription: String
+    var taskName: String
+    var earnedDate: Date
+    var isRedeemed: Bool
+
+    init(id: UUID = UUID(), childName: String, giftDescription: String, taskName: String, earnedDate: Date = Date()) {
+        self.id = id
+        self.childName = childName
+        self.giftDescription = giftDescription
+        self.taskName = taskName
+        self.earnedDate = earnedDate
+        self.isRedeemed = false
+    }
+}
+
 let redemptionTypes = [
     ("cash", "Cash", "banknote.fill"),
     ("toy", "Toy", "teddybear.fill"),
@@ -153,6 +182,155 @@ enum RecurrenceType: String, CaseIterable {
 }
 
 let weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"]
+
+// MARK: - Recurring Task Extension
+
+struct RecurringTaskGroup: Identifiable {
+    let id = UUID()
+    let name: String
+    let assignedTo: String
+    let reward: Double
+    let createdByChild: Bool
+    let latestDate: Date
+    let taskCount: Int
+    let timeHour: Int
+    let timeMinute: Int
+    let weekdays: Set<Int>
+    let frequency: RecurrenceType
+}
+
+struct RecurringTaskExtender {
+    private static let lastExtensionKey = "lastRecurringExtensionDate"
+
+    static func needsExtension() -> Bool {
+        let calendar = Calendar.current
+        let now = Date()
+        let lastExtension = UserDefaults.standard.double(forKey: lastExtensionKey)
+        if lastExtension > 0 {
+            let lastDate = Date(timeIntervalSince1970: lastExtension)
+            if calendar.isDate(lastDate, equalTo: now, toGranularity: .month) {
+                return false
+            }
+        }
+        let endOfMonth = calendar.date(byAdding: DateComponents(month: 1, day: -1),
+                                        to: calendar.date(from: calendar.dateComponents([.year, .month], from: now))!)!
+        let daysLeft = calendar.dateComponents([.day], from: now, to: endOfMonth).day ?? 30
+        return daysLeft <= 7
+    }
+
+    static func markExtended() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastExtensionKey)
+    }
+
+    static func markDismissed() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastExtensionKey)
+    }
+
+    static func findRecurringGroups(from tasks: [Item]) -> [RecurringTaskGroup] {
+        let recurring = tasks.filter { $0.isRecurring && !$0.isArchived }
+        let grouped = Dictionary(grouping: recurring) { "\($0.name)|\($0.assignedTo)|\($0.createdByChild)" }
+        let calendar = Calendar.current
+
+        return grouped.compactMap { _, groupTasks in
+            guard let latest = groupTasks.max(by: { $0.targetDate < $1.targetDate }) else { return nil }
+
+            let now = Date()
+            let endOfNextMonth = calendar.date(byAdding: DateComponents(month: 2),
+                                                to: calendar.date(from: calendar.dateComponents([.year, .month], from: now))!)!
+            if latest.targetDate >= endOfNextMonth { return nil }
+
+            let weekdays = Set(groupTasks.map { calendar.component(.weekday, from: $0.targetDate) })
+            let timeComps = calendar.dateComponents([.hour, .minute], from: latest.targetDate)
+
+            let sortedDates = groupTasks.map(\.targetDate).sorted()
+            let frequency: RecurrenceType
+            if sortedDates.count >= 2 {
+                let intervals = zip(sortedDates, sortedDates.dropFirst()).map {
+                    calendar.dateComponents([.day], from: $0.0, to: $0.1).day ?? 0
+                }
+                let avgInterval = intervals.reduce(0, +) / max(intervals.count, 1)
+                if avgInterval <= 1 { frequency = .daily }
+                else if avgInterval <= 10 { frequency = .weekly }
+                else { frequency = .monthly }
+            } else {
+                frequency = .daily
+            }
+
+            return RecurringTaskGroup(
+                name: latest.name,
+                assignedTo: latest.assignedTo,
+                reward: latest.reward,
+                createdByChild: latest.createdByChild,
+                latestDate: latest.targetDate,
+                taskCount: groupTasks.count,
+                timeHour: timeComps.hour ?? 9,
+                timeMinute: timeComps.minute ?? 0,
+                weekdays: weekdays,
+                frequency: frequency
+            )
+        }
+    }
+
+    static func generateExtensionDates(for group: RecurringTaskGroup, taskLimit: Int?) -> [Date] {
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfNextMonth = calendar.date(byAdding: DateComponents(month: 1),
+                                              to: calendar.date(from: calendar.dateComponents([.year, .month], from: now))!)!
+        let endOfNextMonth = calendar.date(byAdding: DateComponents(month: 2),
+                                            to: calendar.date(from: calendar.dateComponents([.year, .month], from: now))!)!
+
+        let startDate = max(group.latestDate.addingTimeInterval(86400), startOfNextMonth)
+        var dates: [Date] = []
+
+        switch group.frequency {
+        case .daily:
+            var current = startDate
+            while current < endOfNextMonth {
+                var comps = calendar.dateComponents([.year, .month, .day], from: current)
+                comps.hour = group.timeHour
+                comps.minute = group.timeMinute
+                if let date = calendar.date(from: comps) {
+                    dates.append(date)
+                }
+                current = calendar.date(byAdding: .day, value: 1, to: current)!
+            }
+
+        case .weekly:
+            var current = startDate
+            while current < endOfNextMonth {
+                let weekday = calendar.component(.weekday, from: current)
+                if group.weekdays.contains(weekday) {
+                    var comps = calendar.dateComponents([.year, .month, .day], from: current)
+                    comps.hour = group.timeHour
+                    comps.minute = group.timeMinute
+                    if let date = calendar.date(from: comps) {
+                        dates.append(date)
+                    }
+                }
+                current = calendar.date(byAdding: .day, value: 1, to: current)!
+            }
+
+        case .monthly:
+            var comps = calendar.dateComponents([.year, .month, .day], from: group.latestDate)
+            comps.month = calendar.component(.month, from: startOfNextMonth)
+            comps.year = calendar.component(.year, from: startOfNextMonth)
+            comps.hour = group.timeHour
+            comps.minute = group.timeMinute
+            if let date = calendar.date(from: comps), date < endOfNextMonth {
+                dates.append(date)
+            }
+
+        case .none:
+            break
+        }
+
+        if let limit = taskLimit, dates.count > limit {
+            dates = Array(dates.prefix(limit))
+        }
+
+        return dates
+    }
+}
 
 // MARK: - Task Templates
 
@@ -819,7 +997,7 @@ struct AvatarView: View {
         } else if let animalConfig = animalAvatarConfig(for: avatarId) {
             AnimalAvatarFaceView(config: animalConfig, size: size)
         } else {
-            Image(systemName: avatarId.isEmpty ? "star.fill" : avatarId)
+            Image(systemName: "star.fill")
                 .font(.system(size: size * 0.45))
                 .foregroundStyle(avatarColor(for: avatarId))
                 .frame(width: size, height: size)
@@ -828,12 +1006,59 @@ struct AvatarView: View {
     }
 }
 
+// MARK: - Date Helpers
+
+func roundedToNext5Minutes(_ date: Date = Date()) -> Date {
+    let calendar = Calendar.current
+    let minute = calendar.component(.minute, from: date)
+    let remainder = minute % 5
+    let roundUp = remainder == 0 ? 0 : 5 - remainder
+    var comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+    comps.minute = minute + roundUp
+    comps.second = 0
+    return calendar.date(from: comps) ?? date
+}
+
+struct FiveMinuteDatePicker: UIViewRepresentable {
+    @Binding var selection: Date
+    var minimumDate: Date?
+
+    func makeUIView(context: Context) -> UIDatePicker {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .dateAndTime
+        picker.preferredDatePickerStyle = .compact
+        picker.minuteInterval = 5
+        picker.minimumDate = minimumDate
+        picker.date = selection
+        picker.overrideUserInterfaceStyle = .dark
+        picker.addTarget(context.coordinator, action: #selector(Coordinator.dateChanged(_:)), for: .valueChanged)
+        return picker
+    }
+
+    func updateUIView(_ picker: UIDatePicker, context: Context) {
+        picker.date = selection
+        picker.minimumDate = minimumDate
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    class Coordinator: NSObject {
+        var selection: Binding<Date>
+        init(selection: Binding<Date>) { self.selection = selection }
+        @objc func dateChanged(_ picker: UIDatePicker) {
+            selection.wrappedValue = picker.date
+        }
+    }
+}
+
 // MARK: - App Share
 
 let appStoreURL = URL(string: "https://apps.apple.com/app/taskee/id0000000000")!
-let parentShareMessage = "Taskee has been a game-changer for our family! My kids actually WANT to do their chores now — they earn coins, redeem rewards, and it's taught them real responsibility. Best parenting tool I've found. You've got to try it:"
+let parentShareMessage = "Hey! Taskee has been a game-changer for our family — my kids actually WANT to do their chores now. They earn coins, redeem real rewards, and it's taught them so much about responsibility. Seriously the best parenting hack I've found. You've gotta try it!"
 
-let childShareMessage = "Okay so my parents got this app called Taskee and it's actually awesome?? I get coins every time I finish a chore and I can save up for real rewards! It's like turning chores into a game. You NEED to get your parents to download this:"
+let childShareMessage = "Okay so my parents got this app called Taskee and it's actually really fun?? You get coins every time you finish a task and you can save up for REAL rewards like toys or movie nights. It turns chores into a game — tell your parents to download it!"
 
 let privacyPolicyURL = URL(string: "https://selvabhuvanesh.github.io/taskee/privacy")!
 let termsOfUseURL = URL(string: "https://selvabhuvanesh.github.io/taskee/terms")!
@@ -847,13 +1072,45 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
+class ShareTextWithLink: NSObject, UIActivityItemSource {
+    let text: String
+    let url: URL
+
+    init(text: String, url: URL) {
+        self.text = text
+        self.url = url
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        return text
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        return "\(text)\n\n\(url.absoluteString)"
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        return "Check out Taskee!"
+    }
+}
+
 // MARK: - Coin Display
 
 struct CoinDisplay: View {
     let count: Int
     let earned: Bool
 
-    private var baseColor: Color {
+    private var coinGradient: LinearGradient {
+        LinearGradient(
+            colors: earned
+                ? [Color(red: 1.0, green: 0.95, blue: 0.4), Color(red: 1.0, green: 0.7, blue: 0.0)]
+                : [Color(red: 1.0, green: 0.95, blue: 0.4).opacity(0.8), Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.8)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var labelColor: Color {
         earned ? Color(red: 1.0, green: 0.84, blue: 0.0) : Color(red: 1.0, green: 0.84, blue: 0.0).opacity(0.8)
     }
 
@@ -862,18 +1119,20 @@ struct CoinDisplay: View {
             if earned {
                 Text("Earned")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(baseColor)
+                    .foregroundStyle(labelColor)
             }
             if count <= 5 {
                 ForEach(0..<count, id: \.self) { _ in
                     Image(systemName: "star.circle.fill")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(baseColor)
+                        .foregroundStyle(coinGradient)
+                        .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
                 }
             } else {
                 Image(systemName: "star.circle.fill")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(baseColor)
+                    .foregroundStyle(coinGradient)
+                    .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
                     .overlay(
                         Text("\(count)")
                             .font(.system(size: 8, weight: .black))
@@ -884,9 +1143,299 @@ struct CoinDisplay: View {
     }
 }
 
+// MARK: - Gift Reveal
+
+struct GiftRevealView: View {
+    let giftText: String
+    var onDismiss: () -> Void
+
+    @State private var phase = 0
+    @State private var shakeAngle: Double = 0
+    @State private var boxScale: Double = 1.0
+    @State private var showConfetti = false
+    @State private var textOpacity: Double = 0
+    @State private var textScale: Double = 0.3
+    @State private var glowOpacity: Double = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.7)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    if phase >= 3 { onDismiss() }
+                }
+
+            if showConfetti {
+                GiftConfettiView()
+            }
+
+            VStack(spacing: 24) {
+                if phase < 3 {
+                    ZStack {
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 100))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.pink, .purple, .orange],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .shadow(color: .pink.opacity(glowOpacity), radius: 20)
+                            .rotationEffect(.degrees(shakeAngle))
+                            .scaleEffect(boxScale)
+
+                        if phase == 0 {
+                            Text("Tap to open!")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .offset(y: 70)
+                        }
+                    }
+                    .onTapGesture { advancePhase() }
+                }
+
+                if phase >= 3 {
+                    VStack(spacing: 16) {
+                        Image(systemName: "gift.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.yellow)
+                            .shadow(color: .yellow.opacity(0.5), radius: 10)
+
+                        Text("Surprise Gift!")
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+
+                        Text(giftText)
+                            .font(.title.weight(.heavy))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.yellow, .orange, .pink],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+
+                        Text("Tap anywhere to close")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.5))
+                            .padding(.top, 8)
+                    }
+                    .scaleEffect(textScale)
+                    .opacity(textOpacity)
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                glowOpacity = 0.6
+            }
+        }
+    }
+
+    private func advancePhase() {
+        switch phase {
+        case 0:
+            phase = 1
+            withAnimation(.easeInOut(duration: 0.08).repeatCount(8, autoreverses: true)) {
+                shakeAngle = 12
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                shakeAngle = 0
+                advancePhase()
+            }
+        case 1:
+            phase = 2
+            withAnimation(.easeInOut(duration: 0.15).repeatCount(12, autoreverses: true)) {
+                shakeAngle = 18
+            }
+            withAnimation(.easeInOut(duration: 0.5)) {
+                boxScale = 1.2
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                advancePhase()
+            }
+        case 2:
+            phase = 3
+            SoundManager.shared.playApplause()
+            showConfetti = true
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                boxScale = 0
+                textOpacity = 1
+                textScale = 1.0
+            }
+        default:
+            break
+        }
+    }
+}
+
+struct GiftConfettiView: View {
+    @State private var particles: [(id: Int, x: CGFloat, y: CGFloat, color: Color, size: CGFloat, rotation: Double)] = []
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                ForEach(particles, id: \.id) { p in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(p.color)
+                        .frame(width: p.size, height: p.size * 1.5)
+                        .rotationEffect(.degrees(p.rotation))
+                        .position(x: p.x, y: p.y)
+                }
+            }
+            .onAppear {
+                let colors: [Color] = [.pink, .purple, .orange, .yellow, .cyan, .green, .red]
+                for i in 0..<40 {
+                    let startX = geo.size.width / 2 + CGFloat.random(in: -40...40)
+                    particles.append((
+                        id: i,
+                        x: startX,
+                        y: geo.size.height * 0.35,
+                        color: colors.randomElement()!,
+                        size: CGFloat.random(in: 6...12),
+                        rotation: Double.random(in: 0...360)
+                    ))
+                }
+                for i in 0..<40 {
+                    let targetX = CGFloat.random(in: 20...(geo.size.width - 20))
+                    let targetY = CGFloat.random(in: (geo.size.height * 0.5)...(geo.size.height - 40))
+                    withAnimation(.easeOut(duration: Double.random(in: 0.8...1.5)).delay(Double(i) * 0.02)) {
+                        particles[i].x = targetX
+                        particles[i].y = targetY
+                        particles[i].rotation += Double.random(in: 180...720)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 // MARK: - Accent Color
 
 let calmAccent = Color.blue
+
+// MARK: - Child Theme
+
+struct ThemePreset: Identifiable {
+    let id: String
+    let name: String
+    let emoji: String
+    let gradientColors: [Color]
+}
+
+let themePresets: [ThemePreset] = [
+    ThemePreset(id: "default", name: "Ocean", emoji: "🌊", gradientColors: [
+        Color(red: 0.0, green: 0.5, blue: 0.5),
+        Color(red: 0.15, green: 0.3, blue: 0.45),
+        Color(red: 0.3, green: 0.1, blue: 0.4),
+        Color(red: 0.35, green: 0.05, blue: 0.45)
+    ]),
+    ThemePreset(id: "sunset", name: "Sunset", emoji: "🌅", gradientColors: [
+        Color(red: 0.95, green: 0.5, blue: 0.2),
+        Color(red: 0.85, green: 0.25, blue: 0.3),
+        Color(red: 0.55, green: 0.1, blue: 0.4),
+        Color(red: 0.3, green: 0.05, blue: 0.35)
+    ]),
+    ThemePreset(id: "forest", name: "Forest", emoji: "🌲", gradientColors: [
+        Color(red: 0.1, green: 0.5, blue: 0.3),
+        Color(red: 0.05, green: 0.35, blue: 0.25),
+        Color(red: 0.05, green: 0.25, blue: 0.2),
+        Color(red: 0.05, green: 0.15, blue: 0.15)
+    ]),
+    ThemePreset(id: "galaxy", name: "Galaxy", emoji: "🌌", gradientColors: [
+        Color(red: 0.1, green: 0.1, blue: 0.35),
+        Color(red: 0.2, green: 0.05, blue: 0.4),
+        Color(red: 0.35, green: 0.0, blue: 0.5),
+        Color(red: 0.15, green: 0.0, blue: 0.25)
+    ]),
+    ThemePreset(id: "candy", name: "Candy", emoji: "🍬", gradientColors: [
+        Color(red: 0.95, green: 0.4, blue: 0.6),
+        Color(red: 0.7, green: 0.3, blue: 0.7),
+        Color(red: 0.45, green: 0.2, blue: 0.6),
+        Color(red: 0.3, green: 0.1, blue: 0.45)
+    ]),
+    ThemePreset(id: "midnight", name: "Midnight", emoji: "🌙", gradientColors: [
+        Color(red: 0.1, green: 0.12, blue: 0.25),
+        Color(red: 0.08, green: 0.08, blue: 0.2),
+        Color(red: 0.05, green: 0.05, blue: 0.15),
+        Color(red: 0.02, green: 0.02, blue: 0.1)
+    ]),
+    ThemePreset(id: "lava", name: "Lava", emoji: "🌋", gradientColors: [
+        Color(red: 0.9, green: 0.3, blue: 0.1),
+        Color(red: 0.7, green: 0.15, blue: 0.1),
+        Color(red: 0.45, green: 0.08, blue: 0.12),
+        Color(red: 0.25, green: 0.05, blue: 0.1)
+    ]),
+    ThemePreset(id: "arctic", name: "Arctic", emoji: "❄️", gradientColors: [
+        Color(red: 0.6, green: 0.85, blue: 0.95),
+        Color(red: 0.3, green: 0.6, blue: 0.8),
+        Color(red: 0.15, green: 0.35, blue: 0.6),
+        Color(red: 0.1, green: 0.2, blue: 0.4)
+    ]),
+]
+
+struct FontStylePreset: Identifiable {
+    let id: String
+    let name: String
+    let fontName: String?
+}
+
+let fontStylePresets: [FontStylePreset] = [
+    FontStylePreset(id: "default", name: "Default", fontName: nil),
+    FontStylePreset(id: "rounded", name: "Rounded", fontName: ".AppleSystemUIFontRounded-Regular"),
+    FontStylePreset(id: "serif", name: "Serif", fontName: "Georgia"),
+    FontStylePreset(id: "mono", name: "Mono", fontName: "Menlo"),
+    FontStylePreset(id: "handwritten", name: "Handwritten", fontName: "Noteworthy-Bold"),
+]
+
+struct ChildTheme {
+    var themeId: String
+    var fontId: String
+
+    var gradientColors: [Color] {
+        (themePresets.first { $0.id == themeId } ?? themePresets[0]).gradientColors
+    }
+
+    var fontName: String? {
+        fontStylePresets.first { $0.id == fontId }?.fontName
+    }
+
+    func font(_ style: Font) -> Font {
+        guard let name = fontName else { return style }
+        return .custom(name, size: fontBaseSize(for: style))
+    }
+
+    private func fontBaseSize(for style: Font) -> CGFloat {
+        switch style {
+        case .body: return 17
+        case .subheadline: return 15
+        case .caption: return 12
+        case .caption2: return 11
+        case .title2: return 22
+        case .title3: return 20
+        default: return 17
+        }
+    }
+
+    var keyPrefix: String = "child"
+
+    static func load(for role: String = "child") -> ChildTheme {
+        ChildTheme(
+            themeId: UserDefaults.standard.string(forKey: "\(role)ThemeId") ?? "default",
+            fontId: UserDefaults.standard.string(forKey: "\(role)FontId") ?? "default",
+            keyPrefix: role
+        )
+    }
+
+    func save() {
+        UserDefaults.standard.set(themeId, forKey: "\(keyPrefix)ThemeId")
+        UserDefaults.standard.set(fontId, forKey: "\(keyPrefix)FontId")
+    }
+}
 
 func avatarColor(for avatar: String) -> Color {
     if let config = avatarConfig(for: avatar) {
@@ -1084,7 +1633,7 @@ struct StickyNoteView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
                     Text("Did you know?")
-                        .font(.caption.weight(.bold))
+                        .font(.custom("Noteworthy-Bold", size: 14))
                         .foregroundStyle(.black.opacity(0.5))
                 }
                 Spacer()
@@ -1098,17 +1647,177 @@ struct StickyNoteView: View {
             }
 
             Text(message)
-                .font(.subheadline.weight(.medium))
+                .font(.custom("Noteworthy-Bold", size: 16))
                 .foregroundStyle(.black.opacity(0.75))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 2)
         }
         .padding(.horizontal, 18)
-        .padding(.top, 12)
-        .padding(.bottom, 22)
+        .padding(.vertical, 14)
         .frame(maxWidth: 280)
-        .background(color, in: CloudBubble())
+        .background(color, in: RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+    }
+}
+
+// MARK: - Recurring Extension Sheet
+
+struct RecurringExtensionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let groups: [RecurringTaskGroup]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var taskLimit: Int?
+    var onConfirm: () -> Void
+    var onDismiss: () -> Void
+
+    private var totalNewTasks: Int {
+        var total = 0
+        var remaining = taskLimit
+        for group in groups {
+            let dates = RecurringTaskExtender.generateExtensionDates(for: group, taskLimit: remaining)
+            total += dates.count
+            if let r = remaining { remaining = max(0, r - dates.count) }
+        }
+        return total
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer().frame(height: 12)
+
+                        VStack(spacing: 10) {
+                            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.cyan)
+
+                            Text("Extend Recurring Tasks")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.white)
+
+                            Text("Your recurring tasks are ending soon. Extend them for next month?")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
+
+                        if let limit = taskLimit {
+                            HStack(spacing: 6) {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundStyle(.cyan)
+                                Text("\(limit) tasks remaining in your plan this month")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                            .padding(10)
+                            .background(.cyan.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        VStack(spacing: 10) {
+                            ForEach(groups) { group in
+                                extensionRow(group)
+                            }
+                        }
+
+                        VStack(spacing: 8) {
+                            Text("\(totalNewTasks) new tasks will be created")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+
+                            Button {
+                                onConfirm()
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                    Text("Extend All")
+                                }
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.green, in: RoundedRectangle(cornerRadius: 14))
+                            }
+                            .disabled(totalNewTasks == 0)
+
+                            Button {
+                                onDismiss()
+                                dismiss()
+                            } label: {
+                                Text("Not Now")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("Recurring Tasks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onDismiss()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func extensionRow(_ group: RecurringTaskGroup) -> some View {
+        let dates = RecurringTaskExtender.generateExtensionDates(for: group, taskLimit: taskLimit)
+        return HStack(spacing: 12) {
+            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                .font(.title3)
+                .foregroundStyle(.cyan)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(group.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    if !group.assignedTo.isEmpty {
+                        Text(group.assignedTo)
+                            .font(.caption)
+                            .foregroundStyle(.cyan.opacity(0.8))
+                    }
+                    Text(group.frequency.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
+                    if group.reward > 0 {
+                        Text("\(Int(group.reward)) coins")
+                            .font(.caption)
+                            .foregroundStyle(.yellow.opacity(0.8))
+                    }
+                }
+            }
+
+            Spacer()
+
+            Text("+\(dates.count)")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.green)
+        }
+        .padding(14)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
     }
 }

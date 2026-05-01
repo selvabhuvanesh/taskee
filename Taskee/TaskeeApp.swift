@@ -17,6 +17,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         NotificationCenter.default.post(name: .cloudKitDataChanged, object: nil)
+        NotificationCenter.default.post(name: .checkPickupNotification, object: nil)
         completionHandler(.newData)
     }
 }
@@ -38,6 +39,7 @@ struct TaskeeApp: App {
             Item.self,
             FamilyMember.self,
             RewardRedemption.self,
+            SurpriseGift.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,
@@ -104,12 +106,27 @@ struct TaskeeApp: App {
                 Task {
                     await subscriptionManager.refreshTier()
                     await subscriptionManager.loadProducts()
+                    if subscriptionManager.tier != .free && !authManager.familyCode.isEmpty {
+                        await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 UNUserNotificationCenter.current().setBadgeCount(0)
+                guard !authManager.familyCode.isEmpty else { return }
+                Task {
+                    if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
+                        subscriptionManager.setFamilyTier(familyTier)
+                    }
+                }
             }
             .task {
+                subscriptionManager.onTierChanged = { newTier in
+                    guard !authManager.familyCode.isEmpty else { return }
+                    Task {
+                        await cloudKitManager.pushFamilyTier(newTier.rawValue, familyCode: authManager.familyCode)
+                    }
+                }
                 await subscriptionManager.listenForTransactions()
             }
             .task {
@@ -119,8 +136,20 @@ struct TaskeeApp: App {
                 guard !authManager.familyCode.isEmpty else { return }
                 let context = ModelContext(sharedModelContainer)
                 await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-                await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode)
+                await cloudKitManager.backfillCreatedBy(context: context, familyCode: authManager.familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
+                if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
+                    subscriptionManager.setFamilyTier(familyTier)
+                }
+                await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
                 await checkChildAcceptance()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .checkPickupNotification)) { _ in
+                guard authManager.role == "parent", !authManager.familyCode.isEmpty else { return }
+                Task {
+                    if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
+                        notificationManager.sendPickupNotification(childName: pickup.childName)
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
                 guard !authManager.familyCode.isEmpty else { return }
@@ -130,6 +159,9 @@ struct TaskeeApp: App {
                     guard !Task.isCancelled else { return }
                     let context = ModelContext(sharedModelContainer)
                     await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+                    if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
+                        subscriptionManager.setFamilyTier(familyTier)
+                    }
                     await checkChildAcceptance()
                 }
             }
@@ -195,7 +227,10 @@ struct TaskeeApp: App {
 
             let context = ModelContext(sharedModelContainer)
             await cloudKitManager.syncAll(context: context, familyCode: existing.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-            await cloudKitManager.setupSubscriptions(familyCode: existing.familyCode)
+            if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: existing.familyCode) {
+                subscriptionManager.setFamilyTier(familyTier)
+            }
+            await cloudKitManager.setupSubscriptions(familyCode: existing.familyCode, appleUserID: authManager.appleUserID, role: existing.memberRole)
         }
     }
 

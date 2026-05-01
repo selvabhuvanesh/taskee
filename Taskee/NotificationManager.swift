@@ -66,7 +66,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = assignedTo.isEmpty
             ? "\"\(taskName)\" is due in 30 minutes"
             : "\"\(taskName)\" assigned to \(assignedTo) is due in 30 minutes"
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("ting.wav"))
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
         content.categoryIdentifier = "TASK_REMINDER"
         content.interruptionLevel = .timeSensitive
 
@@ -194,6 +194,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .list])
+        let category = notification.request.content.categoryIdentifier
+        if category == "TASK_REMINDER" {
+            SoundManager.shared.playReminderBeep()
+            completionHandler([.banner, .list])
+        } else {
+            completionHandler([.banner, .sound, .list])
+        }
     }
 }

@@ -62,7 +62,7 @@ struct RoleSelectionView: View {
     private var header: some View {
         VStack(spacing: 10) {
             if selectedRole.isEmpty {
-                Image(systemName: "person.2.fill")
+                Image(systemName: "person.3.fill")
                     .font(.system(size: 52))
                     .foregroundStyle(calmAccent)
 
@@ -406,7 +406,10 @@ struct RoleSelectionView: View {
                 if !isNew {
                     await cloudKitManager.syncAll(context: modelContext, familyCode: code)
                 }
-                await cloudKitManager.setupSubscriptions(familyCode: code)
+                if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: code) {
+                    subscriptionManager.setFamilyTier(familyTier)
+                }
+                await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "parent")
             } else {
                 modelContext.delete(member)
                 showCloudUnavailable = true
@@ -598,14 +601,18 @@ struct RoleSelectionView: View {
                             authManager.role = "child"
                             authManager.familyCode = code
                             authManager.avatar = selectedAvatar
+                            if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: code) {
+                                subscriptionManager.setFamilyTier(familyTier)
+                            }
                             await cloudKitManager.sendRemoteNotification(
                                 familyCode: code,
                                 title: "New Family Member Request",
                                 body: "\(trimmedName) wants to join your family. Tap to review.",
                                 category: "MEMBER_REQUEST",
-                                senderAvatar: selectedAvatar
+                                senderAvatar: selectedAvatar,
+                                targetAppleUserID: "parents"
                             )
-                            await cloudKitManager.setupSubscriptions(familyCode: code)
+                            await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "child")
                         } else {
                             modelContext.delete(member)
                             showCloudUnavailable = true

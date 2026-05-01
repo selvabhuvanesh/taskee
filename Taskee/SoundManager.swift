@@ -21,6 +21,10 @@ final class SoundManager {
         generatePickupWAV()
     }()
 
+    private lazy var reminderBeepURL: URL? = {
+        generateReminderBeepWAV()
+    }()
+
     func installNotificationSound() {
         let libDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
         let soundsDir = libDir.appendingPathComponent("Sounds")
@@ -37,6 +41,11 @@ final class SoundManager {
             try? FileManager.default.removeItem(at: dest)
             try? FileManager.default.copyItem(at: src, to: dest)
         }
+        if let src = reminderBeepURL {
+            let dest = soundsDir.appendingPathComponent("reminder.wav")
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.copyItem(at: src, to: dest)
+        }
     }
 
     func playApplause() {
@@ -46,6 +55,17 @@ final class SoundManager {
             try AVAudioSession.sharedInstance().setActive(true)
             player = try AVAudioPlayer(contentsOf: url)
             player?.volume = 0.75
+            player?.play()
+        } catch {}
+    }
+
+    func playReminderBeep() {
+        guard let url = reminderBeepURL else { return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: .mixWithOthers)
+            try AVAudioSession.sharedInstance().setActive(true)
+            player = try AVAudioPlayer(contentsOf: url)
+            player?.volume = 0.85
             player?.play()
         } catch {}
     }
@@ -323,6 +343,80 @@ final class SoundManager {
         wav.append(audioData)
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("pickup.wav")
+        try? wav.write(to: url)
+        return url
+    }
+
+    private func generateReminderBeepWAV() -> URL? {
+        let sampleRate = 44100
+        let duration = 1.2
+        let numSamples = Int(Double(sampleRate) * duration)
+
+        struct Beep {
+            let freq: Double
+            let start: Double
+            let dur: Double
+            let vol: Double
+        }
+
+        // Friendly ascending two-tone: "bee-boop!"
+        let beeps: [Beep] = [
+            Beep(freq: 880.0,  start: 0.0,  dur: 0.18, vol: 0.65),  // A5
+            Beep(freq: 1108.7, start: 0.0,  dur: 0.15, vol: 0.25),  // C#6 shimmer
+            Beep(freq: 1174.7, start: 0.22, dur: 0.25, vol: 0.7),   // D6
+            Beep(freq: 1480.0, start: 0.22, dur: 0.2,  vol: 0.3),   // F#6 shimmer
+            Beep(freq: 1760.0, start: 0.52, dur: 0.35, vol: 0.55),  // A6 - final ring
+        ]
+
+        var audioData = Data()
+        audioData.reserveCapacity(numSamples * 2)
+
+        for i in 0..<numSamples {
+            let t = Double(i) / Double(sampleRate)
+            var sample = 0.0
+
+            for beep in beeps {
+                let elapsed = t - beep.start
+                guard elapsed >= 0, elapsed < beep.dur else { continue }
+                let attack = 0.006
+                let env: Double
+                if elapsed < attack {
+                    env = elapsed / attack
+                } else {
+                    env = exp(-elapsed * 3.5 / beep.dur)
+                }
+                let tone = sin(2.0 * .pi * beep.freq * elapsed)
+                    + 0.35 * sin(2.0 * .pi * beep.freq * 2.0 * elapsed)
+                    + 0.1 * sin(2.0 * .pi * beep.freq * 3.0 * elapsed)
+                sample += (tone / 1.45) * env * beep.vol
+            }
+
+            sample = max(-1.0, min(1.0, sample))
+            let value = Int16(clamping: Int(sample * 26000))
+            var le = value.littleEndian
+            audioData.append(Data(bytes: &le, count: 2))
+        }
+
+        var wav = Data()
+        let dataSize = UInt32(audioData.count)
+        let fileSize = UInt32(36 + audioData.count)
+
+        wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46])
+        appendLE(&wav, fileSize)
+        wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45])
+        wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20])
+        appendLE(&wav, UInt32(16))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt16(1))
+        appendLE(&wav, UInt32(sampleRate))
+        appendLE(&wav, UInt32(sampleRate * 2))
+        appendLE(&wav, UInt16(2))
+        appendLE(&wav, UInt16(16))
+        wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61])
+        appendLE(&wav, dataSize)
+        wav.append(audioData)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("reminder.wav")
         try? wav.write(to: url)
         return url
     }

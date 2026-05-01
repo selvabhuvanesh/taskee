@@ -64,6 +64,9 @@ struct ContentView: View {
     private var pendingChildren: [FamilyMember] {
         allMembers.filter { $0.isChild && !$0.isAccepted }
     }
+    private var otherParent: FamilyMember? {
+        allMembers.first { $0.isParent && $0.name != authManager.userName }
+    }
     @State private var showingAddTask = false
     @State private var showingChildren = false
     @State private var showPendingApprovals = false
@@ -79,6 +82,11 @@ struct ContentView: View {
     @State private var showReminderSent = false
     @State private var reminderSentChildName = ""
     @State private var showShareSheet = false
+    @State private var showThemePicker = false
+    @State private var parentTheme = ChildTheme.load(for: "parent")
+    @State private var unreadNotifCount = 0
+    @State private var showRecurringExtension = false
+    @State private var recurringGroups: [RecurringTaskGroup] = []
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
 
@@ -91,7 +99,10 @@ struct ContentView: View {
     }
 
     private var myTasks: [Item] {
-        activeTasks.filter { $0.assignedTo == authManager.userName || $0.assignedTo.isEmpty || $0.isInReview }
+        let myName = authManager.userName
+        return activeTasks.filter { task in
+            task.assignedTo == myName
+        }
     }
 
     private var filteredTasks: [Item] {
@@ -120,17 +131,18 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(
+                    colors: parentTheme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        UserAvatarHeader(name: authManager.userName, avatar: authManager.avatar)
-
-                        if !children.isEmpty {
-                            childrenStrip
-                        }
+                    if !children.isEmpty || otherParent != nil {
+                        familyStrip
+                            .padding(.top, 8)
                     }
-                    .padding(.top, 8)
 
                     if subscriptionManager.tier != .pro {
                         tierBanner
@@ -152,6 +164,7 @@ struct ContentView: View {
                                 notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
                             }
                         }
+                        await refreshUnreadCount()
                     }
 
                     addTaskButton
@@ -223,8 +236,9 @@ struct ContentView: View {
                             Image(systemName: "bell.fill")
                                 .font(.subheadline)
                                 .overlay(alignment: .topTrailing) {
-                                    if pendingActionCount > 0 {
-                                        Text("\(pendingActionCount)")
+                                    let badgeCount = unreadNotifCount + pendingActionCount
+                                    if badgeCount > 0 {
+                                        Text("\(badgeCount)")
                                             .font(.system(size: 9, weight: .bold))
                                             .foregroundStyle(.white)
                                             .frame(minWidth: 14, minHeight: 14)
@@ -237,7 +251,7 @@ struct ContentView: View {
                         Button {
                             showingChildren = true
                         } label: {
-                            Image(systemName: "person.2")
+                            Image(systemName: "person.3.fill")
                                 .font(.subheadline)
                                 .overlay(alignment: .topTrailing) {
                                     if !pendingChildren.isEmpty {
@@ -258,7 +272,12 @@ struct ContentView: View {
                             Button {
                                 showEditProfile = true
                             } label: {
-                                Label("Edit Profile", systemImage: "pencil.circle")
+                                Label("Edit Profile", systemImage: "person.crop.circle.fill")
+                            }
+                            Button {
+                                showThemePicker = true
+                            } label: {
+                                Label("Customize Theme", systemImage: "paintpalette.fill")
                             }
                             Button {
                                 showSubscription = true
@@ -273,7 +292,7 @@ struct ContentView: View {
                             Button {
                                 showShareSheet = true
                             } label: {
-                                Label("Invite a Friend", systemImage: "person.badge.plus")
+                                Label("Refer Your Friends", systemImage: "person.badge.plus")
                             }
                             Divider()
                             Button(role: .destructive) {
@@ -288,31 +307,43 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showingAddTask) {
-                AddTaskView(children: children)
+                AddTaskView(children: children, otherParent: otherParent, theme: parentTheme)
             }
             .sheet(isPresented: $showingChildren) {
-                ChildrenManagementView()
+                ChildrenManagementView(theme: parentTheme)
             }
             .sheet(isPresented: $showNotificationCenter) {
-                NotificationCenterView()
+                NotificationCenterView(theme: parentTheme)
+            }
+            .onChange(of: showNotificationCenter) { _, showing in
+                if !showing {
+                    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastNotifReadTime")
+                    unreadNotifCount = 0
+                }
+            }
+            .task {
+                await refreshUnreadCount()
             }
             .sheet(isPresented: $showEditProfile) {
-                EditProfileView()
+                EditProfileView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showThemePicker) {
+                ChildThemePickerView(theme: $parentTheme)
             }
             .sheet(isPresented: $showSubscription) {
-                SubscriptionView()
+                SubscriptionView(theme: parentTheme)
             }
             .sheet(isPresented: $showRedemptionApprovals) {
-                RedemptionApprovalsView()
+                RedemptionApprovalsView(theme: parentTheme)
             }
             .sheet(isPresented: $showRewardsHistory) {
-                RewardsHistoryView(redemptions: allRedemptions.sorted { $0.createdAt > $1.createdAt }, isParent: true)
+                RewardsHistoryView(redemptions: allRedemptions.sorted { $0.createdAt > $1.createdAt }, isParent: true, theme: parentTheme)
             }
             .sheet(isPresented: $showShareSheet) {
-                ShareSheet(items: [parentShareMessage, appStoreURL])
+                ShareSheet(items: [ShareTextWithLink(text: parentShareMessage, url: appStoreURL)])
             }
             .sheet(isPresented: $showPendingApprovals) {
-                PendingApprovalsView { reward in
+                PendingApprovalsView(theme: parentTheme) { reward in
                     celebrationReward = reward
                     showCelebration = true
                 }
@@ -330,33 +361,116 @@ struct ContentView: View {
             }
             .task {
                 archiveOldTasks()
+                checkRecurringExtension()
+            }
+            .sheet(isPresented: $showRecurringExtension) {
+                RecurringExtensionSheet(
+                    groups: recurringGroups,
+                    theme: parentTheme,
+                    taskLimit: subscriptionManager.maxTasksPerMonth.map { max(0, $0 - subscriptionManager.tasksCreatedThisMonth(allTasks: tasks)) },
+                    onConfirm: { extendRecurringTasks() },
+                    onDismiss: { RecurringTaskExtender.markDismissed() }
+                )
             }
         }
     }
 
+    private func checkRecurringExtension() {
+        guard RecurringTaskExtender.needsExtension() else { return }
+        let groups = RecurringTaskExtender.findRecurringGroups(from: tasks)
+        guard !groups.isEmpty else { return }
+        recurringGroups = groups
+        showRecurringExtension = true
+    }
+
+    private func extendRecurringTasks() {
+        let remaining = subscriptionManager.maxTasksPerMonth.map {
+            max(0, $0 - subscriptionManager.tasksCreatedThisMonth(allTasks: tasks))
+        }
+        var totalCreated = 0
+
+        for group in recurringGroups {
+            let perGroupLimit: Int? = remaining.map { max(0, $0 - totalCreated) }
+            if let limit = perGroupLimit, limit <= 0 { break }
+
+            let dates = RecurringTaskExtender.generateExtensionDates(for: group, taskLimit: perGroupLimit)
+            for date in dates {
+                let task = Item(
+                    name: group.name,
+                    targetDate: date,
+                    assignedTo: group.assignedTo,
+                    reward: group.reward,
+                    createdByChild: group.createdByChild,
+                    isRecurring: true,
+                    createdBy: authManager.userName,
+                    createdByID: authManager.appleUserID
+                )
+                modelContext.insert(task)
+                notificationManager.scheduleTaskReminder(
+                    taskId: task.id,
+                    taskName: group.name,
+                    assignedTo: group.assignedTo,
+                    dueDate: date
+                )
+                let snapshot = CloudKitManager.TaskSnapshot(task)
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                totalCreated += 1
+            }
+        }
+        RecurringTaskExtender.markExtended()
+    }
+
     private func archiveOldTasks() {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let toArchive = tasks.filter { $0.isApproved && !$0.isArchived && $0.targetDate < cutoff }
-        guard !toArchive.isEmpty else { return }
-        for task in toArchive {
-            task.isArchived = true
+        guard !authManager.familyCode.isEmpty else { return }
+        Task {
+            await cloudKitManager.archiveOldTasks(context: modelContext, familyCode: authManager.familyCode)
         }
     }
 
-    private var childrenStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+    private var familyStrip: some View {
+        HStack {
+            Spacer()
             HStack(spacing: 14) {
+                if let parent = otherParent {
+                    NavigationLink(destination: DateTasksView(
+                        dateLabel: "\(parent.name)'s Tasks",
+                        tasks: activeTasks.filter { $0.assignedTo == parent.name },
+                        children: children,
+                        otherParent: parent,
+                        theme: parentTheme
+                    )) {
+                        VStack(spacing: 4) {
+                            AvatarView(avatarId: parent.avatar, size: 44)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "shield.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.cyan)
+                                        .offset(x: 2, y: 2)
+                                }
+
+                            Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(minWidth: 60)
+                }
+
                 ForEach(children) { child in
                     VStack(spacing: 4) {
                         NavigationLink(destination: ChildTasksView(
                             child: child,
                             tasks: activeTasks.filter { $0.assignedTo == child.name },
-                            allChildren: children
+                            allChildren: children,
+                            otherParent: otherParent,
+                            theme: parentTheme
                         )) {
                             VStack(spacing: 4) {
                                 AvatarView(avatarId: child.avatar, size: 44)
 
-                                Text(child.name)
+                                Text(child.name.count > 6 ? "\(child.name.prefix(6)).." : child.name)
                                     .font(.caption2.weight(.medium))
                                     .foregroundStyle(.white.opacity(0.7))
                                     .lineLimit(1)
@@ -390,8 +504,16 @@ struct ContentView: View {
                 }
             }
             .padding(.trailing, 16)
-            .padding(.vertical, 6)
         }
+        .padding(.vertical, 6)
+    }
+
+    private func refreshUnreadCount() async {
+        let lastRead = UserDefaults.standard.double(forKey: "lastNotifReadTime")
+        let lastReadDate = lastRead > 0 ? Date(timeIntervalSince1970: lastRead) : Date.distantPast
+        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
+        let myName = authManager.userName
+        unreadNotifCount = result.notifications.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
     }
 
     private func sendReminder(to child: FamilyMember) {
@@ -405,13 +527,16 @@ struct ContentView: View {
             ? "Don't forget: \"\(taskList)\" is due today!"
             : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
 
+        let targetID = child.appleUserID
         Task {
             await cloudKitManager.sendRemoteNotification(
                 familyCode: authManager.familyCode,
                 title: "Reminder from \(authManager.userName)",
                 body: body,
                 category: "TASK_REMINDER",
-                senderAvatar: authManager.avatar
+                senderAvatar: authManager.avatar,
+                senderName: authManager.userName,
+                targetAppleUserID: targetID
             )
         }
         reminderSentChildName = child.name
@@ -469,7 +594,9 @@ struct ContentView: View {
                 NavigationLink(destination: DateTasksView(
                     dateLabel: group.key,
                     tasks: group.tasks,
-                    children: children
+                    children: children,
+                    otherParent: otherParent,
+                    theme: parentTheme
                 )) {
                     GroupCard(dateLabel: group.key, count: group.tasks.count)
                 }
@@ -484,7 +611,7 @@ struct ContentView: View {
             showSubscription = true
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: subscriptionManager.tier == .family ? "house.fill" : "sparkles")
+                Image(systemName: subscriptionManager.tier == .family ? "person.3.fill" : "sparkles")
                     .font(.caption)
                     .foregroundStyle(subscriptionManager.tier == .family ? calmAccent : .orange)
 
@@ -571,6 +698,8 @@ struct DateTasksView: View {
     let dateLabel: String
     let tasks: [Item]
     let children: [FamilyMember]
+    var otherParent: FamilyMember? = nil
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var taskToDelete: Item?
     @State private var taskToEdit: Item?
     @State private var taskToApprove: Item?
@@ -580,40 +709,46 @@ struct DateTasksView: View {
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
 
+    private var taskListContent: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(tasks) { task in
+                    TaskRow(
+                        task: task,
+                        showAssignee: true,
+                        theme: theme,
+                        onApprove: {
+                            if !task.canComplete {
+                                tooEarlyTask = task
+                                showTooEarlyAlert = true
+                            } else {
+                                taskToApprove = task
+                            }
+                        },
+                        onEdit: { taskToEdit = task },
+                        onDelete: { taskToDelete = task }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                    .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.vertical, 12)
+        }
+    }
+
     var body: some View {
         ZStack {
-            AppBackground()
+            LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(tasks) { task in
-                        TaskRow(
-                            task: task,
-                            showAssignee: true,
-                            onApprove: {
-                                if !task.canComplete {
-                                    tooEarlyTask = task
-                                    showTooEarlyAlert = true
-                                } else {
-                                    taskToApprove = task
-                                }
-                            },
-                            onEdit: { taskToEdit = task },
-                            onDelete: { taskToDelete = task }
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 2)
-                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(.white.opacity(0.25), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 16)
-                    }
-                }
-                .padding(.vertical, 12)
-                }
+                taskListContent
 
                 Button {
                     showingAddTask = true
@@ -633,82 +768,20 @@ struct DateTasksView: View {
         .navigationTitle(dateLabel)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAddTask) {
-            AddTaskView(children: children)
+            AddTaskView(children: children, otherParent: otherParent, theme: theme)
         }
-        .alert(taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task", isPresented: Binding(
-            get: { taskToDelete != nil },
-            set: { if !$0 { taskToDelete = nil } }
-        )) {
-            if let task = taskToDelete {
-                if task.isRecurring {
-                    Button("Delete This Task Only", role: .destructive) {
-                        deleteSingleTask(task)
-                        taskToDelete = nil
-                    }
-                    Button("Delete All Recurring", role: .destructive) {
-                        deleteAllRecurring(like: task)
-                        taskToDelete = nil
-                    }
-                    Button("Cancel", role: .cancel) { taskToDelete = nil }
-                } else {
-                    Button("Delete", role: .destructive) {
-                        deleteSingleTask(task)
-                        taskToDelete = nil
-                    }
-                    Button("Cancel", role: .cancel) { taskToDelete = nil }
-                }
-            }
+        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
+            deleteAlertButtons
         } message: {
-            if let task = taskToDelete {
-                if task.isApproved && task.reward > 0 {
-                    if task.isRecurring {
-                        let matching = allTasks.filter {
-                            $0.name == task.name && $0.assignedTo == task.assignedTo
-                            && $0.isRecurring && !$0.isArchived
-                        }
-                        let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
-                        Text("Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s") balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total.")
-                    } else {
-                        Text("Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(task.assignedTo.isEmpty ? "you" : task.assignedTo). Deleting it will deduct those coins from the balance.")
-                    }
-                } else if task.isRecurring {
-                    let count = allTasks.filter {
-                        $0.name == task.name && $0.assignedTo == task.assignedTo
-                        && $0.isOpen && $0.isRecurring && !$0.isArchived
-                    }.count
-                    Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
-                } else {
-                    Text("Are you sure you want to delete \"\(task.name)\"?")
-                }
-            }
+            deleteAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: children)
+            EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme)
         }
-        .alert(
-            taskToApprove?.isInReview == true ? "Approve Task?" : "Mark as Complete?",
-            isPresented: Binding(
-                get: { taskToApprove != nil },
-                set: { if !$0 { taskToApprove = nil } }
-            )
-        ) {
-            Button("Cancel", role: .cancel) {
-                taskToApprove = nil
-            }
-            Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
-                if let task = taskToApprove {
-                    handleApproval(task: task)
-                }
-                taskToApprove = nil
-            }
+        .alert(approveAlertTitle, isPresented: approveAlertBinding) {
+            approveAlertButtons
         } message: {
-            if let task = taskToApprove {
-                if task.isInReview {
-                    Text("Approve \"\(task.name)\"? This cannot be undone.")
-                } else {
-                    Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
-                }
-            }
+            approveAlertMessageView
         }
         .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
             Button("Got It", role: .cancel) { tooEarlyTask = nil }
@@ -724,6 +797,110 @@ struct DateTasksView: View {
                 subtitle: "Reward credited",
                 rewardAmount: celebrationReward
             )
+        }
+    }
+
+    private var deleteAlertTitle: String {
+        taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task"
+    }
+
+    private var deleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { taskToDelete != nil },
+            set: { if !$0 { taskToDelete = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var deleteAlertButtons: some View {
+        if let task = taskToDelete {
+            if task.isRecurring {
+                Button("Delete This Task Only", role: .destructive) {
+                    deleteSingleTask(task)
+                    taskToDelete = nil
+                }
+                Button("Delete All Recurring", role: .destructive) {
+                    deleteAllRecurring(like: task)
+                    taskToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            } else {
+                Button("Delete", role: .destructive) {
+                    deleteSingleTask(task)
+                    taskToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var deleteAlertMessageView: some View {
+        if let task = taskToDelete {
+            deleteAlertMessage(for: task)
+        }
+    }
+
+    private var approveAlertTitle: String {
+        taskToApprove?.isInReview == true ? "Approve Task?" : "Mark as Complete?"
+    }
+
+    private var approveAlertBinding: Binding<Bool> {
+        Binding(
+            get: { taskToApprove != nil },
+            set: { if !$0 { taskToApprove = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var approveAlertButtons: some View {
+        Button("Cancel", role: .cancel) {
+            taskToApprove = nil
+        }
+        Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
+            if let task = taskToApprove {
+                handleApproval(task: task)
+            }
+            taskToApprove = nil
+        }
+    }
+
+    @ViewBuilder
+    private var approveAlertMessageView: some View {
+        if let task = taskToApprove {
+            if task.isInReview {
+                Text("Approve \"\(task.name)\"? This cannot be undone.")
+            } else {
+                Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deleteAlertMessage(for task: Item) -> some View {
+        if task.isApproved && task.reward > 0 {
+            if task.isRecurring {
+                let matching = allTasks.filter {
+                    $0.name == task.name && $0.assignedTo == task.assignedTo
+                    && $0.isRecurring && !$0.isArchived
+                }
+                let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+                let owner = task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s"
+                let msg = "Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(owner) balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total."
+                Text(msg)
+            } else {
+                let owner = task.assignedTo.isEmpty ? "you" : task.assignedTo
+                let msg = "Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(owner). Deleting it will deduct those coins from the balance."
+                Text(msg)
+            }
+        } else if task.isRecurring {
+            let count = allTasks.filter {
+                $0.name == task.name && $0.assignedTo == task.assignedTo
+                && $0.isOpen && $0.isRecurring && !$0.isArchived
+            }.count
+            Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+        } else {
+            Text("Are you sure you want to delete \"\(task.name)\"?")
         }
     }
 
@@ -780,16 +957,20 @@ struct DateTasksView: View {
         let taskName = task.name
         let childName = task.assignedTo
         let reward = task.reward
+        let hasGift = task.hasGift
+        let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
         Task {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
             if !childName.isEmpty {
                 let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
                 await cloudKitManager.sendRemoteNotification(
                     familyCode: familyCode,
                     title: "Task Approved!",
-                    body: "\"\(taskName)\" has been approved.\(rewardText)",
+                    body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
                     category: "TASK_APPROVED",
-                    senderAvatar: authManager.avatar
+                    senderAvatar: authManager.avatar,
+                    targetAppleUserID: targetID
                 )
             }
         }
@@ -811,6 +992,8 @@ struct ChildTasksView: View {
     let child: FamilyMember
     let tasks: [Item]
     let allChildren: [FamilyMember]
+    var otherParent: FamilyMember? = nil
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var showOpenOnly = true
     @State private var taskToEdit: Item?
     @State private var taskToDelete: Item?
@@ -853,9 +1036,54 @@ struct ChildTasksView: View {
             }
     }
 
+    private var childTaskListContent: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(groupedTasks, id: \.key) { group in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(group.key)
+                            .font(theme.font(.subheadline).weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.leading, 4)
+
+                        ForEach(group.tasks) { task in
+                            TaskRow(
+                                task: task,
+                                theme: theme,
+                                onApprove: {
+                                    if !task.canComplete {
+                                        tooEarlyTask = task
+                                        showTooEarlyAlert = true
+                                    } else {
+                                        taskToApprove = task
+                                    }
+                                },
+                                onEdit: { taskToEdit = task },
+                                onDelete: { taskToDelete = task }
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 2)
+                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+    }
+
     var body: some View {
         ZStack {
-            AppBackground()
+            LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 childHeader
@@ -871,46 +1099,7 @@ struct ChildTasksView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(groupedTasks, id: \.key) { group in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(group.key)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.6))
-                                        .padding(.leading, 4)
-
-                                    ForEach(group.tasks) { task in
-                                        TaskRow(
-                                            task: task,
-                                            onApprove: {
-                                                if !task.canComplete {
-                                                    tooEarlyTask = task
-                                                    showTooEarlyAlert = true
-                                                } else {
-                                                    taskToApprove = task
-                                                }
-                                            },
-                                            onEdit: { taskToEdit = task },
-                                            onDelete: { taskToDelete = task }
-                                        )
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 2)
-                                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .strokeBorder(
-                                                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
-                                                    lineWidth: 1
-                                                )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                    }
+                    childTaskListContent
                 }
 
                 Button {
@@ -932,121 +1121,22 @@ struct ChildTasksView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationTitle("\(child.name)'s Tasks")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    withAnimation(.snappy) { showOpenOnly.toggle() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        Text(showOpenOnly ? "Open Tasks" : "All Tasks")
-                            .font(.subheadline)
-                    }
-                }
-            }
-        }
-        .alert(taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task", isPresented: Binding(
-            get: { taskToDelete != nil },
-            set: { if !$0 { taskToDelete = nil } }
-        )) {
-            if let task = taskToDelete {
-                if task.isRecurring {
-                    Button("Delete This Task Only", role: .destructive) {
-                        deleteSingleTask(task)
-                        taskToDelete = nil
-                    }
-                    Button("Delete All Recurring", role: .destructive) {
-                        deleteAllRecurring(like: task)
-                        taskToDelete = nil
-                    }
-                    Button("Cancel", role: .cancel) { taskToDelete = nil }
-                } else {
-                    Button("Delete", role: .destructive) {
-                        deleteSingleTask(task)
-                        taskToDelete = nil
-                    }
-                    Button("Cancel", role: .cancel) { taskToDelete = nil }
-                }
-            }
+        .toolbar { childFilterToolbar }
+        .alert(childDeleteAlertTitle, isPresented: childDeleteAlertBinding) {
+            childDeleteAlertButtons
         } message: {
-            if let task = taskToDelete {
-                if task.isApproved && task.reward > 0 {
-                    if task.isRecurring {
-                        let matching = allTasks.filter {
-                            $0.name == task.name && $0.assignedTo == task.assignedTo
-                            && $0.isRecurring && !$0.isArchived
-                        }
-                        let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
-                        Text("Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s") balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total.")
-                    } else {
-                        Text("Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(task.assignedTo.isEmpty ? "you" : task.assignedTo). Deleting it will deduct those coins from the balance.")
-                    }
-                } else if task.isRecurring {
-                    let count = allTasks.filter {
-                        $0.name == task.name && $0.assignedTo == task.assignedTo
-                        && $0.isOpen && $0.isRecurring && !$0.isArchived
-                    }.count
-                    Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
-                } else {
-                    Text("Are you sure you want to delete \"\(task.name)\"?")
-                }
-            }
+            childDeleteAlertMessageView
         }
-        .alert(
-            taskToApprove?.isInReview == true ? "Approve Task?" : "Mark as Complete?",
-            isPresented: Binding(
-                get: { taskToApprove != nil },
-                set: { if !$0 { taskToApprove = nil } }
-            )
-        ) {
-            Button("Cancel", role: .cancel) { taskToApprove = nil }
-            Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
-                if let task = taskToApprove {
-                    task.status = "approved"
-                    let snapshot = CloudKitManager.TaskSnapshot(task)
-                    if task.reward > 0 {
-                        child.totalEarned += task.reward
-                    }
-                    notificationManager.sendTaskApprovedNotification(
-                        taskName: task.name,
-                        childName: child.name,
-                        reward: task.reward
-                    )
-                    let familyCode = authManager.familyCode
-                    let taskName = task.name
-                    let reward = task.reward
-                    Task {
-                        await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-                        await cloudKitManager.pushMember(child, familyCode: familyCode)
-                        let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
-                        await cloudKitManager.sendRemoteNotification(
-                            familyCode: familyCode,
-                            title: "Task Approved!",
-                            body: "\"\(taskName)\" has been approved.\(rewardText)",
-                            category: "TASK_APPROVED",
-                            senderAvatar: authManager.avatar
-                        )
-                    }
-                    SoundManager.shared.playApplause()
-                    celebrationReward = task.reward
-                    showCelebration = true
-                }
-                taskToApprove = nil
-            }
+        .alert(childApproveAlertTitle, isPresented: childApproveAlertBinding) {
+            childApproveAlertButtons
         } message: {
-            if let task = taskToApprove {
-                if task.isInReview {
-                    Text("Approve \"\(task.name)\"? This cannot be undone.")
-                } else {
-                    Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
-                }
-            }
+            childApproveAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: allChildren)
+            EditTaskView(task: task, children: allChildren, otherParent: otherParent, theme: theme)
         }
         .sheet(isPresented: $showingAddTask) {
-            AddTaskView(children: allChildren, preselectedChild: child.name)
+            AddTaskView(children: allChildren, otherParent: otherParent, preselectedChild: child.name, theme: theme)
         }
         .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
             Button("Got It", role: .cancel) { tooEarlyTask = nil }
@@ -1062,6 +1152,94 @@ struct ChildTasksView: View {
                 subtitle: "Reward credited",
                 rewardAmount: celebrationReward
             )
+        }
+    }
+
+    private var childFilterToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                withAnimation(.snappy) { showOpenOnly.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    Text(showOpenOnly ? "Open Tasks" : "All Tasks")
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private var childDeleteAlertTitle: String {
+        taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task"
+    }
+
+    private var childDeleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { taskToDelete != nil },
+            set: { if !$0 { taskToDelete = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var childDeleteAlertButtons: some View {
+        if let task = taskToDelete {
+            if task.isRecurring {
+                Button("Delete This Task Only", role: .destructive) {
+                    deleteSingleTask(task)
+                    taskToDelete = nil
+                }
+                Button("Delete All Recurring", role: .destructive) {
+                    deleteAllRecurring(like: task)
+                    taskToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            } else {
+                Button("Delete", role: .destructive) {
+                    deleteSingleTask(task)
+                    taskToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var childDeleteAlertMessageView: some View {
+        if let task = taskToDelete {
+            deleteAlertMessage(for: task)
+        }
+    }
+
+    private var childApproveAlertTitle: String {
+        taskToApprove?.isInReview == true ? "Approve Task?" : "Mark as Complete?"
+    }
+
+    private var childApproveAlertBinding: Binding<Bool> {
+        Binding(
+            get: { taskToApprove != nil },
+            set: { if !$0 { taskToApprove = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var childApproveAlertButtons: some View {
+        Button("Cancel", role: .cancel) { taskToApprove = nil }
+        Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
+            if let task = taskToApprove {
+                handleChildApproval(task: task)
+            }
+            taskToApprove = nil
+        }
+    }
+
+    @ViewBuilder
+    private var childApproveAlertMessageView: some View {
+        if let task = taskToApprove {
+            if task.isInReview {
+                Text("Approve \"\(task.name)\"? This cannot be undone.")
+            } else {
+                Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
+            }
         }
     }
 
@@ -1135,16 +1313,82 @@ struct ChildTasksView: View {
             ? "Don't forget: \"\(taskList)\" is due today!"
             : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
 
+        let targetID = child.appleUserID
         Task {
             await cloudKitManager.sendRemoteNotification(
                 familyCode: authManager.familyCode,
                 title: "Reminder from \(authManager.userName)",
                 body: body,
                 category: "TASK_REMINDER",
-                senderAvatar: authManager.avatar
+                senderAvatar: authManager.avatar,
+                senderName: authManager.userName,
+                targetAppleUserID: targetID
             )
         }
         showReminderSent = true
+    }
+
+    @ViewBuilder
+    private func deleteAlertMessage(for task: Item) -> some View {
+        if task.isApproved && task.reward > 0 {
+            if task.isRecurring {
+                let matching = allTasks.filter {
+                    $0.name == task.name && $0.assignedTo == task.assignedTo
+                    && $0.isRecurring && !$0.isArchived
+                }
+                let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+                let owner = task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s"
+                let msg = "Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(owner) balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total."
+                Text(msg)
+            } else {
+                let owner = task.assignedTo.isEmpty ? "you" : task.assignedTo
+                let msg = "Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(owner). Deleting it will deduct those coins from the balance."
+                Text(msg)
+            }
+        } else if task.isRecurring {
+            let count = allTasks.filter {
+                $0.name == task.name && $0.assignedTo == task.assignedTo
+                && $0.isOpen && $0.isRecurring && !$0.isArchived
+            }.count
+            Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+        } else {
+            Text("Are you sure you want to delete \"\(task.name)\"?")
+        }
+    }
+
+    private func handleChildApproval(task: Item) {
+        task.status = "approved"
+        let snapshot = CloudKitManager.TaskSnapshot(task)
+        if task.reward > 0 {
+            child.totalEarned += task.reward
+        }
+        notificationManager.sendTaskApprovedNotification(
+            taskName: task.name,
+            childName: child.name,
+            reward: task.reward
+        )
+        let familyCode = authManager.familyCode
+        let taskName = task.name
+        let reward = task.reward
+        let hasGift = task.hasGift
+        let targetID = child.appleUserID
+        Task {
+            await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
+            await cloudKitManager.pushMember(child, familyCode: familyCode)
+            let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+            let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
+            await cloudKitManager.sendRemoteNotification(
+                familyCode: familyCode,
+                title: "Task Approved!",
+                body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
+                category: "TASK_APPROVED",
+                senderAvatar: authManager.avatar,
+                targetAppleUserID: targetID
+            )
+        }
+        SoundManager.shared.playApplause()
+        celebrationReward = task.reward
+        showCelebration = true
     }
 
     private func deductCoinsIfNeeded(_ task: Item) {
@@ -1185,6 +1429,7 @@ struct ChildTasksView: View {
 struct TaskRow: View {
     @Bindable var task: Item
     var showAssignee: Bool = false
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onApprove: (() -> Void)?
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -1205,9 +1450,7 @@ struct TaskRow: View {
         HStack(spacing: 14) {
             Button {
                 guard task.isOpen || task.isInReview else { return }
-                if task.isInReview || task.assignedTo.isEmpty || task.createdByChild {
-                    onApprove?()
-                }
+                onApprove?()
             } label: {
                 VStack(spacing: 3) {
                     ZStack {
@@ -1241,7 +1484,8 @@ struct TaskRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
-                    .font(.body)
+                    .font(theme.font(.body))
+                    .lineLimit(1)
                     .strikethrough(task.isApproved)
                     .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
 
@@ -1264,6 +1508,17 @@ struct TaskRow: View {
                         Text("•")
                             .foregroundStyle(.white.opacity(0.3))
                         CoinDisplay(count: Int(task.reward), earned: task.isApproved)
+                    }
+
+                    if task.hasGift {
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(red: 1.0, green: 0.2, blue: 0.5))
+                            .overlay(
+                                Image(systemName: "gift")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            )
                     }
 
                     if showAssignee && !task.assignedTo.isEmpty {
@@ -1342,10 +1597,12 @@ struct AddTaskView: View {
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     let children: [FamilyMember]
+    var otherParent: FamilyMember? = nil
     var preselectedChild: String = ""
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     @State private var taskName = ""
-    @State private var targetDate = Date()
+    @State private var targetDate = roundedToNext5Minutes()
     @State private var selectedChild = ""
     @State private var rewardText = ""
     @State private var recurrenceType: RecurrenceType = .none
@@ -1356,6 +1613,8 @@ struct AddTaskView: View {
     @State private var smartInput = ""
     @State private var parsedTask: ParsedTask?
     @State private var showQuotaAlert = false
+    @State private var giftText = ""
+    @State private var includeGift = false
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1404,7 +1663,8 @@ struct AddTaskView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -1442,7 +1702,7 @@ struct AddTaskView: View {
 
                                 if remaining <= 10 {
                                     NavigationLink {
-                                        SubscriptionView()
+                                        SubscriptionView(theme: theme)
                                     } label: {
                                         HStack {
                                             Image(systemName: "crown.fill")
@@ -1494,17 +1754,11 @@ struct AddTaskView: View {
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.5))
 
-                            DatePicker(
-                                "",
-                                selection: $targetDate,
-                                in: Date()...,
-                                displayedComponents: [.date, .hourAndMinute]
-                            )
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .colorScheme(.dark)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            FiveMinuteDatePicker(selection: $targetDate, minimumDate: Date())
+                            .frame(height: 44)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
@@ -1536,15 +1790,56 @@ struct AddTaskView: View {
                             )
                         }
 
-                        if !children.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(isOn: $includeGift) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "gift.fill")
+                                        .foregroundStyle(.pink)
+                                    Text("Add Surprise Gift")
+                                        .font(.body)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .tint(.pink)
+                            .padding(14)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if includeGift {
+                                Text("Gift Description")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.5))
+
+                                TextField("e.g. New shoes, Movie of choice", text: $giftText)
+                                    .font(.body)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
+                                    )
+                            }
+                        }
+
+                        if !children.isEmpty || otherParent != nil {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Assign To")
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.5))
 
                                 VStack(spacing: 8) {
-                                    childChip(name: authManager.userName, isSelected: selectedChild.isEmpty) {
-                                        selectedChild = ""
+                                    childChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
+                                        selectedChild = authManager.userName
+                                    }
+
+                                    if let parent = otherParent {
+                                        childChip(name: parent.name, isSelected: selectedChild == parent.name) {
+                                            selectedChild = parent.name
+                                        }
                                     }
 
                                     ForEach(children) { child in
@@ -1567,8 +1862,8 @@ struct AddTaskView: View {
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                if selectedChild.isEmpty && !preselectedChild.isEmpty {
-                    selectedChild = preselectedChild
+                if selectedChild.isEmpty {
+                    selectedChild = preselectedChild.isEmpty ? authManager.userName : preselectedChild
                 }
             }
             .toolbar {
@@ -1585,13 +1880,17 @@ struct AddTaskView: View {
                         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
                         var createdTasks: [Item] = []
                         let recurring = recurrenceType != .none
+                        let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
                         for date in dates {
                             let task = Item(
                                 name: trimmedName,
                                 targetDate: date,
                                 assignedTo: selectedChild,
                                 reward: rewardValue,
-                                isRecurring: recurring
+                                isRecurring: recurring,
+                                giftText: trimmedGift,
+                                createdBy: authManager.userName,
+                                createdByID: authManager.appleUserID
                             )
                             modelContext.insert(task)
                             createdTasks.append(task)
@@ -1607,6 +1906,7 @@ struct AddTaskView: View {
                         let childName = selectedChild
                         let parentName = authManager.userName
                         let taskCount = createdTasks.count
+                        let targetID = children.first(where: { $0.name == selectedChild })?.appleUserID ?? ""
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
@@ -1617,7 +1917,8 @@ struct AddTaskView: View {
                                     title: "New Task Assigned",
                                     body: "\(parentName) assigned \"\(trimmedName)\" to \(childName)" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
                                     category: "TASK_ASSIGNED",
-                                    senderAvatar: authManager.avatar
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: targetID
                                 )
                             }
                         }
@@ -1631,7 +1932,7 @@ struct AddTaskView: View {
         .presentationDetents([.large])
         .alert("Task Limit Reached", isPresented: $showQuotaAlert) {
             NavigationLink("Upgrade Plan") {
-                SubscriptionView()
+                SubscriptionView(theme: theme)
             }
             Button("OK", role: .cancel) { }
         } message: {
@@ -1876,7 +2177,7 @@ struct AddTaskView: View {
     private func applyParsedTask(_ parsed: ParsedTask) {
         taskName = parsed.name
         targetDate = parsed.targetDate
-        selectedChild = parsed.assignedTo.isEmpty ? preselectedChild : parsed.assignedTo
+        selectedChild = parsed.assignedTo.isEmpty ? (preselectedChild.isEmpty ? authManager.userName : preselectedChild) : parsed.assignedTo
         rewardText = parsed.reward > 0 ? "\(parsed.reward)" : ""
         recurrenceType = parsed.recurrence
 
@@ -1889,13 +2190,17 @@ struct AddTaskView: View {
         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
         let recurring = recurrenceType != .none
 
+        let trimmedGiftSmart = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
         for date in dates {
             let task = Item(
                 name: trimmedName,
                 targetDate: date,
                 assignedTo: selectedChild,
                 reward: Double(rewardText) ?? 0,
-                isRecurring: recurring
+                isRecurring: recurring,
+                giftText: trimmedGiftSmart,
+                createdBy: authManager.userName,
+                createdByID: authManager.appleUserID
             )
             modelContext.insert(task)
 
@@ -1908,6 +2213,7 @@ struct AddTaskView: View {
 
             if !authManager.familyCode.isEmpty {
                 let snapshot = CloudKitManager.TaskSnapshot(task)
+                let targetID = children.first(where: { $0.name == selectedChild })?.appleUserID ?? ""
                 Task {
                     await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: authManager.familyCode)
                     if !selectedChild.isEmpty {
@@ -1916,7 +2222,8 @@ struct AddTaskView: View {
                             title: "New Task Assigned",
                             body: "\"\(trimmedName)\" assigned to \(selectedChild)",
                             category: "TASK_ASSIGNED",
-                            senderAvatar: authManager.avatar
+                            senderAvatar: authManager.avatar,
+                            targetAppleUserID: targetID
                         )
                     }
                 }
@@ -2005,19 +2312,27 @@ struct EditTaskView: View {
     @Environment(AuthManager.self) private var authManager
     @Bindable var task: Item
     let children: [FamilyMember]
+    var otherParent: FamilyMember? = nil
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     @State private var taskName: String
     @State private var targetDate: Date
     @State private var selectedChild: String
     @State private var rewardText: String
+    @State private var includeGift: Bool
+    @State private var giftText: String
 
-    init(task: Item, children: [FamilyMember]) {
+    init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")) {
         self.task = task
         self.children = children
+        self.otherParent = otherParent
+        self.theme = theme
         _taskName = State(initialValue: task.name)
         _targetDate = State(initialValue: task.targetDate)
         _selectedChild = State(initialValue: task.assignedTo)
         _rewardText = State(initialValue: task.reward > 0 ? String(format: "%.2f", task.reward) : "")
+        _includeGift = State(initialValue: !task.giftText.isEmpty)
+        _giftText = State(initialValue: task.giftText)
     }
 
     private var isValid: Bool {
@@ -2031,7 +2346,8 @@ struct EditTaskView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -2058,15 +2374,10 @@ struct EditTaskView: View {
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.5))
 
-                            DatePicker(
-                                "",
-                                selection: $targetDate,
-                                displayedComponents: [.date, .hourAndMinute]
-                            )
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .colorScheme(.dark)
-                            .padding(14)
+                            FiveMinuteDatePicker(selection: $targetDate)
+                            .frame(height: 44)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
@@ -2097,15 +2408,56 @@ struct EditTaskView: View {
                             )
                         }
 
-                        if !children.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(isOn: $includeGift) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "gift.fill")
+                                        .foregroundStyle(.pink)
+                                    Text("Surprise Gift")
+                                        .font(.body)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .tint(.pink)
+                            .padding(14)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if includeGift {
+                                Text("Gift Description")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.5))
+
+                                TextField("e.g. New shoes, Movie of choice", text: $giftText)
+                                    .font(.body)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
+                                    )
+                            }
+                        }
+
+                        if !children.isEmpty || otherParent != nil {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Assign To")
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.5))
 
                                 VStack(spacing: 8) {
-                                    editChildChip(name: authManager.userName, isSelected: selectedChild.isEmpty) {
-                                        selectedChild = ""
+                                    editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
+                                        selectedChild = authManager.userName
+                                    }
+
+                                    if let parent = otherParent {
+                                        editChildChip(name: parent.name, isSelected: selectedChild == parent.name) {
+                                            selectedChild = parent.name
+                                        }
                                     }
 
                                     ForEach(children) { child in
@@ -2135,6 +2487,7 @@ struct EditTaskView: View {
                         task.targetDate = targetDate
                         task.assignedTo = selectedChild
                         task.reward = rewardValue
+                        task.giftText = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
                         notificationManager.cancelTaskReminder(taskId: task.id)
                         notificationManager.scheduleTaskReminder(
                             taskId: task.id,
@@ -2189,6 +2542,7 @@ struct ChildrenManagementView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var memberToRemove: FamilyMember?
 
     private var parents: [FamilyMember] {
@@ -2206,7 +2560,8 @@ struct ChildrenManagementView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -2332,6 +2687,7 @@ struct ChildrenManagementView: View {
                     Button {
                         member.isAccepted = true
                         let familyCode = authManager.familyCode
+                        let targetID = member.appleUserID
                         Task {
                             await cloudKitManager.pushMember(member, familyCode: familyCode)
                             await cloudKitManager.sendRemoteNotification(
@@ -2339,7 +2695,8 @@ struct ChildrenManagementView: View {
                                 title: "Welcome to the Family!",
                                 body: "\(member.name), your parent approved your request. You're all set!",
                                 category: "MEMBER_ACCEPTED",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: targetID
                             )
                         }
                     } label: {
@@ -2444,7 +2801,7 @@ struct ChildrenManagementView: View {
             }
 
             NavigationLink {
-                SubscriptionView()
+                SubscriptionView(theme: theme)
             } label: {
                 HStack {
                     Image(systemName: "crown.fill")
@@ -2480,13 +2837,15 @@ struct PendingApprovalsView: View {
     @Query(filter: #Predicate<Item> { $0.status == "inReview" }, sort: \Item.targetDate)
     private var pendingTasks: [Item]
     @Query private var children: [FamilyMember]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onApproved: ((Double) -> Void)?
     @State private var taskToApprove: Item?
 
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 if pendingTasks.isEmpty {
                     VStack(spacing: 12) {
@@ -2545,16 +2904,20 @@ struct PendingApprovalsView: View {
                         let taskName = task.name
                         let childName = task.assignedTo
                         let reward = task.reward
+                        let hasGift = task.hasGift
+                        let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
                         Task {
                             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
                             if !childName.isEmpty {
                                 let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                                let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
                                 await cloudKitManager.sendRemoteNotification(
                                     familyCode: familyCode,
                                     title: "Task Approved!",
-                                    body: "\"\(taskName)\" has been approved.\(rewardText)",
+                                    body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
                                     category: "TASK_APPROVED",
-                                    senderAvatar: authManager.avatar
+                                    senderAvatar: authManager.avatar,
+                                    targetAppleUserID: targetID
                                 )
                             }
                         }
@@ -2587,6 +2950,7 @@ struct PendingApprovalsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(task.name)
                         .font(.body.weight(.medium))
+                        .lineLimit(1)
                         .foregroundStyle(.white)
 
                     HStack(spacing: 6) {
@@ -2620,6 +2984,7 @@ struct PendingApprovalsView: View {
                     let familyCode = authManager.familyCode
                     let taskName = task.name
                     let childName = task.assignedTo
+                    let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
                     Task {
                         await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
                         if !childName.isEmpty {
@@ -2628,7 +2993,8 @@ struct PendingApprovalsView: View {
                                 title: "Task Needs Redo",
                                 body: "\"\(taskName)\" was sent back. Please try again.",
                                 category: "TASK_REJECTED",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: targetID
                             )
                         }
                     }
@@ -2690,6 +3056,7 @@ struct ParentOnboardingView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onComplete: () -> Void
 
     private var children: [FamilyMember] {
@@ -2702,7 +3069,8 @@ struct ParentOnboardingView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -2862,6 +3230,7 @@ struct EditProfileView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     @State private var name = ""
     @State private var selectedAvatar = ""
@@ -2877,7 +3246,12 @@ struct EditProfileView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -2981,13 +3355,15 @@ struct RedemptionApprovalsView: View {
     @Query(filter: #Predicate<RewardRedemption> { $0.status == "pending" }, sort: \RewardRedemption.createdAt)
     private var pendingRedemptions: [RewardRedemption]
     @Query private var allMembers: [FamilyMember]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var rejectTarget: RewardRedemption?
     @State private var rejectReason = ""
 
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 if pendingRedemptions.isEmpty {
                     VStack(spacing: 12) {
@@ -3037,6 +3413,7 @@ struct RedemptionApprovalsView: View {
                         redemption.resolvedAt = Date()
                         let familyCode = authManager.familyCode
                         let desc = redemption.itemDescription
+                        let targetID = allMembers.first(where: { $0.name == redemption.childName })?.appleUserID ?? ""
                         Task {
                             _ = await cloudKitManager.pushRedemption(redemption, familyCode: familyCode)
                             await cloudKitManager.sendRemoteNotification(
@@ -3044,7 +3421,8 @@ struct RedemptionApprovalsView: View {
                                 title: "Reward Request Declined",
                                 body: "Your request for \"\(desc)\" was declined." + (rejectReason.isEmpty ? "" : " Reason: \(rejectReason)"),
                                 category: "REWARD_REJECTED",
-                                senderAvatar: authManager.avatar
+                                senderAvatar: authManager.avatar,
+                                targetAppleUserID: targetID
                             )
                         }
                     }
@@ -3152,6 +3530,7 @@ struct RedemptionApprovalsView: View {
         let familyCode = authManager.familyCode
         let desc = r.itemDescription
         let coins = r.coinAmount
+        let targetID = allMembers.first(where: { $0.name == r.childName })?.appleUserID ?? ""
         Task {
             _ = await cloudKitManager.pushRedemption(r, familyCode: familyCode)
             await cloudKitManager.sendRemoteNotification(
@@ -3159,7 +3538,9 @@ struct RedemptionApprovalsView: View {
                 title: "Reward Approved!",
                 body: "Your request for \"\(desc)\" (\(coins) coins) was approved!",
                 category: "REWARD_APPROVED",
-                senderAvatar: authManager.avatar
+                senderAvatar: authManager.avatar,
+                senderName: authManager.userName,
+                targetAppleUserID: targetID
             )
         }
     }
@@ -3170,6 +3551,9 @@ struct RedemptionApprovalsView: View {
 struct SubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var isPurchasing = false
 
     private struct PlanFeature {
@@ -3211,7 +3595,7 @@ struct SubscriptionView: View {
             PlanInfo(
                 tier: .family,
                 name: "Family",
-                icon: "house.fill",
+                icon: "person.3.fill",
                 color: calmAccent,
                 price: "$4.99",
                 period: "/month",
@@ -3248,7 +3632,8 @@ struct SubscriptionView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -3291,7 +3676,7 @@ struct SubscriptionView: View {
 
     private var currentPlanBadge: some View {
         HStack(spacing: 10) {
-            Image(systemName: subscriptionManager.tier == .pro ? "crown.fill" : subscriptionManager.tier == .family ? "house.fill" : "person.2.fill")
+            Image(systemName: subscriptionManager.tier == .pro ? "crown.fill" : subscriptionManager.tier == .family ? "person.3.fill" : "person.2.fill")
                 .font(.title3)
                 .foregroundStyle(subscriptionManager.tier == .pro ? .orange : subscriptionManager.tier == .family ? calmAccent : .gray)
 
@@ -3409,7 +3794,10 @@ struct SubscriptionView: View {
             guard let product else { return }
             isPurchasing = true
             Task {
-                _ = await subscriptionManager.purchase(product)
+                let success = await subscriptionManager.purchase(product)
+                if success {
+                    await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
+                }
                 isPurchasing = false
             }
         } label: {
@@ -3448,6 +3836,9 @@ struct SubscriptionView: View {
         Button {
             Task {
                 await subscriptionManager.restorePurchases()
+                if subscriptionManager.tier != .free {
+                    await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
+                }
             }
         } label: {
             Text("Restore Purchases")
@@ -3483,6 +3874,7 @@ struct NotificationCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var notifications: [CloudKitManager.NotificationItem] = []
     @State private var isLoading = true
     @State private var showClearAllConfirm = false
@@ -3491,7 +3883,12 @@ struct NotificationCenterView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 if isLoading {
                     ProgressView()
@@ -3575,7 +3972,7 @@ struct NotificationCenterView: View {
     private func loadNotifications() async {
         isLoading = notifications.isEmpty
         let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
-        notifications = result.notifications
+        notifications = result.notifications.filter { $0.senderName != authManager.userName || $0.senderName.isEmpty }
         isLoading = false
     }
 
@@ -3606,11 +4003,7 @@ struct NotificationCenterView: View {
     private func notificationRow(_ notif: CloudKitManager.NotificationItem) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                Image(systemName: notif.senderAvatar.isEmpty ? "star.fill" : notif.senderAvatar)
-                    .font(.title)
-                    .foregroundStyle(colorForCategory(notif.category))
-                    .frame(width: 36, height: 36)
-                    .background(colorForCategory(notif.category).opacity(0.15), in: Circle())
+                AvatarView(avatarId: notif.senderAvatar, size: 36)
 
                 Image(systemName: iconForCategory(notif.category))
                     .font(.system(size: 10, weight: .bold))
