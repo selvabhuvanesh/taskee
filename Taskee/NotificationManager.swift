@@ -150,6 +150,19 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         saveNotification(title: title, body: body, category: "TASK_ASSIGNED", senderName: assignerName)
     }
 
+    func deliverBeepNotification(title: String, body: String, category: String, senderName: String = "") {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
+        content.categoryIdentifier = category
+        content.interruptionLevel = .timeSensitive
+
+        let request = UNNotificationRequest(identifier: "beep-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: category, senderName: senderName)
+    }
+
     func sendPickupNotification(childName: String) {
         let title = "Pickup Request!"
         let body = "\(childName) wants to be picked up in 5 minutes!"
@@ -207,7 +220,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let category = notification.request.content.categoryIdentifier
-        if category == "TASK_REMINDER" {
+        if category == "TASK_REMINDER" || category == "TASK_ASSIGNED" {
             SoundManager.shared.playReminderBeep()
             completionHandler([.banner, .list])
         } else {

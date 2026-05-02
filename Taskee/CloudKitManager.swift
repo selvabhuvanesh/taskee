@@ -769,6 +769,55 @@ final class CloudKitManager {
         }
     }
 
+    struct RemoteNotification {
+        let recordID: String
+        let title: String
+        let body: String
+        let category: String
+        let senderName: String
+    }
+
+    func fetchUnseenNotifications(familyCode: String, appleUserID: String) async -> [RemoteNotification] {
+        guard !familyCode.isEmpty, !appleUserID.isEmpty else { return [] }
+
+        let seenIDs = Set(UserDefaults.standard.stringArray(forKey: "seenRemoteNotifIDs") ?? [])
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        let predicate = NSPredicate(
+            format: "familyCode == %@ AND targetAppleUserID == %@ AND createdAt > %@",
+            familyCode, appleUserID, cutoff as NSDate
+        )
+        let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+        do {
+            let (results, _) = try await database.records(matching: query, resultsLimit: 20)
+            var notifications: [RemoteNotification] = []
+            for (recordID, result) in results {
+                let id = recordID.recordName
+                guard !seenIDs.contains(id) else { continue }
+                if let record = try? result.get() {
+                    notifications.append(RemoteNotification(
+                        recordID: id,
+                        title: record["title"] as? String ?? "",
+                        body: record["body"] as? String ?? "",
+                        category: record["category"] as? String ?? "",
+                        senderName: record["senderName"] as? String ?? ""
+                    ))
+                }
+            }
+            return notifications
+        } catch {
+            return []
+        }
+    }
+
+    static func markNotificationsSeen(_ ids: [String]) {
+        var seen = UserDefaults.standard.stringArray(forKey: "seenRemoteNotifIDs") ?? []
+        seen.append(contentsOf: ids)
+        if seen.count > 500 { seen = Array(seen.suffix(500)) }
+        UserDefaults.standard.set(seen, forKey: "seenRemoteNotifIDs")
+    }
+
     // MARK: - Family Subscription Tier
 
     func pushFamilyTier(_ tier: String, familyCode: String) async {
@@ -917,6 +966,11 @@ final class CloudKitManager {
         await createSubscription(
             id: "family-changes-\(familyCode)",
             recordType: "FamilyRecord",
+            familyCode: familyCode
+        )
+        await createSubscription(
+            id: "notif-changes-\(familyCode)",
+            recordType: "NotificationRecord",
             familyCode: familyCode
         )
         await createSilentSubscription(

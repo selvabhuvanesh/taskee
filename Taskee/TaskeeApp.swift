@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import Combine
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -120,6 +121,7 @@ struct TaskeeApp: App {
                     if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
                         subscriptionManager.setFamilyTier(familyTier)
                     }
+                    await fetchAndDeliverNotifications()
                 }
             }
             .task {
@@ -143,6 +145,7 @@ struct TaskeeApp: App {
                     subscriptionManager.setFamilyTier(familyTier)
                 }
                 await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
+                await fetchAndDeliverNotifications()
                 await checkChildAcceptance()
             }
             .onReceive(NotificationCenter.default.publisher(for: .checkPickupNotification)) { _ in
@@ -164,8 +167,13 @@ struct TaskeeApp: App {
                     if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
                         subscriptionManager.setFamilyTier(familyTier)
                     }
+                    await fetchAndDeliverNotifications()
                     await checkChildAcceptance()
                 }
+            }
+            .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+                guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty else { return }
+                Task { await fetchAndDeliverNotifications() }
             }
             .sheet(isPresented: $showOnboarding) {
                 ParentOnboardingView {
@@ -252,6 +260,29 @@ struct TaskeeApp: App {
                 )
             }
         }
+    }
+
+    private func fetchAndDeliverNotifications() async {
+        guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty else { return }
+        let unseen = await cloudKitManager.fetchUnseenNotifications(
+            familyCode: authManager.familyCode,
+            appleUserID: authManager.appleUserID
+        )
+        guard !unseen.isEmpty else { return }
+        let myName = authManager.userName
+        var seenIDs: [String] = []
+        for notif in unseen {
+            if notif.senderName != myName {
+                notificationManager.deliverBeepNotification(
+                    title: notif.title,
+                    body: notif.body,
+                    category: notif.category,
+                    senderName: notif.senderName
+                )
+            }
+            seenIDs.append(notif.recordID)
+        }
+        CloudKitManager.markNotificationsSeen(seenIDs)
     }
 }
 

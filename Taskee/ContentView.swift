@@ -2036,6 +2036,7 @@ struct AddTaskView: View {
                                     body: "\(parentName) assigned \"\(trimmedName)\" to you" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
                                     category: "TASK_ASSIGNED",
                                     senderAvatar: authManager.avatar,
+                                    senderName: parentName,
                                     targetAppleUserID: targetID
                                 )
                             }
@@ -2341,6 +2342,7 @@ struct AddTaskView: View {
                             body: "\"\(trimmedName)\" assigned to \(selectedChild)",
                             category: "TASK_ASSIGNED",
                             senderAvatar: authManager.avatar,
+                            senderName: authManager.userName,
                             targetAppleUserID: targetID
                         )
                     }
@@ -2632,6 +2634,7 @@ struct EditTaskView: View {
                                     body: "\(parentName) assigned \"\(trimmedName)\" to you",
                                     category: "TASK_ASSIGNED",
                                     senderAvatar: authManager.avatar,
+                                    senderName: parentName,
                                     targetAppleUserID: targetID
                                 )
                             }

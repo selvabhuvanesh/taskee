@@ -1247,6 +1247,7 @@ struct AddChildTaskView: View {
                                     body: "\(senderName) assigned \"\(trimmedName)\" to you" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
                                     category: "TASK_ASSIGNED",
                                     senderAvatar: authManager.avatar,
+                                    senderName: senderName,
                                     targetAppleUserID: targetID
                                 )
                                 await cloudKitManager.sendRemoteNotification(
