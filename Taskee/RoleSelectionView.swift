@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 struct RoleSelectionView: View {
     @Environment(\.modelContext) private var modelContext
@@ -29,6 +30,8 @@ struct RoleSelectionView: View {
     @State private var gateA = Int.random(in: 6...12)
     @State private var gateB = Int.random(in: 4...9)
     @State private var showWrongAnswer = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var customPhotoImage: UIImage?
 
     var body: some View {
         ZStack {
@@ -179,10 +182,58 @@ struct RoleSelectionView: View {
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.5))
 
+            HStack(spacing: 16) {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    VStack(spacing: 6) {
+                        if let img = customPhotoImage, selectedAvatar.hasPrefix("photo_") {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 54, height: 54)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(.blue, lineWidth: 2.5)
+                                        .frame(width: 58, height: 58)
+                                )
+                        } else {
+                            ZStack {
+                                Circle()
+                                    .fill(.white.opacity(0.15))
+                                    .frame(width: 54, height: 54)
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                        }
+                        Text("Photo")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .onChange(of: selectedPhotoItem) { _, item in
+                    guard let item else { return }
+                    Task {
+                        if let data = try? await item.loadTransferable(type: Data.self),
+                           let uiImage = UIImage(data: data) {
+                            let photoID = UUID().uuidString
+                            let resized = resizeAvatar(uiImage, maxSize: 400)
+                            if saveAvatarPhoto(resized, photoID: photoID) {
+                                customPhotoImage = resized
+                                selectedAvatar = "photo_\(photoID)"
+                            }
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                 ForEach(avatarPresets, id: \.id) { preset in
                     Button {
                         selectedAvatar = preset.id
+                        customPhotoImage = nil
                     } label: {
                         AvatarFaceView(config: preset, size: 54)
                             .overlay(
@@ -205,6 +256,7 @@ struct RoleSelectionView: View {
                 ForEach(animalAvatarPresets, id: \.id) { preset in
                     Button {
                         selectedAvatar = preset.id
+                        customPhotoImage = nil
                     } label: {
                         AnimalAvatarFaceView(config: preset, size: 54)
                             .overlay(
@@ -218,6 +270,15 @@ struct RoleSelectionView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func resizeAvatar(_ image: UIImage, maxSize: CGFloat) -> UIImage {
+        let scale = min(maxSize / image.size.width, maxSize / image.size.height, 1.0)
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 

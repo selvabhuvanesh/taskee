@@ -251,8 +251,8 @@ struct ChildDashboardView: View {
                     unreadNotifCount = 0
                 }
             }
-            .task {
-                await refreshUnreadCount()
+            .onAppear {
+                refreshUnreadCount()
             }
             .sheet(isPresented: $showRedeemSheet) {
                 RedeemRewardsView(availableCoins: collectableCoins, childName: authManager.userName, theme: childTheme)
@@ -431,12 +431,12 @@ struct ChildDashboardView: View {
         RecurringTaskExtender.markExtended()
     }
 
-    private func refreshUnreadCount() async {
+    private func refreshUnreadCount() {
         let lastRead = UserDefaults.standard.double(forKey: "lastNotifReadTime")
         let lastReadDate = lastRead > 0 ? Date(timeIntervalSince1970: lastRead) : Date.distantPast
-        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
         let myName = authManager.userName
-        unreadNotifCount = result.notifications.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
+        let all = notificationManager.savedNotifications()
+        unreadNotifCount = all.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
     }
 
     private func archiveOldTasks() {
@@ -810,7 +810,7 @@ struct ChildDashboardView: View {
                     notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
                 }
             }
-            await refreshUnreadCount()
+            refreshUnreadCount()
         }
     }
 

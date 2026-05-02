@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import StoreKit
+import PhotosUI
 
 // Shared gradient background used across all screens.
 struct AppBackground: View {
@@ -167,7 +168,7 @@ struct ContentView: View {
                                 notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
                             }
                         }
-                        await refreshUnreadCount()
+                        refreshUnreadCount()
                     }
 
                     addTaskButton
@@ -324,8 +325,8 @@ struct ContentView: View {
                     unreadNotifCount = 0
                 }
             }
-            .task {
-                await refreshUnreadCount()
+            .onAppear {
+                refreshUnreadCount()
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
@@ -536,12 +537,12 @@ struct ContentView: View {
         .padding(.vertical, 6)
     }
 
-    private func refreshUnreadCount() async {
+    private func refreshUnreadCount() {
         let lastRead = UserDefaults.standard.double(forKey: "lastNotifReadTime")
         let lastReadDate = lastRead > 0 ? Date(timeIntervalSince1970: lastRead) : Date.distantPast
-        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
         let myName = authManager.userName
-        unreadNotifCount = result.notifications.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
+        let all = notificationManager.savedNotifications()
+        unreadNotifCount = all.filter { $0.createdAt > lastReadDate && ($0.senderName != myName || $0.senderName.isEmpty) }.count
     }
 
     private func sendReminder(to child: FamilyMember) {
@@ -805,7 +806,7 @@ struct DateTasksView: View {
         .navigationTitle(dateLabel)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAddTask) {
-            AddTaskView(children: children, otherParent: otherParent, theme: theme)
+            AddTaskView(children: children, otherParent: otherParent, preselectedChild: otherParent?.name ?? "", theme: theme)
         }
         .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
             deleteAlertButtons
@@ -3381,6 +3382,8 @@ struct EditProfileView: View {
 
     @State private var name = ""
     @State private var selectedAvatar = ""
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var customPhotoImage: UIImage?
 
     private var myMember: FamilyMember? {
         allMembers.first { $0.appleUserID == authManager.appleUserID }
@@ -3411,13 +3414,62 @@ struct EditProfileView: View {
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.7))
 
+                            HStack(spacing: 16) {
+                                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                    VStack(spacing: 6) {
+                                        if let img = customPhotoImage, selectedAvatar.hasPrefix("photo_") {
+                                            Image(uiImage: img)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 50, height: 50)
+                                                .clipShape(Circle())
+                                                .overlay(
+                                                    Circle().strokeBorder(.blue, lineWidth: 2)
+                                                        .frame(width: 54, height: 54)
+                                                )
+                                        } else {
+                                            ZStack {
+                                                Circle()
+                                                    .fill(.white.opacity(0.15))
+                                                    .frame(width: 50, height: 50)
+                                                Image(systemName: "camera.fill")
+                                                    .font(.system(size: 20))
+                                                    .foregroundStyle(.white.opacity(0.7))
+                                            }
+                                        }
+                                        Text("Photo")
+                                            .font(.caption2)
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
+                                }
+                                .onChange(of: selectedPhotoItem) { _, item in
+                                    guard let item else { return }
+                                    Task {
+                                        if let data = try? await item.loadTransferable(type: Data.self),
+                                           let uiImage = UIImage(data: data) {
+                                            let photoID = UUID().uuidString
+                                            let resized = resizeAvatarImage(uiImage, maxSize: 400)
+                                            if saveAvatarPhoto(resized, photoID: photoID) {
+                                                customPhotoImage = resized
+                                                selectedAvatar = "photo_\(photoID)"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer()
+                            }
+
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
                                 ForEach(avatarPresets, id: \.id) { preset in
                                     AvatarView(avatarId: preset.id, size: 50)
                                         .overlay(
                                             Circle().strokeBorder(selectedAvatar == preset.id ? avatarColor(for: preset.id) : .clear, lineWidth: 2)
                                         )
-                                        .onTapGesture { selectedAvatar = preset.id }
+                                        .onTapGesture {
+                                            selectedAvatar = preset.id
+                                            customPhotoImage = nil
+                                        }
                                 }
                             }
 
@@ -3432,7 +3484,10 @@ struct EditProfileView: View {
                                         .overlay(
                                             Circle().strokeBorder(selectedAvatar == preset.id ? avatarColor(for: preset.id) : .clear, lineWidth: 2)
                                         )
-                                        .onTapGesture { selectedAvatar = preset.id }
+                                        .onTapGesture {
+                                            selectedAvatar = preset.id
+                                            customPhotoImage = nil
+                                        }
                                 }
                             }
                         }
@@ -3485,9 +3540,22 @@ struct EditProfileView: View {
             .onAppear {
                 name = authManager.userName
                 selectedAvatar = authManager.avatar
+                if selectedAvatar.hasPrefix("photo_") {
+                    let photoID = String(selectedAvatar.dropFirst(6))
+                    customPhotoImage = loadAvatarPhoto(photoID: photoID)
+                }
             }
         }
         .presentationDetents([.large])
+    }
+
+    private func resizeAvatarImage(_ image: UIImage, maxSize: CGFloat) -> UIImage {
+        let scale = min(maxSize / image.size.width, maxSize / image.size.height, 1.0)
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 }
 
@@ -4019,13 +4087,11 @@ struct SubscriptionView: View {
 
 struct NotificationCenterView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(NotificationManager.self) private var notificationManager
     @Environment(AuthManager.self) private var authManager
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
-    @State private var notifications: [CloudKitManager.NotificationItem] = []
-    @State private var isLoading = true
+    @State private var notifications: [NotificationManager.LocalNotification] = []
     @State private var showClearAllConfirm = false
-    @State private var isClearingAll = false
 
     var body: some View {
         NavigationStack {
@@ -4037,10 +4103,7 @@ struct NotificationCenterView: View {
                 )
                 .ignoresSafeArea()
 
-                if isLoading {
-                    ProgressView()
-                        .tint(.white)
-                } else if notifications.isEmpty {
+                if notifications.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "bell.slash")
                             .font(.system(size: 56))
@@ -4066,20 +4129,6 @@ struct NotificationCenterView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
-                    .refreshable {
-                        await loadNotifications()
-                    }
-                }
-
-                if isClearingAll {
-                    Color.black.opacity(0.4).ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .tint(.white)
-                        Text("Clearing notifications...")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
                 }
             }
             .navigationTitle("Notifications")
@@ -4095,7 +4144,6 @@ struct NotificationCenterView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
                         }
-                        .disabled(isClearingAll)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -4108,19 +4156,12 @@ struct NotificationCenterView: View {
                     clearAllNotifications()
                 }
             } message: {
-                Text("This will permanently delete all \(notifications.count) notifications from your family. This cannot be undone.")
+                Text("This will delete all \(notifications.count) notifications from your device.")
             }
-            .task {
-                await loadNotifications()
+            .onAppear {
+                notifications = notificationManager.savedNotifications()
             }
         }
-    }
-
-    private func loadNotifications() async {
-        isLoading = notifications.isEmpty
-        let result = await cloudKitManager.fetchNotifications(familyCode: authManager.familyCode)
-        notifications = result.notifications.filter { $0.senderName != authManager.userName || $0.senderName.isEmpty }
-        isLoading = false
     }
 
     private func deleteNotifications(at offsets: IndexSet) {
@@ -4128,26 +4169,19 @@ struct NotificationCenterView: View {
         withAnimation {
             notifications.remove(atOffsets: offsets)
         }
-        Task {
-            for notif in toDelete {
-                _ = await cloudKitManager.deleteNotification(id: notif.id)
-            }
+        for notif in toDelete {
+            notificationManager.deleteLocalNotification(id: notif.id)
         }
     }
 
     private func clearAllNotifications() {
-        isClearingAll = true
-        let familyCode = authManager.familyCode
-        Task {
-            _ = await cloudKitManager.deleteAllNotifications(familyCode: familyCode)
-            withAnimation {
-                notifications.removeAll()
-            }
-            isClearingAll = false
+        notificationManager.clearAllLocalNotifications()
+        withAnimation {
+            notifications.removeAll()
         }
     }
 
-    private func notificationRow(_ notif: CloudKitManager.NotificationItem) -> some View {
+    private func notificationRow(_ notif: NotificationManager.LocalNotification) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
                 AvatarView(avatarId: notif.senderAvatar, size: 36)

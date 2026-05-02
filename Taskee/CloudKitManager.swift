@@ -248,6 +248,14 @@ final class CloudKitManager {
         record["appleUserID"] = appleID
         record["isAccepted"] = NSNumber(value: accepted ? 1 : 0)
 
+        if avatar.hasPrefix("photo_") {
+            let photoID = String(avatar.dropFirst(6))
+            let url = avatarPhotoURL(photoID: photoID)
+            if FileManager.default.fileExists(atPath: url.path) {
+                record["avatarPhoto"] = CKAsset(fileURL: url)
+            }
+        }
+
         return await saveRecord(record)
     }
 
@@ -516,10 +524,13 @@ final class CloudKitManager {
 
         for record in remoteRecords {
             let idStr = record.recordID.recordName
+            let remoteAvatar = record["avatar"] as? String ?? "star.fill"
+            cacheAvatarPhotoIfNeeded(avatar: remoteAvatar, record: record)
+
             if let local = localByID[idStr] {
                 local.name = record["name"] as? String ?? local.name
                 local.memberRole = record["memberRole"] as? String ?? local.memberRole
-                local.avatar = record["avatar"] as? String ?? local.avatar
+                local.avatar = remoteAvatar
                 local.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? local.totalEarned
                 local.appleUserID = record["appleUserID"] as? String ?? local.appleUserID
                 local.isAccepted = ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1
@@ -528,7 +539,7 @@ final class CloudKitManager {
                     id: uuid,
                     name: record["name"] as? String ?? "",
                     memberRole: record["memberRole"] as? String ?? "child",
-                    avatar: record["avatar"] as? String ?? "star.fill",
+                    avatar: remoteAvatar,
                     isAccepted: ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1,
                     appleUserID: record["appleUserID"] as? String ?? ""
                 )
@@ -540,6 +551,15 @@ final class CloudKitManager {
         for member in localMembers where !remoteIDs.contains(member.id.uuidString) {
             context.delete(member)
         }
+    }
+
+    private func cacheAvatarPhotoIfNeeded(avatar: String, record: CKRecord) {
+        guard avatar.hasPrefix("photo_") else { return }
+        let photoID = String(avatar.dropFirst(6))
+        let localURL = avatarPhotoURL(photoID: photoID)
+        guard !FileManager.default.fileExists(atPath: localURL.path) else { return }
+        guard let asset = record["avatarPhoto"] as? CKAsset, let fileURL = asset.fileURL else { return }
+        try? FileManager.default.copyItem(at: fileURL, to: localURL)
     }
 
     // MARK: - Redemptions

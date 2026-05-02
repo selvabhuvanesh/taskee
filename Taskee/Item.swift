@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import SwiftData
+import UIKit
 
 @Model
 final class Item {
@@ -987,12 +988,56 @@ struct AnimalAvatarFaceView: View {
     }
 }
 
+// MARK: - Avatar Photo Storage
+
+func avatarPhotoDirectory() -> URL {
+    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let dir = docs.appendingPathComponent("avatar_photos")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+}
+
+func saveAvatarPhoto(_ image: UIImage, photoID: String) -> Bool {
+    guard let data = image.jpegData(compressionQuality: 0.8) else { return false }
+    let url = avatarPhotoDirectory().appendingPathComponent("\(photoID).jpg")
+    do {
+        try data.write(to: url)
+        return true
+    } catch {
+        return false
+    }
+}
+
+func loadAvatarPhoto(photoID: String) -> UIImage? {
+    let url = avatarPhotoDirectory().appendingPathComponent("\(photoID).jpg")
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    return UIImage(data: data)
+}
+
+func avatarPhotoURL(photoID: String) -> URL {
+    avatarPhotoDirectory().appendingPathComponent("\(photoID).jpg")
+}
+
 struct AvatarView: View {
     let avatarId: String
     let size: CGFloat
 
     var body: some View {
-        if let config = avatarConfig(for: avatarId) {
+        if avatarId.hasPrefix("photo_") {
+            let photoID = String(avatarId.dropFirst(6))
+            if let image = loadAvatarPhoto(photoID: photoID) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: size * 0.9))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: size, height: size)
+            }
+        } else if let config = avatarConfig(for: avatarId) {
             AvatarFaceView(config: config, size: size)
         } else if let animalConfig = animalAvatarConfig(for: avatarId) {
             AnimalAvatarFaceView(config: animalConfig, size: size)

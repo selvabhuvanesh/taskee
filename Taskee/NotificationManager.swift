@@ -92,83 +92,77 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func sendTaskReviewNotification(taskName: String, childName: String) {
+        let title = "Task Submitted for Review"
+        let body = "\(childName) completed \"\(taskName)\""
         let content = UNMutableNotificationContent()
-        content.title = "Task Submitted for Review"
-        content.body = "\(childName) completed \"\(taskName)\""
+        content.title = title
+        content.body = body
         content.sound = .default
         content.categoryIdentifier = "TASK_REVIEW"
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
-
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "TASK_REVIEW", senderName: childName)
     }
 
     func sendTaskApprovedNotification(taskName: String, childName: String, reward: Double) {
-        let content = UNMutableNotificationContent()
-        content.title = "Task Approved!"
-        content.body = reward > 0
+        let title = "Task Approved!"
+        let body = reward > 0
             ? "Your task \"\(taskName)\" was approved! You earned \(Int(reward)) coins."
             : "Your task \"\(taskName)\" was approved!"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
         content.sound = .default
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "TASK_APPROVED")
     }
 
     func sendTaskRejectedNotification(taskName: String, childName: String) {
+        let title = "Task Needs Redo"
+        let body = "Your task \"\(taskName)\" was sent back. Please try again."
         let content = UNMutableNotificationContent()
-        content.title = "Task Needs Redo"
-        content.body = "Your task \"\(taskName)\" was sent back. Please try again."
+        content.title = title
+        content.body = body
         content.sound = .default
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "TASK_REJECTED")
     }
 
     func sendTaskAssignedNotification(taskName: String, assignerName: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "New Task Assigned"
-        content.body = assignerName.isEmpty
+        let title = "New Task Assigned"
+        let body = assignerName.isEmpty
             ? taskName
             : "\(assignerName) assigned \"\(taskName)\" to you"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
         content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
         content.categoryIdentifier = "TASK_ASSIGNED"
         content.interruptionLevel = .timeSensitive
 
-        let request = UNNotificationRequest(
-            identifier: "assigned-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: "assigned-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "TASK_ASSIGNED", senderName: assignerName)
     }
 
     func sendPickupNotification(childName: String) {
+        let title = "Pickup Request!"
+        let body = "\(childName) wants to be picked up in 5 minutes!"
         let content = UNMutableNotificationContent()
-        content.title = "Pickup Request!"
-        content.body = "\(childName) wants to be picked up in 5 minutes!"
+        content.title = title
+        content.body = body
         content.sound = UNNotificationSound(named: UNNotificationSoundName("pickup.wav"))
         content.categoryIdentifier = "PICKUP_REQUEST"
         content.interruptionLevel = .timeSensitive
 
-        let request = UNNotificationRequest(
-            identifier: "pickup-\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: "pickup-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "PICKUP_REQUEST", senderName: childName)
     }
 
     func userNotificationCenter(
@@ -219,5 +213,61 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         } else {
             completionHandler([.banner, .sound, .list])
         }
+    }
+
+    // MARK: - Local Notification History
+
+    struct LocalNotification: Codable, Identifiable {
+        let id: String
+        let title: String
+        let body: String
+        let category: String
+        let senderAvatar: String
+        let senderName: String
+        let createdAt: Date
+    }
+
+    private static let storageKey = "localNotificationHistory"
+
+    func savedNotifications() -> [LocalNotification] {
+        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
+              let items = try? JSONDecoder().decode([LocalNotification].self, from: data) else {
+            return []
+        }
+        return items.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func saveNotification(title: String, body: String, category: String, senderAvatar: String = "", senderName: String = "") {
+        var items = savedNotifications()
+        let notif = LocalNotification(
+            id: UUID().uuidString,
+            title: title,
+            body: body,
+            category: category,
+            senderAvatar: senderAvatar,
+            senderName: senderName,
+            createdAt: Date()
+        )
+        items.insert(notif, at: 0)
+        if items.count > 100 { items = Array(items.prefix(100)) }
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    func deleteLocalNotification(id: String) {
+        var items = savedNotifications()
+        items.removeAll { $0.id == id }
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    func clearAllLocalNotifications() {
+        UserDefaults.standard.removeObject(forKey: Self.storageKey)
+    }
+
+    var localNotificationCount: Int {
+        savedNotifications().count
     }
 }
