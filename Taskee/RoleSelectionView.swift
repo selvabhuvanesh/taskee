@@ -464,7 +464,10 @@ struct RoleSelectionView: View {
                 authManager.role = "parent"
                 authManager.avatar = selectedAvatar
                 authManager.familyCode = code
-                if !isNew {
+                if isNew {
+                    await cloudKitManager.createFamilyZone(familyCode: code)
+                } else {
+                    await cloudKitManager.ensureFamilyZoneAccess(familyCode: code, appleUserID: authManager.appleUserID)
                     await cloudKitManager.syncAll(context: modelContext, familyCode: code)
                 }
                 if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: code) {

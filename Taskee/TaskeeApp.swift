@@ -18,7 +18,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         NotificationCenter.default.post(name: .cloudKitDataChanged, object: nil)
-        NotificationCenter.default.post(name: .checkPickupNotification, object: nil)
         completionHandler(.newData)
     }
 }
@@ -34,6 +33,7 @@ struct TaskeeApp: App {
     @State private var isCheckingExistingUser = false
     @State private var isCheckingAcceptance = false
     @State private var pendingSyncTask: Task<Void, Never>?
+    @State private var isPolling = false
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -41,6 +41,7 @@ struct TaskeeApp: App {
             FamilyMember.self,
             RewardRedemption.self,
             SurpriseGift.self,
+            ShoppingItem.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,
@@ -138,6 +139,9 @@ struct TaskeeApp: App {
                 await restoreUserIfNeeded()
 
                 guard !authManager.familyCode.isEmpty else { return }
+                await cloudKitManager.ensureFamilyZoneAccess(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID)
+                let migrationContext = ModelContext(sharedModelContainer)
+                await cloudKitManager.migratePublicToPrivateZone(context: migrationContext, familyCode: authManager.familyCode)
                 let context = ModelContext(sharedModelContainer)
                 await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
                 await cloudKitManager.backfillCreatedBy(context: context, familyCode: authManager.familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
@@ -147,14 +151,6 @@ struct TaskeeApp: App {
                 await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
                 await fetchAndDeliverNotifications()
                 await checkChildAcceptance()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .checkPickupNotification)) { _ in
-                guard authManager.role == "parent", !authManager.familyCode.isEmpty else { return }
-                Task {
-                    if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
-                        notificationManager.sendPickupNotification(childName: pickup.childName)
-                    }
-                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
                 guard !authManager.familyCode.isEmpty else { return }
@@ -168,12 +164,26 @@ struct TaskeeApp: App {
                         subscriptionManager.setFamilyTier(familyTier)
                     }
                     await fetchAndDeliverNotifications()
+                    if authManager.role == "parent" {
+                        if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
+                            notificationManager.sendPickupNotification(childName: pickup.childName)
+                        }
+                    }
                     await checkChildAcceptance()
                 }
             }
-            .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
-                guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty else { return }
-                Task { await fetchAndDeliverNotifications() }
+            .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
+                guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty, !isPolling else { return }
+                isPolling = true
+                Task {
+                    await fetchAndDeliverNotifications()
+                    if authManager.role == "parent" {
+                        if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
+                            notificationManager.sendPickupNotification(childName: pickup.childName)
+                        }
+                    }
+                    isPolling = false
+                }
             }
             .sheet(isPresented: $showOnboarding) {
                 ParentOnboardingView {
@@ -216,6 +226,7 @@ struct TaskeeApp: App {
         if accepted {
             authManager.isPendingApproval = false
             if !authManager.familyCode.isEmpty {
+                await cloudKitManager.ensureFamilyZoneAccess(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID)
                 let context = ModelContext(sharedModelContainer)
                 await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
             }
@@ -235,6 +246,7 @@ struct TaskeeApp: App {
             authManager.hasCompletedOnboarding = true
             authManager.role = existing.memberRole
 
+            await cloudKitManager.ensureFamilyZoneAccess(familyCode: existing.familyCode, appleUserID: authManager.appleUserID)
             let context = ModelContext(sharedModelContainer)
             await cloudKitManager.syncAll(context: context, familyCode: existing.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
             if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: existing.familyCode) {

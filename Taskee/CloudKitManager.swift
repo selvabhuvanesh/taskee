@@ -27,6 +27,47 @@ final class CloudKitManager {
 
     private let container = CKContainer(identifier: "iCloud.com.selvabhuvanesh.taskee")
     private var database: CKDatabase { container.publicCloudDatabase }
+    private var privateDatabase: CKDatabase { container.privateCloudDatabase }
+    private var sharedDatabase: CKDatabase { container.sharedCloudDatabase }
+
+    // MARK: - Private Zone State
+
+    private(set) var familyZoneID: CKRecordZone.ID?
+    var hasFamilyZone: Bool { familyZoneID != nil }
+
+    var isZoneOwner: Bool {
+        get { UserDefaults.standard.bool(forKey: "ckIsZoneOwner") }
+        set { UserDefaults.standard.set(newValue, forKey: "ckIsZoneOwner") }
+    }
+
+    private var familyDatabase: CKDatabase {
+        guard familyZoneID != nil else { return database }
+        return isZoneOwner ? privateDatabase : sharedDatabase
+    }
+
+    private func familyRecordID(name: String) -> CKRecord.ID {
+        if let zoneID = familyZoneID {
+            return CKRecord.ID(recordName: name, zoneID: zoneID)
+        }
+        return CKRecord.ID(recordName: name)
+    }
+
+    // MARK: - Change Token (Delta Sync)
+
+    private func loadChangeToken() -> CKServerChangeToken? {
+        guard let data = UserDefaults.standard.data(forKey: "ckZoneChangeToken") else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
+    }
+
+    private func saveChangeToken(_ token: CKServerChangeToken) {
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) {
+            UserDefaults.standard.set(data, forKey: "ckZoneChangeToken")
+        }
+    }
+
+    private func clearChangeToken() {
+        UserDefaults.standard.removeObject(forKey: "ckZoneChangeToken")
+    }
 
     // MARK: - Availability
 
@@ -34,8 +75,206 @@ final class CloudKitManager {
         do {
             let status = try await container.accountStatus()
             isAvailable = (status == .available)
+            if !isAvailable {
+                print("[CloudKit] Account not available. Status: \(status.rawValue)")
+            } else {
+                print("[CloudKit] Account available")
+            }
         } catch {
             isAvailable = false
+            print("[CloudKit] Account check failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Zone & Share Management
+
+    func ensureFamilyZoneAccess(familyCode: String, appleUserID: String) async {
+        guard !familyCode.isEmpty, isAvailable else { return }
+        if familyZoneID != nil { return }
+
+        let zoneName = "family-\(familyCode)"
+        let zoneID = CKRecordZone.ID(zoneName: zoneName)
+
+        // 1. Check private DB (are we the zone owner?)
+        do {
+            _ = try await privateDatabase.recordZone(for: zoneID)
+            familyZoneID = zoneID
+            isZoneOwner = true
+            print("[CloudKit] Found owned zone: \(zoneName)")
+            await ensureShareExists(familyCode: familyCode)
+            return
+        } catch { }
+
+        // 2. Check shared DB (are we a participant?)
+        do {
+            let zones = try await sharedDatabase.allRecordZones()
+            if zones.contains(where: { $0.zoneID.zoneName == zoneName }) {
+                familyZoneID = zoneID
+                isZoneOwner = false
+                print("[CloudKit] Found shared zone: \(zoneName)")
+                return
+            }
+        } catch { }
+
+        // 3. Zone not found — check if we're the family creator
+        let isCreator = await isFamilyCreator(familyCode: familyCode, appleUserID: appleUserID)
+
+        if isCreator {
+            await createFamilyZone(familyCode: familyCode)
+        } else {
+            if let shareURL = await fetchShareURL(familyCode: familyCode) {
+                if await acceptFamilyShare(shareURLString: shareURL) {
+                    familyZoneID = zoneID
+                    isZoneOwner = false
+                    print("[CloudKit] Accepted share for zone: \(zoneName)")
+                }
+            }
+        }
+    }
+
+    private func isFamilyCreator(familyCode: String, appleUserID: String) async -> Bool {
+        guard !appleUserID.isEmpty else { return false }
+        let recordID = CKRecord.ID(recordName: "family-\(familyCode)")
+        do {
+            let record = try await database.record(for: recordID)
+            return (record["createdByAppleID"] as? String) == appleUserID
+        } catch {
+            return false
+        }
+    }
+
+    func createFamilyZone(familyCode: String) async {
+        let zoneName = "family-\(familyCode)"
+        let zoneID = CKRecordZone.ID(zoneName: zoneName)
+        let zone = CKRecordZone(zoneID: zoneID)
+
+        do {
+            try await privateDatabase.save(zone)
+            familyZoneID = zoneID
+            isZoneOwner = true
+            print("[CloudKit] Created zone: \(zoneName)")
+
+            let share = CKShare(recordZoneID: zoneID)
+            share.publicPermission = .readWrite
+            share[CKShare.SystemFieldKey.title] = "Taskee Family"
+
+            try await privateDatabase.save(share)
+            if let url = share.url {
+                await updateFamilyShareURL(familyCode: familyCode, shareURL: url.absoluteString)
+                print("[CloudKit] Share created, URL stored")
+            }
+        } catch let error as CKError where error.code == .zoneNotFound || error.code == .serverRecordChanged {
+            familyZoneID = zoneID
+            isZoneOwner = true
+            await ensureShareExists(familyCode: familyCode)
+        } catch {
+            lastSyncError = error.localizedDescription
+            print("[CloudKit] Zone creation failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func ensureShareExists(familyCode: String) async {
+        guard let zoneID = familyZoneID, isZoneOwner else { return }
+        let existing = await fetchShareURL(familyCode: familyCode)
+        if existing != nil { return }
+
+        let share = CKShare(recordZoneID: zoneID)
+        share.publicPermission = .readWrite
+        share[CKShare.SystemFieldKey.title] = "Taskee Family"
+
+        do {
+            try await privateDatabase.save(share)
+            if let url = share.url {
+                await updateFamilyShareURL(familyCode: familyCode, shareURL: url.absoluteString)
+            }
+        } catch {
+            print("[CloudKit] Share creation failed: \(error.localizedDescription)")
+        }
+    }
+
+    func acceptFamilyShare(shareURLString: String) async -> Bool {
+        guard let url = URL(string: shareURLString) else { return false }
+
+        do {
+            let metadata = try await fetchShareMetadata(url: url)
+            try await acceptShare(metadata: metadata)
+            return true
+        } catch {
+            lastSyncError = error.localizedDescription
+            print("[CloudKit] Share accept failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func fetchShareMetadata(url: URL) async throws -> CKShare.Metadata {
+        try await withCheckedThrowingContinuation { continuation in
+            let operation = CKFetchShareMetadataOperation(shareURLs: [url])
+            var resumed = false
+            operation.perShareMetadataResultBlock = { _, result in
+                guard !resumed else { return }
+                resumed = true
+                switch result {
+                case .success(let metadata):
+                    continuation.resume(returning: metadata)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            operation.fetchShareMetadataResultBlock = { result in
+                guard !resumed else { return }
+                resumed = true
+                if case .failure(let error) = result {
+                    continuation.resume(throwing: error)
+                }
+            }
+            container.add(operation)
+        }
+    }
+
+    private func acceptShare(metadata: CKShare.Metadata) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKAcceptSharesOperation(shareMetadatas: [metadata])
+            var resumed = false
+            operation.perShareResultBlock = { _, result in
+                guard !resumed else { return }
+                resumed = true
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            operation.acceptSharesResultBlock = { result in
+                guard !resumed else { return }
+                resumed = true
+                if case .failure(let error) = result {
+                    continuation.resume(throwing: error)
+                }
+            }
+            container.add(operation)
+        }
+    }
+
+    func fetchShareURL(familyCode: String) async -> String? {
+        guard !familyCode.isEmpty else { return nil }
+        let recordID = CKRecord.ID(recordName: "family-\(familyCode)")
+        do {
+            let record = try await database.record(for: recordID)
+            return record["shareURL"] as? String
+        } catch {
+            return nil
+        }
+    }
+
+    private func updateFamilyShareURL(familyCode: String, shareURL: String) async {
+        let recordID = CKRecord.ID(recordName: "family-\(familyCode)")
+        do {
+            let record = try await database.record(for: recordID)
+            record["shareURL"] = shareURL
+            try await database.save(record)
+        } catch {
+            print("[CloudKit] Failed to store share URL: \(error.localizedDescription)")
         }
     }
 
@@ -204,7 +443,7 @@ final class CloudKitManager {
     func pushTaskSnapshot(_ snap: TaskSnapshot, familyCode: String) async -> Bool {
         guard !familyCode.isEmpty else { return false }
 
-        let recordID = CKRecord.ID(recordName: snap.id)
+        let recordID = familyRecordID(name: snap.id)
         let record = CKRecord(recordType: "TaskRecord", recordID: recordID)
         record["familyCode"] = familyCode
         record["name"] = snap.name
@@ -220,7 +459,7 @@ final class CloudKitManager {
         record["createdBy"] = snap.createdBy
         record["createdByID"] = snap.createdByID
 
-        return await saveRecord(record)
+        return await saveRecord(record, to: familyDatabase)
     }
 
     // MARK: - Push Member
@@ -261,13 +500,14 @@ final class CloudKitManager {
 
     var lastPushResult: String = ""
 
-    private func saveRecord(_ record: CKRecord) async -> Bool {
+    private func saveRecord(_ record: CKRecord, to targetDB: CKDatabase? = nil) async -> Bool {
+        let db = targetDB ?? database
         let status = record["status"] as? String ?? "n/a"
         let type = record.recordType
         let id = record.recordID.recordName
 
         do {
-            let (saveResults, _) = try await database.modifyRecords(
+            let (saveResults, _) = try await db.modifyRecords(
                 saving: [record],
                 deleting: [],
                 savePolicy: .allKeys
@@ -276,14 +516,17 @@ final class CloudKitManager {
                 if case .failure(let error) = result {
                     lastSyncError = error.localizedDescription
                     lastPushResult = "FAIL \(type) \(id) status=\(status): \(error.localizedDescription)"
+                    print("[CloudKit] SAVE FAIL \(type) \(id): \(error.localizedDescription)")
                     return false
                 }
             }
             lastPushResult = "OK \(type) \(id) status=\(status)"
+            print("[CloudKit] SAVE OK \(type) \(id)")
             return true
         } catch {
             lastSyncError = error.localizedDescription
             lastPushResult = "ERROR \(type) \(id) status=\(status): \(error.localizedDescription)"
+            print("[CloudKit] SAVE ERROR \(type) \(id): \(error.localizedDescription)")
             return false
         }
     }
@@ -291,8 +534,9 @@ final class CloudKitManager {
     // MARK: - Delete
 
     func deleteRemoteTask(_ taskID: UUID) async {
+        let recordID = familyRecordID(name: taskID.uuidString)
         do {
-            try await database.deleteRecord(withID: CKRecord.ID(recordName: taskID.uuidString))
+            try await familyDatabase.deleteRecord(withID: recordID)
         } catch {
             lastSyncError = error.localizedDescription
         }
@@ -308,9 +552,9 @@ final class CloudKitManager {
 
     func deleteRemoteTasks(_ taskIDs: [UUID]) async {
         guard !taskIDs.isEmpty else { return }
-        let recordIDs = taskIDs.map { CKRecord.ID(recordName: $0.uuidString) }
+        let recordIDs = taskIDs.map { familyRecordID(name: $0.uuidString) }
         do {
-            let (_, deleteResults) = try await database.modifyRecords(saving: [], deleting: recordIDs)
+            let (_, deleteResults) = try await familyDatabase.modifyRecords(saving: [], deleting: recordIDs)
             for (_, result) in deleteResults {
                 if case .failure(let error) = result {
                     lastSyncError = error.localizedDescription
@@ -336,7 +580,8 @@ final class CloudKitManager {
         var deleteIDs: [CKRecord.ID] = []
 
         for task in toArchive {
-            let record = CKRecord(recordType: "ArchivedTaskRecord", recordID: CKRecord.ID(recordName: "arch-\(task.id.uuidString)"))
+            let archID = familyRecordID(name: "arch-\(task.id.uuidString)")
+            let record = CKRecord(recordType: "ArchivedTaskRecord", recordID: archID)
             record["familyCode"] = familyCode
             record["name"] = task.name
             record["targetDate"] = task.targetDate as NSDate
@@ -350,16 +595,17 @@ final class CloudKitManager {
             record["createdBy"] = task.createdBy
             record["createdByID"] = task.createdByID
             savedRecords.append(record)
-            deleteIDs.append(CKRecord.ID(recordName: task.id.uuidString))
+            deleteIDs.append(familyRecordID(name: task.id.uuidString))
         }
 
         do {
+            let db = familyDatabase
             let batchSize = 400
             for start in stride(from: 0, to: savedRecords.count, by: batchSize) {
                 let end = min(start + batchSize, savedRecords.count)
                 let saveBatch = Array(savedRecords[start..<end])
                 let deleteBatch = Array(deleteIDs[start..<end])
-                try await database.modifyRecords(saving: saveBatch, deleting: deleteBatch)
+                try await db.modifyRecords(saving: saveBatch, deleting: deleteBatch)
             }
 
             for task in toArchive {
@@ -383,7 +629,7 @@ final class CloudKitManager {
 
     func fetchArchivedTasks(familyCode: String) async -> [ArchivedTask] {
         guard !familyCode.isEmpty else { return [] }
-        let records = await fetchAllRecords(type: "ArchivedTaskRecord", familyCode: familyCode)
+        let records = await fetchAllRecords(type: "ArchivedTaskRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
         return records.compactMap { record in
             ArchivedTask(
                 id: record.recordID.recordName,
@@ -420,9 +666,22 @@ final class CloudKitManager {
             syncInProgress = false
         }
 
-        let newTasks = await syncTasks(context: context, familyCode: familyCode)
+        var newTasks: [SyncedTask] = []
+
+        if familyZoneID != nil {
+            let localCount = (try? context.fetch(FetchDescriptor<Item>()))?.count ?? 0
+            if localCount == 0 && loadChangeToken() != nil {
+                clearChangeToken()
+                print("[CloudKit] Local store empty with saved token — forcing full re-sync")
+            }
+            newTasks = await deltaSyncFamilyZone(context: context, familyCode: familyCode)
+        } else {
+            newTasks = await syncTasks(context: context, familyCode: familyCode)
+            await syncRedemptions(context: context, familyCode: familyCode)
+            await syncShoppingItems(context: context, familyCode: familyCode)
+        }
+
         await syncMembers(context: context, familyCode: familyCode)
-        await syncRedemptions(context: context, familyCode: familyCode)
         try? context.save()
 
         if !newTasks.isEmpty {
@@ -430,30 +689,33 @@ final class CloudKitManager {
         }
     }
 
-    private func fetchAllRecords(type: String, familyCode: String) async -> [CKRecord] {
+    private func fetchAllRecords(type: String, familyCode: String, from targetDB: CKDatabase? = nil, inZone zoneID: CKRecordZone.ID? = nil) async -> [CKRecord] {
+        let db = targetDB ?? database
         let predicate = NSPredicate(format: "familyCode == %@", familyCode)
         let query = CKQuery(recordType: type, predicate: predicate)
         var all: [CKRecord] = []
 
         do {
-            var (results, cursor) = try await database.records(matching: query)
+            var (results, cursor) = try await db.records(matching: query, inZoneWith: zoneID)
             all.append(contentsOf: results.compactMap { try? $0.1.get() })
 
             while let c = cursor {
-                let (more, next) = try await database.records(continuingMatchFrom: c)
+                let (more, next) = try await db.records(continuingMatchFrom: c)
                 all.append(contentsOf: more.compactMap { try? $0.1.get() })
                 cursor = next
             }
         } catch {
             lastSyncError = error.localizedDescription
+            print("[CloudKit] FETCH ERROR \(type): \(error.localizedDescription)")
         }
 
+        print("[CloudKit] FETCH \(type): \(all.count) records for family=\(familyCode)")
         return all
     }
 
     @discardableResult
     private func syncTasks(context: ModelContext, familyCode: String) async -> [SyncedTask] {
-        let remoteRecords = await fetchAllRecords(type: "TaskRecord", familyCode: familyCode)
+        let remoteRecords = await fetchAllRecords(type: "TaskRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
 
         let descriptor = FetchDescriptor<Item>()
         let localTasks = (try? context.fetch(descriptor)) ?? []
@@ -507,8 +769,10 @@ final class CloudKitManager {
             }
         }
 
-        for task in localTasks where !remoteIDs.contains(task.id.uuidString) {
-            context.delete(task)
+        if !remoteRecords.isEmpty {
+            for task in localTasks where !remoteIDs.contains(task.id.uuidString) {
+                context.delete(task)
+            }
         }
 
         return newTasks
@@ -575,7 +839,7 @@ final class CloudKitManager {
         let createdAt = redemption.createdAt
         let resolvedAt = redemption.resolvedAt
 
-        let recordID = CKRecord.ID(recordName: id)
+        let recordID = familyRecordID(name: id)
         let record = CKRecord(recordType: "RedemptionRecord", recordID: recordID)
         record["familyCode"] = familyCode
         record["childName"] = childName
@@ -588,11 +852,11 @@ final class CloudKitManager {
         if let resolved = resolvedAt {
             record["resolvedAt"] = resolved as NSDate
         }
-        return await saveRecord(record)
+        return await saveRecord(record, to: familyDatabase)
     }
 
     private func syncRedemptions(context: ModelContext, familyCode: String) async {
-        let remoteRecords = await fetchAllRecords(type: "RedemptionRecord", familyCode: familyCode)
+        let remoteRecords = await fetchAllRecords(type: "RedemptionRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
 
         let descriptor = FetchDescriptor<RewardRedemption>()
         let local = (try? context.fetch(descriptor)) ?? []
@@ -626,8 +890,246 @@ final class CloudKitManager {
             }
         }
 
-        for item in local where !remoteIDs.contains(item.id.uuidString) {
-            context.delete(item)
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    // MARK: - Shopping Items
+
+    private static let pendingShoppingPushesKey = "pendingShoppingPushes"
+
+    struct ShoppingSnapshot {
+        let id: String
+        let name: String
+        let addedBy: String
+        let isBought: Bool
+        let createdAt: Date
+
+        init(_ item: ShoppingItem) {
+            self.id = item.id.uuidString
+            self.name = item.name
+            self.addedBy = item.addedBy
+            self.isBought = item.isBought
+            self.createdAt = item.createdAt
+        }
+    }
+
+    func pushShoppingItem(_ item: ShoppingItem, familyCode: String) async -> Bool {
+        await pushShoppingSnapshot(ShoppingSnapshot(item), familyCode: familyCode)
+    }
+
+    func pushShoppingSnapshot(_ snap: ShoppingSnapshot, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+
+        if familyZoneID != nil {
+            let recordID = familyRecordID(name: snap.id)
+            let record = CKRecord(recordType: "ShoppingRecord", recordID: recordID)
+            record["familyCode"] = familyCode
+            record["itemID"] = snap.id
+            record["name"] = snap.name
+            record["addedBy"] = snap.addedBy
+            record["isBought"] = snap.isBought ? 1 : 0
+            record["createdAt"] = snap.createdAt as NSDate
+            record["updatedAt"] = Date() as NSDate
+            print("[CloudKit] Shopping push (zone): itemID=\(snap.id) isBought=\(snap.isBought)")
+            return await saveRecord(record, to: familyDatabase)
+        }
+
+        addPendingPush(snap.id)
+        let newRecordName = UUID().uuidString
+        let record = CKRecord(recordType: "ShoppingRecord", recordID: CKRecord.ID(recordName: newRecordName))
+        record["familyCode"] = familyCode
+        record["itemID"] = snap.id
+        record["name"] = snap.name
+        record["addedBy"] = snap.addedBy
+        record["isBought"] = snap.isBought ? 1 : 0
+        record["createdAt"] = snap.createdAt as NSDate
+        record["updatedAt"] = Date() as NSDate
+        print("[CloudKit] Shopping push (public): itemID=\(snap.id) isBought=\(snap.isBought)")
+        let success = await saveRecord(record)
+        if success { removePendingPush(snap.id) }
+        return success
+    }
+
+    private func addPendingPush(_ id: String) {
+        var set = Set(UserDefaults.standard.stringArray(forKey: Self.pendingShoppingPushesKey) ?? [])
+        set.insert(id)
+        UserDefaults.standard.set(Array(set), forKey: Self.pendingShoppingPushesKey)
+    }
+
+    private func removePendingPush(_ id: String) {
+        var set = Set(UserDefaults.standard.stringArray(forKey: Self.pendingShoppingPushesKey) ?? [])
+        set.remove(id)
+        UserDefaults.standard.set(Array(set), forKey: Self.pendingShoppingPushesKey)
+    }
+
+    private static let pendingShoppingDeletesKey = "pendingShoppingDeletes"
+
+    func deleteShoppingItem(id: UUID, familyCode: String) async {
+        let idStr = id.uuidString
+
+        if familyZoneID != nil {
+            let recordID = familyRecordID(name: idStr)
+            do {
+                try await familyDatabase.deleteRecord(withID: recordID)
+            } catch {
+                lastSyncError = error.localizedDescription
+            }
+            return
+        }
+
+        var pending = Set(UserDefaults.standard.stringArray(forKey: Self.pendingShoppingDeletesKey) ?? [])
+        pending.insert(idStr)
+        UserDefaults.standard.set(Array(pending), forKey: Self.pendingShoppingDeletesKey)
+
+        let predicate = NSPredicate(format: "familyCode == %@ AND itemID == %@", familyCode, idStr)
+        let query = CKQuery(recordType: "ShoppingRecord", predicate: predicate)
+        do {
+            let (results, _) = try await database.records(matching: query)
+            for (recordID, _) in results {
+                try? await database.deleteRecord(withID: recordID)
+            }
+        } catch { }
+
+        let legacyID = CKRecord.ID(recordName: idStr)
+        try? await database.deleteRecord(withID: legacyID)
+
+        pending.remove(idStr)
+        UserDefaults.standard.set(Array(pending), forKey: Self.pendingShoppingDeletesKey)
+    }
+
+    func syncShoppingOnly(context: ModelContext, familyCode: String) async {
+        guard !familyCode.isEmpty else { return }
+        await syncShoppingItems(context: context, familyCode: familyCode)
+        try? context.save()
+    }
+
+    private func syncShoppingItems(context: ModelContext, familyCode: String) async {
+        if familyZoneID != nil {
+            await syncShoppingItemsFromZone(context: context, familyCode: familyCode)
+        } else {
+            await syncShoppingItemsFromPublic(context: context, familyCode: familyCode)
+        }
+    }
+
+    private func syncShoppingItemsFromZone(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "ShoppingRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+
+        let descriptor = FetchDescriptor<ShoppingItem>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            let bought = record["isBought"]
+            let isBoughtVal: Bool
+            if let num = bought as? NSNumber { isBoughtVal = num.intValue == 1 }
+            else if let int = bought as? Int { isBoughtVal = int == 1 }
+            else { isBoughtVal = false }
+
+            if let existing = localByID[idStr] {
+                existing.name = record["name"] as? String ?? existing.name
+                existing.addedBy = record["addedBy"] as? String ?? existing.addedBy
+                existing.isBought = isBoughtVal
+                existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+            } else if let uuid = UUID(uuidString: idStr) {
+                let item = ShoppingItem(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    addedBy: record["addedBy"] as? String ?? "",
+                    isBought: isBoughtVal,
+                    createdAt: record["createdAt"] as? Date ?? Date()
+                )
+                context.insert(item)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    private func syncShoppingItemsFromPublic(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "ShoppingRecord", familyCode: familyCode)
+        let pendingDeletes = Set(UserDefaults.standard.stringArray(forKey: Self.pendingShoppingDeletesKey) ?? [])
+        let pendingPushes = Set(UserDefaults.standard.stringArray(forKey: Self.pendingShoppingPushesKey) ?? [])
+
+        var latestByItemID: [String: CKRecord] = [:]
+        var duplicateRecordIDs: [CKRecord.ID] = []
+
+        for record in remoteRecords {
+            let itemID = record["itemID"] as? String ?? record.recordID.recordName
+            let recordTime = record["updatedAt"] as? Date ?? record.creationDate ?? .distantPast
+
+            if let existing = latestByItemID[itemID] {
+                let existingTime = existing["updatedAt"] as? Date ?? existing.creationDate ?? .distantPast
+                if recordTime > existingTime {
+                    duplicateRecordIDs.append(existing.recordID)
+                    latestByItemID[itemID] = record
+                } else {
+                    duplicateRecordIDs.append(record.recordID)
+                }
+            } else {
+                latestByItemID[itemID] = record
+            }
+        }
+
+        for dupID in duplicateRecordIDs {
+            try? await database.deleteRecord(withID: dupID)
+        }
+
+        let descriptor = FetchDescriptor<ShoppingItem>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteItemIDs = Set(latestByItemID.keys)
+
+        for (itemID, record) in latestByItemID {
+            if pendingDeletes.contains(itemID) { continue }
+            if let existing = localByID[itemID] {
+                if !pendingPushes.contains(itemID) {
+                    existing.name = record["name"] as? String ?? existing.name
+                    existing.addedBy = record["addedBy"] as? String ?? existing.addedBy
+                    let bought = record["isBought"]
+                    if let num = bought as? NSNumber {
+                        existing.isBought = num.intValue == 1
+                    } else if let int = bought as? Int {
+                        existing.isBought = int == 1
+                    }
+                    existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+                }
+            } else if let uuid = UUID(uuidString: itemID) {
+                let boughtVal = record["isBought"]
+                let isBought: Bool
+                if let num = boughtVal as? NSNumber {
+                    isBought = num.intValue == 1
+                } else if let int = boughtVal as? Int {
+                    isBought = int == 1
+                } else {
+                    isBought = false
+                }
+                let item = ShoppingItem(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    addedBy: record["addedBy"] as? String ?? "",
+                    isBought: isBought,
+                    createdAt: record["createdAt"] as? Date ?? Date()
+                )
+                context.insert(item)
+            }
+        }
+
+        for item in local {
+            let idStr = item.id.uuidString
+            if pendingPushes.contains(idStr) { continue }
+            if !remoteItemIDs.contains(idStr) || pendingDeletes.contains(idStr) {
+                context.delete(item)
+            }
         }
     }
 
@@ -890,14 +1392,19 @@ final class CloudKitManager {
     func fetchLatestPickup(familyCode: String) async -> (childName: String, body: String)? {
         guard !familyCode.isEmpty else { return nil }
 
-        let predicate = NSPredicate(format: "familyCode == %@ AND category == %@", familyCode, "PICKUP_REQUEST")
+        let cutoff = Date().addingTimeInterval(-10 * 60)
+        let predicate = NSPredicate(format: "familyCode == %@ AND category == %@ AND createdAt > %@", familyCode, "PICKUP_REQUEST", cutoff as NSDate)
         let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
 
         do {
             let (results, _) = try await database.records(matching: query, resultsLimit: 1)
-            guard let (_, result) = results.first,
+            guard let (recordID, result) = results.first,
                   let record = try? result.get() else { return nil }
+            let id = recordID.recordName
+            let lastProcessed = UserDefaults.standard.string(forKey: "lastProcessedPickupID") ?? ""
+            guard id != lastProcessed else { return nil }
+            UserDefaults.standard.set(id, forKey: "lastProcessedPickupID")
             let senderName = record["senderName"] as? String ?? ""
             let body = record["body"] as? String ?? "\(senderName) wants to be picked up!"
             return (senderName, body)
@@ -953,11 +1460,21 @@ final class CloudKitManager {
     func setupSubscriptions(familyCode: String, appleUserID: String = "", role: String = "") async {
         guard !familyCode.isEmpty else { return }
 
-        await createSubscription(
-            id: "task-changes-\(familyCode)",
-            recordType: "TaskRecord",
-            familyCode: familyCode
-        )
+        if familyZoneID != nil {
+            await createDatabaseSubscription()
+        } else {
+            await createSubscription(
+                id: "task-changes-\(familyCode)",
+                recordType: "TaskRecord",
+                familyCode: familyCode
+            )
+            await createSubscription(
+                id: "shopping-changes-\(familyCode)",
+                recordType: "ShoppingRecord",
+                familyCode: familyCode
+            )
+        }
+
         await createSubscription(
             id: "member-changes-\(familyCode)",
             recordType: "MemberRecord",
@@ -1132,5 +1649,369 @@ final class CloudKitManager {
         } catch {
             lastSyncError = error.localizedDescription
         }
+    }
+
+    private func createDatabaseSubscription() async {
+        let db = familyDatabase
+        let subID = isZoneOwner ? "private-db-changes" : "shared-db-changes"
+
+        do {
+            _ = try await db.subscription(for: subID)
+            return
+        } catch { }
+
+        let sub = CKDatabaseSubscription(subscriptionID: subID)
+        let info = CKSubscription.NotificationInfo()
+        info.shouldSendContentAvailable = true
+        sub.notificationInfo = info
+
+        do {
+            try await db.save(sub)
+            print("[CloudKit] Database subscription created: \(subID)")
+        } catch {
+            print("[CloudKit] Database subscription failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Delta Sync
+
+    private final class DeltaSyncCollector: @unchecked Sendable {
+        var records: [CKRecord] = []
+        var deletedIDs: [(CKRecord.ID, CKRecord.RecordType)] = []
+        var token: CKServerChangeToken?
+        var error: Error?
+    }
+
+    func deltaSyncFamilyZone(context: ModelContext, familyCode: String) async -> [SyncedTask] {
+        guard let zoneID = familyZoneID else { return [] }
+
+        let isInitialSync = loadChangeToken() == nil
+        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
+            previousServerChangeToken: loadChangeToken()
+        )
+
+        let collector = DeltaSyncCollector()
+
+        let operation = CKFetchRecordZoneChangesOperation(
+            recordZoneIDs: [zoneID],
+            configurationsByRecordZoneID: [zoneID: config]
+        )
+
+        operation.recordWasChangedBlock = { _, result in
+            if case .success(let record) = result {
+                collector.records.append(record)
+            }
+        }
+
+        operation.recordWithIDWasDeletedBlock = { recordID, recordType in
+            collector.deletedIDs.append((recordID, recordType))
+        }
+
+        operation.recordZoneFetchResultBlock = { _, result in
+            switch result {
+            case .success((let serverToken, _, _)):
+                collector.token = serverToken
+            case .failure(let error):
+                collector.error = error
+            }
+        }
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            operation.fetchRecordZoneChangesResultBlock = { _ in
+                continuation.resume()
+            }
+            familyDatabase.add(operation)
+        }
+
+        if let error = collector.error {
+            if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
+                clearChangeToken()
+                print("[CloudKit] Change token expired, will do full sync next time")
+            }
+            lastSyncError = error.localizedDescription
+            return []
+        }
+
+        var newTasks: [SyncedTask] = []
+        var seenTaskIDs = Set<String>()
+        var seenRedemptionIDs = Set<String>()
+        var seenShoppingIDs = Set<String>()
+
+        for record in collector.records {
+            let idStr = record.recordID.recordName
+            switch record.recordType {
+            case "TaskRecord":
+                seenTaskIDs.insert(idStr)
+                if let synced = applyTaskRecord(record, context: context) {
+                    newTasks.append(synced)
+                }
+            case "RedemptionRecord":
+                seenRedemptionIDs.insert(idStr)
+                applyRedemptionRecord(record, context: context)
+            case "ShoppingRecord":
+                seenShoppingIDs.insert(idStr)
+                applyShoppingRecord(record, context: context)
+            default:
+                break
+            }
+        }
+
+        for (recordID, recordType) in collector.deletedIDs {
+            applyDeletion(recordID: recordID, recordType: recordType, context: context)
+        }
+
+        if isInitialSync && !collector.records.isEmpty {
+            cleanupOrphans(context: context, taskIDs: seenTaskIDs, redemptionIDs: seenRedemptionIDs, shoppingIDs: seenShoppingIDs)
+        }
+
+        if let token = collector.token {
+            saveChangeToken(token)
+        }
+
+        print("[CloudKit] Delta sync: \(collector.records.count) changed, \(collector.deletedIDs.count) deleted")
+        try? context.save()
+        return newTasks
+    }
+
+    private func applyTaskRecord(_ record: CKRecord, context: ModelContext) -> SyncedTask? {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return nil }
+
+        let descriptor = FetchDescriptor<Item>()
+        let allTasks = (try? context.fetch(descriptor)) ?? []
+
+        if let local = allTasks.first(where: { $0.id == uuid }) {
+            local.name = record["name"] as? String ?? local.name
+            local.targetDate = record["targetDate"] as? Date ?? local.targetDate
+            local.assignedTo = record["assignedTo"] as? String ?? local.assignedTo
+            local.reward = (record["reward"] as? NSNumber)?.doubleValue ?? local.reward
+            local.status = record["status"] as? String ?? local.status
+            local.createdByChild = ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1
+            local.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+            local.isRecurring = ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
+            local.giftText = record["giftText"] as? String ?? local.giftText
+            local.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
+            let remoteCreatedBy = record["createdBy"] as? String ?? ""
+            if !remoteCreatedBy.isEmpty { local.createdBy = remoteCreatedBy }
+            let remoteCreatedByID = record["createdByID"] as? String ?? ""
+            if !remoteCreatedByID.isEmpty { local.createdByID = remoteCreatedByID }
+            return nil
+        }
+
+        let name = record["name"] as? String ?? ""
+        let targetDate = record["targetDate"] as? Date ?? Date()
+        let assignedTo = record["assignedTo"] as? String ?? ""
+        let status = record["status"] as? String ?? "open"
+        let item = Item(
+            id: uuid,
+            name: name,
+            targetDate: targetDate,
+            assignedTo: assignedTo,
+            reward: (record["reward"] as? NSNumber)?.doubleValue ?? 0,
+            status: status,
+            createdByChild: ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1,
+            isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1,
+            giftText: record["giftText"] as? String ?? "",
+            createdBy: record["createdBy"] as? String ?? "",
+            createdByID: record["createdByID"] as? String ?? ""
+        )
+        item.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+        item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
+        context.insert(item)
+
+        if status == "open" {
+            return SyncedTask(id: uuid, name: name, targetDate: targetDate, assignedTo: assignedTo, createdBy: record["createdBy"] as? String ?? "")
+        }
+        return nil
+    }
+
+    private func applyRedemptionRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+
+        let descriptor = FetchDescriptor<RewardRedemption>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.childName = record["childName"] as? String ?? existing.childName
+            existing.coinAmount = (record["coinAmount"] as? NSNumber)?.intValue ?? existing.coinAmount
+            existing.redemptionType = record["redemptionType"] as? String ?? existing.redemptionType
+            existing.itemDescription = record["itemDescription"] as? String ?? existing.itemDescription
+            existing.status = record["status"] as? String ?? existing.status
+            existing.rejectReason = record["rejectReason"] as? String ?? existing.rejectReason
+            existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+            existing.resolvedAt = record["resolvedAt"] as? Date
+        } else {
+            let r = RewardRedemption(
+                id: uuid,
+                childName: record["childName"] as? String ?? "",
+                coinAmount: (record["coinAmount"] as? NSNumber)?.intValue ?? 0,
+                redemptionType: record["redemptionType"] as? String ?? "other",
+                itemDescription: record["itemDescription"] as? String ?? "",
+                status: record["status"] as? String ?? "pending"
+            )
+            r.rejectReason = record["rejectReason"] as? String ?? ""
+            r.createdAt = record["createdAt"] as? Date ?? Date()
+            r.resolvedAt = record["resolvedAt"] as? Date
+            context.insert(r)
+        }
+    }
+
+    private func applyShoppingRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+
+        let descriptor = FetchDescriptor<ShoppingItem>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        let bought = record["isBought"]
+        let isBoughtVal: Bool
+        if let num = bought as? NSNumber { isBoughtVal = num.intValue == 1 }
+        else if let int = bought as? Int { isBoughtVal = int == 1 }
+        else { isBoughtVal = false }
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.name = record["name"] as? String ?? existing.name
+            existing.addedBy = record["addedBy"] as? String ?? existing.addedBy
+            existing.isBought = isBoughtVal
+            existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+        } else {
+            let item = ShoppingItem(
+                id: uuid,
+                name: record["name"] as? String ?? "",
+                addedBy: record["addedBy"] as? String ?? "",
+                isBought: isBoughtVal,
+                createdAt: record["createdAt"] as? Date ?? Date()
+            )
+            context.insert(item)
+        }
+    }
+
+    private func applyDeletion(recordID: CKRecord.ID, recordType: CKRecord.RecordType, context: ModelContext) {
+        let idStr = recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+
+        switch recordType {
+        case "TaskRecord":
+            let d = FetchDescriptor<Item>()
+            if let task = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(task)
+            }
+        case "ShoppingRecord":
+            let d = FetchDescriptor<ShoppingItem>()
+            if let item = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(item)
+            }
+        case "RedemptionRecord":
+            let d = FetchDescriptor<RewardRedemption>()
+            if let r = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(r)
+            }
+        default:
+            break
+        }
+    }
+
+    private func cleanupOrphans(context: ModelContext, taskIDs: Set<String>, redemptionIDs: Set<String>, shoppingIDs: Set<String>) {
+        let tasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        for task in tasks where !taskIDs.contains(task.id.uuidString) {
+            context.delete(task)
+        }
+        let redemptions = (try? context.fetch(FetchDescriptor<RewardRedemption>())) ?? []
+        for r in redemptions where !redemptionIDs.contains(r.id.uuidString) {
+            context.delete(r)
+        }
+        let shopping = (try? context.fetch(FetchDescriptor<ShoppingItem>())) ?? []
+        for s in shopping where !shoppingIDs.contains(s.id.uuidString) {
+            context.delete(s)
+        }
+    }
+
+    // MARK: - Migration (Public → Private Zone)
+
+    func migratePublicToPrivateZone(context: ModelContext, familyCode: String) async {
+        guard !familyCode.isEmpty, familyZoneID != nil else { return }
+        let key = "hasMigratedToPrivateZone_\(familyCode)"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+
+        print("[CloudKit] Starting migration to private zone for \(familyCode)")
+
+        let taskRecords = await fetchAllRecords(type: "TaskRecord", familyCode: familyCode)
+        let redemptionRecords = await fetchAllRecords(type: "RedemptionRecord", familyCode: familyCode)
+        let shoppingRecords = await fetchAllRecords(type: "ShoppingRecord", familyCode: familyCode)
+
+        var recordsToSave: [CKRecord] = []
+        let db = familyDatabase
+
+        for oldRecord in taskRecords {
+            let newID = familyRecordID(name: oldRecord.recordID.recordName)
+            let newRecord = CKRecord(recordType: "TaskRecord", recordID: newID)
+            for key in oldRecord.allKeys() {
+                newRecord[key] = oldRecord[key]
+            }
+            recordsToSave.append(newRecord)
+        }
+
+        for oldRecord in redemptionRecords {
+            let newID = familyRecordID(name: oldRecord.recordID.recordName)
+            let newRecord = CKRecord(recordType: "RedemptionRecord", recordID: newID)
+            for key in oldRecord.allKeys() {
+                newRecord[key] = oldRecord[key]
+            }
+            recordsToSave.append(newRecord)
+        }
+
+        for oldRecord in shoppingRecords {
+            let itemID = oldRecord["itemID"] as? String ?? oldRecord.recordID.recordName
+            let newID = familyRecordID(name: itemID)
+            let newRecord = CKRecord(recordType: "ShoppingRecord", recordID: newID)
+            for key in oldRecord.allKeys() {
+                newRecord[key] = oldRecord[key]
+            }
+            recordsToSave.append(newRecord)
+        }
+
+        guard !recordsToSave.isEmpty else {
+            UserDefaults.standard.set(true, forKey: key)
+            print("[CloudKit] No records to migrate")
+            return
+        }
+
+        do {
+            let batchSize = 400
+            for start in stride(from: 0, to: recordsToSave.count, by: batchSize) {
+                let end = min(start + batchSize, recordsToSave.count)
+                let batch = Array(recordsToSave[start..<end])
+                try await db.modifyRecords(saving: batch, deleting: [], savePolicy: .allKeys)
+            }
+            UserDefaults.standard.set(true, forKey: key)
+            print("[CloudKit] Migration complete: \(recordsToSave.count) records copied to private zone (public records kept as fallback)")
+        } catch {
+            lastSyncError = error.localizedDescription
+            print("[CloudKit] Migration failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Re-push Local Data (Recovery)
+
+    func rePushLocalData(context: ModelContext, familyCode: String) async {
+        guard !familyCode.isEmpty else { return }
+
+        let tasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        for task in tasks {
+            await pushTask(task, familyCode: familyCode)
+        }
+
+        let redemptions = (try? context.fetch(FetchDescriptor<RewardRedemption>())) ?? []
+        for r in redemptions {
+            _ = await pushRedemption(r, familyCode: familyCode)
+        }
+
+        let shopping = (try? context.fetch(FetchDescriptor<ShoppingItem>())) ?? []
+        for item in shopping {
+            _ = await pushShoppingItem(item, familyCode: familyCode)
+        }
+
+        print("[CloudKit] Re-pushed \(tasks.count) tasks, \(redemptions.count) redemptions, \(shopping.count) shopping items")
     }
 }
