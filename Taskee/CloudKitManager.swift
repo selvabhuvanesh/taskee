@@ -108,10 +108,10 @@ final class CloudKitManager {
         // 2. Check shared DB (are we a participant?)
         do {
             let zones = try await sharedDatabase.allRecordZones()
-            if zones.contains(where: { $0.zoneID.zoneName == zoneName }) {
-                familyZoneID = zoneID
+            if let matchedZone = zones.first(where: { $0.zoneID.zoneName == zoneName }) {
+                familyZoneID = matchedZone.zoneID
                 isZoneOwner = false
-                print("[CloudKit] Found shared zone: \(zoneName)")
+                print("[CloudKit] Found shared zone: \(zoneName) owner=\(matchedZone.zoneID.ownerName)")
                 return
             }
         } catch { }
@@ -124,7 +124,11 @@ final class CloudKitManager {
         } else {
             if let shareURL = await fetchShareURL(familyCode: familyCode) {
                 if await acceptFamilyShare(shareURLString: shareURL) {
-                    familyZoneID = zoneID
+                    if let actualZoneID = await resolveSharedZoneID(zoneName: zoneName) {
+                        familyZoneID = actualZoneID
+                    } else {
+                        familyZoneID = zoneID
+                    }
                     isZoneOwner = false
                     print("[CloudKit] Accepted share for zone: \(zoneName)")
                 }
@@ -253,6 +257,15 @@ final class CloudKitManager {
                 }
             }
             container.add(operation)
+        }
+    }
+
+    private func resolveSharedZoneID(zoneName: String) async -> CKRecordZone.ID? {
+        do {
+            let zones = try await sharedDatabase.allRecordZones()
+            return zones.first(where: { $0.zoneID.zoneName == zoneName })?.zoneID
+        } catch {
+            return nil
         }
     }
 
@@ -1318,6 +1331,49 @@ final class CloudKitManager {
         seen.append(contentsOf: ids)
         if seen.count > 500 { seen = Array(seen.suffix(500)) }
         UserDefaults.standard.set(seen, forKey: "seenRemoteNotifIDs")
+    }
+
+    // MARK: - Notification Cleanup (TTL)
+
+    func cleanupExpiredNotifications(familyCode: String) async {
+        guard !familyCode.isEmpty else { return }
+        let key = "lastNotifCleanup_\(familyCode)"
+        let lastCleanup = UserDefaults.standard.double(forKey: key)
+        let now = Date().timeIntervalSince1970
+        guard now - lastCleanup > 24 * 60 * 60 else { return }
+
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        let predicate = NSPredicate(format: "familyCode == %@ AND createdAt < %@", familyCode, cutoff as NSDate)
+        let query = CKQuery(recordType: "NotificationRecord", predicate: predicate)
+
+        do {
+            var idsToDelete: [CKRecord.ID] = []
+            var (results, cursor) = try await database.records(matching: query)
+            idsToDelete.append(contentsOf: results.map { $0.0 })
+
+            while let c = cursor {
+                let (more, next) = try await database.records(continuingMatchFrom: c)
+                idsToDelete.append(contentsOf: more.map { $0.0 })
+                cursor = next
+            }
+
+            guard !idsToDelete.isEmpty else {
+                UserDefaults.standard.set(now, forKey: key)
+                return
+            }
+
+            let batchSize = 400
+            for start in stride(from: 0, to: idsToDelete.count, by: batchSize) {
+                let end = min(start + batchSize, idsToDelete.count)
+                let batch = Array(idsToDelete[start..<end])
+                try await database.modifyRecords(saving: [], deleting: batch)
+            }
+
+            UserDefaults.standard.set(now, forKey: key)
+            print("[CloudKit] Cleaned up \(idsToDelete.count) expired notifications")
+        } catch {
+            print("[CloudKit] Notification cleanup failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Family Subscription Tier

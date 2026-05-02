@@ -33,7 +33,7 @@ struct TaskeeApp: App {
     @State private var isCheckingExistingUser = false
     @State private var isCheckingAcceptance = false
     @State private var pendingSyncTask: Task<Void, Never>?
-    @State private var isPolling = false
+    @State private var hasCompletedInitialSetup = false
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -106,8 +106,9 @@ struct TaskeeApp: App {
                 SoundManager.shared.installNotificationSound()
                 UNUserNotificationCenter.current().setBadgeCount(0)
                 Task {
-                    await subscriptionManager.refreshTier()
-                    await subscriptionManager.loadProducts()
+                    async let tier: Void = subscriptionManager.refreshTier()
+                    async let products: Void = subscriptionManager.loadProducts()
+                    _ = await (tier, products)
                     if subscriptionManager.tier != .free && !authManager.familyCode.isEmpty {
                         await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
                     }
@@ -115,14 +116,9 @@ struct TaskeeApp: App {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 UNUserNotificationCenter.current().setBadgeCount(0)
-                guard !authManager.familyCode.isEmpty else { return }
+                guard !authManager.familyCode.isEmpty, hasCompletedInitialSetup else { return }
                 Task {
-                    let context = ModelContext(sharedModelContainer)
-                    await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-                    if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
-                        subscriptionManager.setFamilyTier(familyTier)
-                    }
-                    await fetchAndDeliverNotifications()
+                    await ensureZoneAndSync()
                 }
             }
             .task {
@@ -138,19 +134,8 @@ struct TaskeeApp: App {
                 await cloudKitManager.checkAvailability()
                 await restoreUserIfNeeded()
 
-                guard !authManager.familyCode.isEmpty else { return }
-                await cloudKitManager.ensureFamilyZoneAccess(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID)
-                let migrationContext = ModelContext(sharedModelContainer)
-                await cloudKitManager.migratePublicToPrivateZone(context: migrationContext, familyCode: authManager.familyCode)
-                let context = ModelContext(sharedModelContainer)
-                await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-                await cloudKitManager.backfillCreatedBy(context: context, familyCode: authManager.familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
-                if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
-                    subscriptionManager.setFamilyTier(familyTier)
-                }
-                await cloudKitManager.setupSubscriptions(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
-                await fetchAndDeliverNotifications()
-                await checkChildAcceptance()
+                guard !authManager.familyCode.isEmpty, !hasCompletedInitialSetup else { return }
+                await performInitialSync(familyCode: authManager.familyCode)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
                 guard !authManager.familyCode.isEmpty else { return }
@@ -158,31 +143,13 @@ struct TaskeeApp: App {
                 pendingSyncTask = Task {
                     try? await Task.sleep(for: .seconds(1))
                     guard !Task.isCancelled else { return }
-                    let context = ModelContext(sharedModelContainer)
-                    await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-                    if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: authManager.familyCode) {
-                        subscriptionManager.setFamilyTier(familyTier)
-                    }
-                    await fetchAndDeliverNotifications()
+                    await ensureZoneAndSync()
                     if authManager.role == "parent" {
                         if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
                             notificationManager.sendPickupNotification(childName: pickup.childName)
                         }
                     }
                     await checkChildAcceptance()
-                }
-            }
-            .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
-                guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty, !isPolling else { return }
-                isPolling = true
-                Task {
-                    await fetchAndDeliverNotifications()
-                    if authManager.role == "parent" {
-                        if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
-                            notificationManager.sendPickupNotification(childName: pickup.childName)
-                        }
-                    }
-                    isPolling = false
                 }
             }
             .sheet(isPresented: $showOnboarding) {
@@ -237,7 +204,6 @@ struct TaskeeApp: App {
         guard authManager.isLoggedIn, authManager.role.isEmpty, !authManager.appleUserID.isEmpty else { return }
 
         isCheckingExistingUser = true
-        defer { isCheckingExistingUser = false }
 
         if let existing = await cloudKitManager.lookupExistingMember(appleUserID: authManager.appleUserID) {
             authManager.userName = existing.name
@@ -245,15 +211,51 @@ struct TaskeeApp: App {
             authManager.familyCode = existing.familyCode
             authManager.hasCompletedOnboarding = true
             authManager.role = existing.memberRole
+            isCheckingExistingUser = false
 
-            await cloudKitManager.ensureFamilyZoneAccess(familyCode: existing.familyCode, appleUserID: authManager.appleUserID)
-            let context = ModelContext(sharedModelContainer)
-            await cloudKitManager.syncAll(context: context, familyCode: existing.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
-            if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: existing.familyCode) {
-                subscriptionManager.setFamilyTier(familyTier)
-            }
-            await cloudKitManager.setupSubscriptions(familyCode: existing.familyCode, appleUserID: authManager.appleUserID, role: existing.memberRole)
+            await performInitialSync(familyCode: existing.familyCode)
+        } else {
+            isCheckingExistingUser = false
         }
+    }
+
+    private func ensureZoneAndSync() async {
+        let familyCode = authManager.familyCode
+        guard !familyCode.isEmpty else { return }
+        if !cloudKitManager.hasFamilyZone {
+            await cloudKitManager.ensureFamilyZoneAccess(familyCode: familyCode, appleUserID: authManager.appleUserID)
+        }
+        let context = ModelContext(sharedModelContainer)
+        await cloudKitManager.syncAll(context: context, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+        if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: familyCode) {
+            subscriptionManager.setFamilyTier(familyTier)
+        }
+        await fetchAndDeliverNotifications()
+    }
+
+    private func performInitialSync(familyCode: String) async {
+        guard !familyCode.isEmpty, !hasCompletedInitialSetup else { return }
+        hasCompletedInitialSetup = true
+
+        await cloudKitManager.ensureFamilyZoneAccess(familyCode: familyCode, appleUserID: authManager.appleUserID)
+
+        let migrationContext = ModelContext(sharedModelContainer)
+        await cloudKitManager.migratePublicToPrivateZone(context: migrationContext, familyCode: familyCode)
+
+        let context = ModelContext(sharedModelContainer)
+        await cloudKitManager.syncAll(context: context, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+
+        async let backfill: Void = cloudKitManager.backfillCreatedBy(context: context, familyCode: familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
+        async let tierFetch = cloudKitManager.fetchFamilyTier(familyCode: familyCode)
+        async let subs: Void = cloudKitManager.setupSubscriptions(familyCode: familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
+        async let notifs: Void = fetchAndDeliverNotifications()
+        async let acceptance: Void = checkChildAcceptance()
+        async let cleanup: Void = cloudKitManager.cleanupExpiredNotifications(familyCode: familyCode)
+
+        if let familyTier = await tierFetch {
+            subscriptionManager.setFamilyTier(familyTier)
+        }
+        _ = await (backfill, subs, notifs, acceptance, cleanup)
     }
 
     private func scheduleRemindersForSyncedTasks(_ tasks: [CloudKitManager.SyncedTask]) {
