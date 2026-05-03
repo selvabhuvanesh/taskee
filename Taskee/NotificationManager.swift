@@ -259,14 +259,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
         let content = UNMutableNotificationContent()
-        let greeting = userName.isEmpty ? "Good morning!" : "Good morning, \(userName)!"
+        let greeting = userName.isEmpty ? "Your Day Ahead" : "Your Day Ahead, \(userName)"
 
         if tomorrowTasks.isEmpty {
             content.title = greeting
             content.body = Self.noTaskMessages.randomElement()!
         } else {
             let count = tomorrowTasks.count
-            content.title = "\(greeting) You have \(count) task\(count == 1 ? "" : "s") today"
+            content.title = "\(greeting) — \(count) task\(count == 1 ? "" : "s") today"
 
             let previews = tomorrowTasks.prefix(3).map { "• \($0.name)" }
             var body = previews.joined(separator: "\n")

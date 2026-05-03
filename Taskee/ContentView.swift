@@ -563,14 +563,20 @@ struct ContentView: View {
             $0.assignedTo == child.name && $0.isOpen
             && Calendar.current.isDateInToday($0.targetDate)
         }
-        let count = openToday.count
-        let taskList = openToday.prefix(3).map { $0.name }.joined(separator: ", ")
-        let body = count == 1
-            ? "Don't forget: \"\(taskList)\" is due today!"
-            : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
+        guard !openToday.isEmpty else { return }
 
-        let memberName = child.name
-        reminderSentChildName = memberName
+        let now = Date()
+        let familyCode = authManager.familyCode
+        for task in openToday {
+            task.lastRemindedAt = now
+        }
+        Task {
+            for task in openToday {
+                await cloudKitManager.pushTask(task, familyCode: familyCode)
+            }
+        }
+
+        reminderSentChildName = child.name
         showReminderSent = true
     }
 
@@ -765,6 +771,9 @@ struct DateTasksView: View {
     @State private var tooEarlyTask: Item?
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
+    @State private var showEditChoice = false
+    @State private var editAllRecurring = false
+    @State private var pendingEditTask: Item?
 
     private var taskListContent: some View {
         ScrollView {
@@ -783,7 +792,14 @@ struct DateTasksView: View {
                                 taskToApprove = task
                             }
                         },
-                        onEdit: { taskToEdit = task },
+                        onEdit: {
+                            if task.isRecurring {
+                                pendingEditTask = task
+                                showEditChoice = true
+                            } else {
+                                taskToEdit = task
+                            }
+                        },
                         onDelete: { taskToDelete = task }
                     )
                     .padding(.horizontal, 16)
@@ -834,7 +850,22 @@ struct DateTasksView: View {
             deleteAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme)
+            EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring)
+        }
+        .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
+            Button("Edit This Task Only") {
+                editAllRecurring = false
+                taskToEdit = pendingEditTask
+                pendingEditTask = nil
+            }
+            Button("Edit All Recurring") {
+                editAllRecurring = true
+                taskToEdit = pendingEditTask
+                pendingEditTask = nil
+            }
+            Button("Cancel", role: .cancel) { pendingEditTask = nil }
+        } message: {
+            Text("Would you like to edit just this task or all open instances?")
         }
         .alert(approveAlertTitle, isPresented: approveAlertBinding) {
             approveAlertButtons
@@ -1075,6 +1106,9 @@ struct ChildTasksView: View {
     @State private var showTooEarlyAlert = false
     @State private var tooEarlyTask: Item?
     @State private var showReminderSent = false
+    @State private var showEditChoice = false
+    @State private var editAllRecurring = false
+    @State private var pendingEditTask: Item?
 
     private var childTotalEarned: Int {
         allTasks
@@ -1130,7 +1164,14 @@ struct ChildTasksView: View {
                                         taskToApprove = task
                                     }
                                 },
-                                onEdit: { taskToEdit = task },
+                                onEdit: {
+                                    if task.isRecurring {
+                                        pendingEditTask = task
+                                        showEditChoice = true
+                                    } else {
+                                        taskToEdit = task
+                                    }
+                                },
                                 onDelete: { taskToDelete = task }
                             )
                             .padding(.horizontal, 16)
@@ -1205,7 +1246,22 @@ struct ChildTasksView: View {
             childApproveAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: allChildren, otherParent: otherParent, theme: theme)
+            EditTaskView(task: task, children: allChildren, otherParent: otherParent, theme: theme, editAll: editAllRecurring)
+        }
+        .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
+            Button("Edit This Task Only") {
+                editAllRecurring = false
+                taskToEdit = pendingEditTask
+                pendingEditTask = nil
+            }
+            Button("Edit All Recurring") {
+                editAllRecurring = true
+                taskToEdit = pendingEditTask
+                pendingEditTask = nil
+            }
+            Button("Cancel", role: .cancel) { pendingEditTask = nil }
+        } message: {
+            Text("Would you like to edit just this task or all open instances?")
         }
         .sheet(isPresented: $showingAddTask) {
             AddTaskView(children: allChildren, otherParent: otherParent, preselectedChild: child.name, theme: theme)
@@ -1387,11 +1443,18 @@ struct ChildTasksView: View {
     }
 
     private func sendReminder() {
-        let count = todayOpenTasks.count
-        let taskList = todayOpenTasks.prefix(3).map { $0.name }.joined(separator: ", ")
-        let body = count == 1
-            ? "Don't forget: \"\(taskList)\" is due today!"
-            : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
+        guard !todayOpenTasks.isEmpty else { return }
+
+        let now = Date()
+        let familyCode = authManager.familyCode
+        for task in todayOpenTasks {
+            task.lastRemindedAt = now
+        }
+        Task {
+            for task in todayOpenTasks {
+                await cloudKitManager.pushTask(task, familyCode: familyCode)
+            }
+        }
 
         showReminderSent = true
     }
@@ -1814,17 +1877,17 @@ struct AddTaskView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.7))
 
                             TextField("What needs to be done?", text: $taskName)
-                                .font(.body)
+                                .font(.title3.weight(.medium))
                                 .foregroundStyle(.white)
-                                .padding(14)
-                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .padding(16)
+                                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(taskName.isEmpty ? .white.opacity(0.35) : .green.opacity(0.6), lineWidth: 1.5)
                                 )
                         }
 
@@ -2362,6 +2425,7 @@ struct EditTaskView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Bindable var task: Item
     let children: [FamilyMember]
     var otherParent: FamilyMember? = nil
@@ -2374,11 +2438,18 @@ struct EditTaskView: View {
     @State private var includeGift: Bool
     @State private var giftText: String
 
-    init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")) {
+    private let originalName: String
+    private let originalAssignee: String
+    let editAll: Bool
+
+    init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default"), editAll: Bool = false) {
         self.task = task
         self.children = children
         self.otherParent = otherParent
         self.theme = theme
+        self.editAll = editAll
+        self.originalName = task.name
+        self.originalAssignee = task.assignedTo
         _taskName = State(initialValue: task.name)
         _targetDate = State(initialValue: task.targetDate)
         _selectedChild = State(initialValue: task.assignedTo)
@@ -2407,17 +2478,17 @@ struct EditTaskView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.7))
 
                             TextField("What needs to be done?", text: $taskName)
-                                .font(.body)
+                                .font(.title3.weight(.medium))
                                 .foregroundStyle(.white)
-                                .padding(14)
-                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .padding(16)
+                                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(taskName.isEmpty ? .white.opacity(0.35) : .green.opacity(0.6), lineWidth: 1.5)
                                 )
                         }
 
@@ -2533,24 +2604,11 @@ struct EditTaskView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let previousAssignee = task.assignedTo
-                        task.name = taskName.trimmingCharacters(in: .whitespaces)
-                        task.targetDate = targetDate
-                        task.assignedTo = selectedChild
-                        task.reward = rewardValue
-                        task.giftText = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
-                        notificationManager.cancelTaskReminder(taskId: task.id)
-                        notificationManager.scheduleTaskReminder(
-                            taskId: task.id,
-                            taskName: task.name,
-                            assignedTo: task.assignedTo,
-                            dueDate: targetDate
-                        )
-                        let familyCode = authManager.familyCode
-                        Task {
-                            await cloudKitManager.pushTask(task, familyCode: familyCode)
+                        if editAll {
+                            saveAllRecurring()
+                        } else {
+                            saveSingleTask()
                         }
-                        dismiss()
                     }
                     .fontWeight(.semibold)
                     .disabled(!isValid)
@@ -2558,6 +2616,56 @@ struct EditTaskView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private func saveSingleTask() {
+        let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
+        let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
+        task.name = trimmedName
+        task.targetDate = targetDate
+        task.assignedTo = selectedChild
+        task.reward = rewardValue
+        task.giftText = trimmedGift
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        notificationManager.scheduleTaskReminder(
+            taskId: task.id,
+            taskName: trimmedName,
+            assignedTo: selectedChild,
+            dueDate: targetDate
+        )
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        dismiss()
+    }
+
+    private func saveAllRecurring() {
+        let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
+        let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
+        let familyCode = authManager.familyCode
+        let siblings = allTasks.filter {
+            $0.name == originalName && $0.assignedTo == originalAssignee
+            && $0.isRecurring && !$0.isArchived && $0.isOpen
+        }
+        for sibling in siblings {
+            sibling.name = trimmedName
+            sibling.assignedTo = selectedChild
+            sibling.reward = rewardValue
+            sibling.giftText = trimmedGift
+            notificationManager.cancelTaskReminder(taskId: sibling.id)
+            notificationManager.scheduleTaskReminder(
+                taskId: sibling.id,
+                taskName: trimmedName,
+                assignedTo: selectedChild,
+                dueDate: sibling.targetDate
+            )
+        }
+        task.targetDate = targetDate
+        Task {
+            for sibling in siblings {
+                await cloudKitManager.pushTask(sibling, familyCode: familyCode)
+            }
+        }
+        dismiss()
     }
 
     private func editChildChip(name: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
