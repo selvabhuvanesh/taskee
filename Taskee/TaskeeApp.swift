@@ -144,11 +144,6 @@ struct TaskeeApp: App {
                     try? await Task.sleep(for: .seconds(1))
                     guard !Task.isCancelled else { return }
                     await ensureZoneAndSync()
-                    if authManager.role == "parent" {
-                        if let pickup = await cloudKitManager.fetchLatestPickup(familyCode: authManager.familyCode) {
-                            notificationManager.sendPickupNotification(childName: pickup.childName)
-                        }
-                    }
                     await checkChildAcceptance()
                 }
             }
@@ -194,8 +189,7 @@ struct TaskeeApp: App {
             authManager.isPendingApproval = false
             if !authManager.familyCode.isEmpty {
                 await cloudKitManager.ensureFamilyZoneAccess(familyCode: authManager.familyCode, appleUserID: authManager.appleUserID)
-                let context = ModelContext(sharedModelContainer)
-                await cloudKitManager.syncAll(context: context, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+                await cloudKitManager.syncAll(context: sharedModelContainer.mainContext, familyCode: authManager.familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
             }
         }
     }
@@ -225,12 +219,12 @@ struct TaskeeApp: App {
         if !cloudKitManager.hasFamilyZone {
             await cloudKitManager.ensureFamilyZoneAccess(familyCode: familyCode, appleUserID: authManager.appleUserID)
         }
-        let context = ModelContext(sharedModelContainer)
-        await cloudKitManager.syncAll(context: context, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+        let result = await cloudKitManager.syncAll(context: sharedModelContainer.mainContext, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+        handleSyncChanges(result.changes)
         if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: familyCode) {
             subscriptionManager.setFamilyTier(familyTier)
         }
-        await fetchAndDeliverNotifications()
+        scheduleDailySummary()
     }
 
     private func performInitialSync(familyCode: String) async {
@@ -239,23 +233,27 @@ struct TaskeeApp: App {
 
         await cloudKitManager.ensureFamilyZoneAccess(familyCode: familyCode, appleUserID: authManager.appleUserID)
 
-        let migrationContext = ModelContext(sharedModelContainer)
+        let migrationContext = sharedModelContainer.mainContext
         await cloudKitManager.migratePublicToPrivateZone(context: migrationContext, familyCode: familyCode)
 
-        let context = ModelContext(sharedModelContainer)
+        let context = sharedModelContainer.mainContext
         await cloudKitManager.syncAll(context: context, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
 
         async let backfill: Void = cloudKitManager.backfillCreatedBy(context: context, familyCode: familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
         async let tierFetch = cloudKitManager.fetchFamilyTier(familyCode: familyCode)
         async let subs: Void = cloudKitManager.setupSubscriptions(familyCode: familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
-        async let notifs: Void = fetchAndDeliverNotifications()
         async let acceptance: Void = checkChildAcceptance()
-        async let cleanup: Void = cloudKitManager.cleanupExpiredNotifications(familyCode: familyCode)
 
         if let familyTier = await tierFetch {
             subscriptionManager.setFamilyTier(familyTier)
         }
-        _ = await (backfill, subs, notifs, acceptance, cleanup)
+        _ = await (backfill, subs, acceptance)
+        scheduleDailySummary()
+    }
+
+    private func scheduleDailySummary() {
+        let allTasks = (try? sharedModelContainer.mainContext.fetch(FetchDescriptor<Item>())) ?? []
+        notificationManager.scheduleDailySummary(tasks: allTasks, userName: authManager.userName)
     }
 
     private func scheduleRemindersForSyncedTasks(_ tasks: [CloudKitManager.SyncedTask]) {
@@ -276,27 +274,113 @@ struct TaskeeApp: App {
         }
     }
 
-    private func fetchAndDeliverNotifications() async {
-        guard !authManager.familyCode.isEmpty, !authManager.appleUserID.isEmpty else { return }
-        let unseen = await cloudKitManager.fetchUnseenNotifications(
-            familyCode: authManager.familyCode,
-            appleUserID: authManager.appleUserID
-        )
-        guard !unseen.isEmpty else { return }
+    private func handleSyncChanges(_ changes: [CloudKitManager.SyncChange]) {
         let myName = authManager.userName
-        var seenIDs: [String] = []
-        for notif in unseen {
-            if notif.senderName != myName {
+        let myRole = authManager.role
+
+        for change in changes {
+            switch change {
+            case .taskApproved(let taskName, let assignedTo, let reward, let hasGift):
+                guard assignedTo == myName else { continue }
+                let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
+                let giftHint = hasGift ? " You have a surprise gift waiting!" : ""
                 notificationManager.deliverBeepNotification(
-                    title: notif.title,
-                    body: notif.body,
-                    category: notif.category,
-                    senderName: notif.senderName
+                    title: "Task Approved!",
+                    body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
+                    category: "TASK_APPROVED"
                 )
+
+            case .taskRejected(let taskName, let assignedTo):
+                guard assignedTo == myName else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Task Needs Redo",
+                    body: "Your task \"\(taskName)\" was sent back. Please try again.",
+                    category: "TASK_REJECTED"
+                )
+
+            case .taskInReview(let taskName, let childName):
+                guard myRole == "parent" else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Task Submitted for Review",
+                    body: "\(childName) completed \"\(taskName)\"",
+                    category: "TASK_REVIEW",
+                    senderName: childName
+                )
+
+            case .taskAssigned(let taskName, let assignedTo, let createdBy):
+                guard assignedTo == myName, createdBy != myName else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "New Task Assigned",
+                    body: createdBy.isEmpty ? taskName : "\(createdBy) assigned \"\(taskName)\" to you",
+                    category: "TASK_ASSIGNED",
+                    senderName: createdBy
+                )
+
+            case .taskReminded(let taskName, let assignedTo):
+                guard assignedTo == myName else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Task Reminder",
+                    body: "Don't forget: \"\(taskName)\"",
+                    category: "TASK_REMINDER"
+                )
+
+            case .redemptionRequested(let description, let childName, let coins):
+                guard myRole == "parent" else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Reward Request",
+                    body: "\(childName) wants to redeem \(coins) coins for \"\(description)\"",
+                    category: "REWARD_REQUEST",
+                    senderName: childName
+                )
+
+            case .redemptionApproved(let description, let childName):
+                guard childName == myName else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Reward Approved!",
+                    body: "Your request for \"\(description)\" has been approved!",
+                    category: "REWARD_APPROVED"
+                )
+
+            case .redemptionRejected(let description, let childName, let reason):
+                guard childName == myName else { continue }
+                let reasonText = reason.isEmpty ? "" : " Reason: \(reason)"
+                notificationManager.deliverBeepNotification(
+                    title: "Reward Request Declined",
+                    body: "Your request for \"\(description)\" was declined.\(reasonText)",
+                    category: "REWARD_REJECTED"
+                )
+
+            case .redemptionFulfilled(let description, let childName):
+                guard myRole == "parent" else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Reward Received",
+                    body: "\(childName) confirmed receiving: \"\(description)\"",
+                    category: "REWARD_FULFILLED",
+                    senderName: childName
+                )
+
+            case .memberAccepted(let name, _):
+                guard name == myName else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "Welcome to the Family!",
+                    body: "Your request to join has been approved!",
+                    category: "MEMBER_ACCEPTED"
+                )
+
+            case .memberRequested(let name):
+                guard myRole == "parent" else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "New Family Member Request",
+                    body: "\(name) wants to join your family",
+                    category: "MEMBER_REQUEST",
+                    senderName: name
+                )
+
+            case .pickupRequested(let childName):
+                guard myRole == "parent" else { continue }
+                notificationManager.sendPickupNotification(childName: childName)
             }
-            seenIDs.append(notif.recordID)
         }
-        CloudKitManager.markNotificationsSeen(seenIDs)
     }
 }
 

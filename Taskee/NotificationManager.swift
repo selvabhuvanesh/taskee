@@ -228,6 +228,74 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    // MARK: - Daily Morning Summary
+
+    private static let dailySummaryID = "daily-morning-summary"
+
+    private static let noTaskMessages = [
+        "No tasks today — a perfect day to create something phenomenal!",
+        "Your slate is clean! What amazing thing will you do today?",
+        "Zero tasks, infinite possibilities. Make today count!",
+        "Nothing on the list — the world is yours today!",
+        "A fresh day with no tasks. Dream big and go for it!",
+        "All clear! Use today to do something that makes you proud.",
+        "No tasks? No problem. Today's yours to own!",
+    ]
+
+    func scheduleDailySummary(tasks: [Item], userName: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.dailySummaryID])
+
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: Date())!
+        let startOfTomorrow = calendar.startOfDay(for: tomorrow)
+        let endOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfTomorrow)!
+
+        let tomorrowTasks = tasks.filter { task in
+            !task.isArchived && task.isOpen
+            && task.targetDate >= startOfTomorrow
+            && task.targetDate < endOfTomorrow
+            && (task.assignedTo == userName || task.assignedTo.isEmpty)
+        }
+
+        let content = UNMutableNotificationContent()
+        let greeting = userName.isEmpty ? "Good morning!" : "Good morning, \(userName)!"
+
+        if tomorrowTasks.isEmpty {
+            content.title = greeting
+            content.body = Self.noTaskMessages.randomElement()!
+        } else {
+            let count = tomorrowTasks.count
+            content.title = "\(greeting) You have \(count) task\(count == 1 ? "" : "s") today"
+
+            let previews = tomorrowTasks.prefix(3).map { "• \($0.name)" }
+            var body = previews.joined(separator: "\n")
+            if tomorrowTasks.count > 3 {
+                body += "\n  ...and \(tomorrowTasks.count - 3) more"
+            }
+            let totalCoins = tomorrowTasks.reduce(0) { $0 + Int($1.reward) }
+            if totalCoins > 0 {
+                body += "\n⭐ \(totalCoins) coins up for grabs!"
+            }
+            content.body = body
+        }
+
+        content.sound = .default
+        content.interruptionLevel = .active
+
+        var triggerComponents = DateComponents()
+        triggerComponents.hour = 7
+        triggerComponents.minute = 30
+        let triggerDate = calendar.nextDate(after: Date(), matching: triggerComponents, matchingPolicy: .nextTime)!
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: triggerDate),
+            repeats: false
+        )
+
+        let request = UNNotificationRequest(identifier: Self.dailySummaryID, content: content, trigger: trigger)
+        center.add(request)
+    }
+
     // MARK: - Local Notification History
 
     struct LocalNotification: Codable, Identifiable {

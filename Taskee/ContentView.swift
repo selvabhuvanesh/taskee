@@ -90,6 +90,7 @@ struct ContentView: View {
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
+    @State private var showShoppingBag = false
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
@@ -171,8 +172,11 @@ struct ContentView: View {
                         refreshUnreadCount()
                     }
 
-                    addTaskButton
-                        .padding(.bottom, 8)
+                    HStack(spacing: 12) {
+                        shoppingBagButton
+                        addTaskButton
+                    }
+                    .padding(.bottom, 8)
                 }
 
                 CelebrationOverlay(
@@ -192,6 +196,7 @@ struct ContentView: View {
                     }
                     .transition(.scale.combined(with: .opacity))
                 }
+
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -319,6 +324,9 @@ struct ContentView: View {
             .sheet(isPresented: $showNotificationCenter) {
                 NotificationCenterView(theme: parentTheme)
             }
+            .sheet(isPresented: $showShoppingBag) {
+                ShoppingBagView(theme: parentTheme)
+            }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
                     UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastNotifReadTime")
@@ -341,7 +349,12 @@ struct ContentView: View {
                 RedemptionApprovalsView(theme: parentTheme)
             }
             .sheet(isPresented: $showRewardsHistory) {
-                RewardsHistoryView(redemptions: allRedemptions.sorted { $0.createdAt > $1.createdAt }, isParent: true, theme: parentTheme)
+                RewardsHistoryView(
+                    redemptions: allRedemptions.sorted { $0.createdAt > $1.createdAt },
+                    tasks: tasks,
+                    isParent: true,
+                    theme: parentTheme
+                )
             }
             .sheet(isPresented: $showShareSheet) {
                 ShareSheet(items: [ShareTextWithLink(text: parentShareMessage, url: appStoreURL)])
@@ -556,26 +569,7 @@ struct ContentView: View {
             ? "Don't forget: \"\(taskList)\" is due today!"
             : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
 
-        let localTargetID = child.appleUserID
         let memberName = child.name
-        let familyCode = authManager.familyCode
-        let senderName = authManager.userName
-        let senderAvatar = authManager.avatar
-        Task {
-            var targetID = localTargetID
-            if targetID.isEmpty {
-                targetID = await cloudKitManager.lookupMemberAppleUserID(name: memberName, familyCode: familyCode) ?? ""
-            }
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: familyCode,
-                title: "Reminder from \(senderName)",
-                body: body,
-                category: "TASK_REMINDER",
-                senderAvatar: senderAvatar,
-                senderName: senderName,
-                targetAppleUserID: targetID
-            )
-        }
         reminderSentChildName = memberName
         showReminderSent = true
     }
@@ -688,6 +682,32 @@ struct ContentView: View {
                 .foregroundStyle(.white)
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
+    }
+
+    @Query private var shoppingItems: [ShoppingItem]
+
+    private var shoppingBagButton: some View {
+        Button {
+            showShoppingBag = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bag.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.orange, in: Circle())
+
+                let unboughtCount = shoppingItems.filter { !$0.isBought }.count
+                if unboughtCount > 0 {
+                    Text("\(unboughtCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
     }
 }
 
@@ -950,17 +970,17 @@ struct DateTasksView: View {
         }
     }
 
-    private func deductCoinsIfNeeded(_ task: Item) {
+    private func recomputeCoinsAfterDelete(for task: Item) {
         guard task.isApproved, task.reward > 0, !task.assignedTo.isEmpty else { return }
         if let child = children.first(where: { $0.name == task.assignedTo }) {
-            child.totalEarned = max(0, child.totalEarned - task.reward)
+            child.recomputeEarned(from: allTasks, excluding: task.id)
             let familyCode = authManager.familyCode
             Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
         }
     }
 
     private func deleteSingleTask(_ task: Item) {
-        deductCoinsIfNeeded(task)
+        recomputeCoinsAfterDelete(for: task)
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
@@ -972,9 +992,18 @@ struct DateTasksView: View {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
+        let deletedIDs = Set(matching.map { $0.id })
+        if let assignee = matching.first?.assignedTo, !assignee.isEmpty,
+           matching.contains(where: { $0.isApproved && $0.reward > 0 }),
+           let child = children.first(where: { $0.name == assignee }) {
+            child.totalEarned = allTasks
+                .filter { !deletedIDs.contains($0.id) && $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
+                .reduce(0.0) { $0 + $1.reward }
+            let familyCode = authManager.familyCode
+            Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
+        }
         var taskIDs: [UUID] = []
         for t in matching {
-            deductCoinsIfNeeded(t)
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
@@ -987,7 +1016,7 @@ struct DateTasksView: View {
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 && !task.assignedTo.isEmpty {
             if let child = children.first(where: { $0.name == task.assignedTo }) {
-                child.totalEarned += task.reward
+                child.recomputeEarned(from: allTasks)
                 let familyCode = authManager.familyCode
                 Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
             }
@@ -1000,25 +1029,8 @@ struct DateTasksView: View {
             )
         }
         let familyCode = authManager.familyCode
-        let taskName = task.name
-        let childName = task.assignedTo
-        let reward = task.reward
-        let hasGift = task.hasGift
-        let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
         Task {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-            if !childName.isEmpty {
-                let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
-                let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
-                await cloudKitManager.sendRemoteNotification(
-                    familyCode: familyCode,
-                    title: "Task Approved!",
-                    body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
-                    category: "TASK_APPROVED",
-                    senderAvatar: authManager.avatar,
-                    targetAppleUserID: targetID
-                )
-            }
         }
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
@@ -1033,23 +1045,8 @@ struct DateTasksView: View {
             childName: task.assignedTo
         )
         let familyCode = authManager.familyCode
-        let taskName = task.name
-        let assigneeName = task.assignedTo
-        let targetID = children.first(where: { $0.name == assigneeName })?.appleUserID ?? ""
         Task {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-            var resolvedTargetID = targetID
-            if resolvedTargetID.isEmpty {
-                resolvedTargetID = await cloudKitManager.lookupMemberAppleUserID(name: assigneeName, familyCode: familyCode) ?? ""
-            }
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: familyCode,
-                title: "Task Needs Redo",
-                body: "\"\(taskName)\" was sent back. Please try again.",
-                category: "TASK_REJECTED",
-                senderAvatar: authManager.avatar,
-                targetAppleUserID: resolvedTargetID
-            )
         }
     }
 }
@@ -1396,18 +1393,6 @@ struct ChildTasksView: View {
             ? "Don't forget: \"\(taskList)\" is due today!"
             : "You have \(count) tasks due today: \(taskList)\(count > 3 ? "..." : "")"
 
-        let targetID = child.appleUserID
-        Task {
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: authManager.familyCode,
-                title: "Reminder from \(authManager.userName)",
-                body: body,
-                category: "TASK_REMINDER",
-                senderAvatar: authManager.avatar,
-                senderName: authManager.userName,
-                targetAppleUserID: targetID
-            )
-        }
         showReminderSent = true
     }
 
@@ -1443,7 +1428,7 @@ struct ChildTasksView: View {
         task.status = "approved"
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 {
-            child.totalEarned += task.reward
+            child.recomputeEarned(from: allTasks)
         }
         notificationManager.sendTaskApprovedNotification(
             taskName: task.name,
@@ -1451,23 +1436,9 @@ struct ChildTasksView: View {
             reward: task.reward
         )
         let familyCode = authManager.familyCode
-        let taskName = task.name
-        let reward = task.reward
-        let hasGift = task.hasGift
-        let targetID = child.appleUserID
         Task {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
             await cloudKitManager.pushMember(child, familyCode: familyCode)
-            let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
-            let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: familyCode,
-                title: "Task Approved!",
-                body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
-                category: "TASK_APPROVED",
-                senderAvatar: authManager.avatar,
-                targetAppleUserID: targetID
-            )
         }
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
@@ -1482,36 +1453,22 @@ struct ChildTasksView: View {
             childName: child.name
         )
         let familyCode = authManager.familyCode
-        let taskName = task.name
-        let targetID = child.appleUserID
         Task {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-            var resolvedTargetID = targetID
-            if resolvedTargetID.isEmpty {
-                resolvedTargetID = await cloudKitManager.lookupMemberAppleUserID(name: child.name, familyCode: familyCode) ?? ""
-            }
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: familyCode,
-                title: "Task Needs Redo",
-                body: "\"\(taskName)\" was sent back. Please try again.",
-                category: "TASK_REJECTED",
-                senderAvatar: authManager.avatar,
-                targetAppleUserID: resolvedTargetID
-            )
         }
     }
 
-    private func deductCoinsIfNeeded(_ task: Item) {
+    private func recomputeCoinsAfterDelete(for task: Item) {
         guard task.isApproved, task.reward > 0, !task.assignedTo.isEmpty else { return }
         if let member = allChildren.first(where: { $0.name == task.assignedTo }) {
-            member.totalEarned = max(0, member.totalEarned - task.reward)
+            member.recomputeEarned(from: allTasks, excluding: task.id)
             let familyCode = authManager.familyCode
             Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
         }
     }
 
     private func deleteSingleTask(_ task: Item) {
-        deductCoinsIfNeeded(task)
+        recomputeCoinsAfterDelete(for: task)
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
@@ -1523,9 +1480,18 @@ struct ChildTasksView: View {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
+        let deletedIDs = Set(matching.map { $0.id })
+        if let assignee = matching.first?.assignedTo, !assignee.isEmpty,
+           matching.contains(where: { $0.isApproved && $0.reward > 0 }),
+           let child = allChildren.first(where: { $0.name == assignee }) {
+            child.totalEarned = allTasks
+                .filter { !deletedIDs.contains($0.id) && $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
+                .reduce(0.0) { $0 + $1.reward }
+            let familyCode = authManager.familyCode
+            Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
+        }
         var taskIDs: [UUID] = []
         for t in matching {
-            deductCoinsIfNeeded(t)
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
@@ -2014,31 +1980,9 @@ struct AddTaskView: View {
                             )
                         }
                         let familyCode = authManager.familyCode
-                        let assigneeName = selectedChild
-                        let parentName = authManager.userName
-                        let taskCount = createdTasks.count
-                        let localTargetID = children.first(where: { $0.name == selectedChild })?.appleUserID
-                            ?? (otherParent?.name == selectedChild ? otherParent?.appleUserID : nil)
-                            ?? ""
-                        let isAssignedToSelf = selectedChild == authManager.userName
                         Task {
                             for task in createdTasks {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
-                            }
-                            if !assigneeName.isEmpty && !isAssignedToSelf {
-                                var targetID = localTargetID
-                                if targetID.isEmpty {
-                                    targetID = await cloudKitManager.lookupMemberAppleUserID(name: assigneeName, familyCode: familyCode) ?? ""
-                                }
-                                await cloudKitManager.sendRemoteNotification(
-                                    familyCode: familyCode,
-                                    title: "New Task Assigned",
-                                    body: "\(parentName) assigned \"\(trimmedName)\" to you" + (taskCount > 1 ? " (\(taskCount) tasks)" : ""),
-                                    category: "TASK_ASSIGNED",
-                                    senderAvatar: authManager.avatar,
-                                    senderName: parentName,
-                                    targetAppleUserID: targetID
-                                )
                             }
                         }
                         dismiss()
@@ -2332,20 +2276,8 @@ struct AddTaskView: View {
 
             if !authManager.familyCode.isEmpty {
                 let snapshot = CloudKitManager.TaskSnapshot(task)
-                let targetID = children.first(where: { $0.name == selectedChild })?.appleUserID ?? ""
                 Task {
                     await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: authManager.familyCode)
-                    if !selectedChild.isEmpty {
-                        await cloudKitManager.sendRemoteNotification(
-                            familyCode: authManager.familyCode,
-                            title: "New Task Assigned",
-                            body: "\"\(trimmedName)\" assigned to \(selectedChild)",
-                            category: "TASK_ASSIGNED",
-                            senderAvatar: authManager.avatar,
-                            senderName: authManager.userName,
-                            targetAppleUserID: targetID
-                        )
-                    }
                 }
             }
         }
@@ -2615,29 +2547,8 @@ struct EditTaskView: View {
                             dueDate: targetDate
                         )
                         let familyCode = authManager.familyCode
-                        let newAssignee = selectedChild
-                        let parentName = authManager.userName
-                        let trimmedName = task.name
-                        let localTargetID = children.first(where: { $0.name == newAssignee })?.appleUserID
-                            ?? (otherParent?.name == newAssignee ? otherParent?.appleUserID : nil)
-                            ?? ""
                         Task {
                             await cloudKitManager.pushTask(task, familyCode: familyCode)
-                            if newAssignee != previousAssignee && !newAssignee.isEmpty && newAssignee != parentName {
-                                var targetID = localTargetID
-                                if targetID.isEmpty {
-                                    targetID = await cloudKitManager.lookupMemberAppleUserID(name: newAssignee, familyCode: familyCode) ?? ""
-                                }
-                                await cloudKitManager.sendRemoteNotification(
-                                    familyCode: familyCode,
-                                    title: "New Task Assigned",
-                                    body: "\(parentName) assigned \"\(trimmedName)\" to you",
-                                    category: "TASK_ASSIGNED",
-                                    senderAvatar: authManager.avatar,
-                                    senderName: parentName,
-                                    targetAppleUserID: targetID
-                                )
-                            }
                         }
                         dismiss()
                     }
@@ -2684,6 +2595,7 @@ struct ChildrenManagementView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query private var allMembers: [FamilyMember]
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var memberToRemove: FamilyMember?
 
@@ -2835,17 +2747,8 @@ struct ChildrenManagementView: View {
                     Button {
                         member.isAccepted = true
                         let familyCode = authManager.familyCode
-                        let targetID = member.appleUserID
                         Task {
                             await cloudKitManager.pushMember(member, familyCode: familyCode)
-                            await cloudKitManager.sendRemoteNotification(
-                                familyCode: familyCode,
-                                title: "Welcome to the Family!",
-                                body: "\(member.name), your parent approved your request. You're all set!",
-                                category: "MEMBER_ACCEPTED",
-                                senderAvatar: authManager.avatar,
-                                targetAppleUserID: targetID
-                            )
                         }
                     } label: {
                         Text("Accept")
@@ -2897,7 +2800,8 @@ struct ChildrenManagementView: View {
                                 .foregroundStyle(.white)
 
                             if member.isChild {
-                                Text("Earned: \(Int(member.totalEarned)) coins")
+                                let earned = allTasks.filter { $0.assignedTo == member.name && $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+                                Text("Earned: \(earned) coins")
                                     .font(.caption)
                                     .foregroundStyle(.yellow.opacity(0.8))
                             } else {
@@ -2984,6 +2888,7 @@ struct PendingApprovalsView: View {
     @Environment(AuthManager.self) private var authManager
     @Query(filter: #Predicate<Item> { $0.status == "inReview" }, sort: \Item.targetDate)
     private var pendingTasks: [Item]
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var children: [FamilyMember]
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onApproved: ((Double) -> Void)?
@@ -3041,7 +2946,7 @@ struct PendingApprovalsView: View {
                         withAnimation(.snappy) {
                             if task.reward > 0 && !task.assignedTo.isEmpty {
                                 if let child = children.first(where: { $0.name == task.assignedTo }) {
-                                    child.totalEarned += task.reward
+                                    child.recomputeEarned(from: allTasks)
                                     let familyCode = authManager.familyCode
                                     Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                                 }
@@ -3049,25 +2954,8 @@ struct PendingApprovalsView: View {
                             onApproved?(task.reward)
                         }
                         let familyCode = authManager.familyCode
-                        let taskName = task.name
-                        let childName = task.assignedTo
-                        let reward = task.reward
-                        let hasGift = task.hasGift
-                        let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
                         Task {
                             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-                            if !childName.isEmpty {
-                                let rewardText = reward > 0 ? " You earned \(Int(reward)) coins!" : ""
-                                let giftHint = hasGift ? " 🎁 You have a surprise gift waiting!" : ""
-                                await cloudKitManager.sendRemoteNotification(
-                                    familyCode: familyCode,
-                                    title: "Task Approved!",
-                                    body: "\"\(taskName)\" has been approved.\(rewardText)\(giftHint)",
-                                    category: "TASK_APPROVED",
-                                    senderAvatar: authManager.avatar,
-                                    targetAppleUserID: targetID
-                                )
-                            }
                         }
                         if !task.assignedTo.isEmpty {
                             notificationManager.sendTaskApprovedNotification(
@@ -3130,21 +3018,8 @@ struct PendingApprovalsView: View {
                     task.status = "open"
                     let snapshot = CloudKitManager.TaskSnapshot(task)
                     let familyCode = authManager.familyCode
-                    let taskName = task.name
-                    let childName = task.assignedTo
-                    let targetID = children.first(where: { $0.name == task.assignedTo })?.appleUserID ?? ""
                     Task {
                         await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
-                        if !childName.isEmpty {
-                            await cloudKitManager.sendRemoteNotification(
-                                familyCode: familyCode,
-                                title: "Task Needs Redo",
-                                body: "\"\(taskName)\" was sent back. Please try again.",
-                                category: "TASK_REJECTED",
-                                senderAvatar: authManager.avatar,
-                                targetAppleUserID: targetID
-                            )
-                        }
                     }
                     if !task.assignedTo.isEmpty {
                         notificationManager.sendTaskRejectedNotification(
@@ -3630,18 +3505,8 @@ struct RedemptionApprovalsView: View {
                         redemption.rejectReason = rejectReason
                         redemption.resolvedAt = Date()
                         let familyCode = authManager.familyCode
-                        let desc = redemption.itemDescription
-                        let targetID = allMembers.first(where: { $0.name == redemption.childName })?.appleUserID ?? ""
                         Task {
                             _ = await cloudKitManager.pushRedemption(redemption, familyCode: familyCode)
-                            await cloudKitManager.sendRemoteNotification(
-                                familyCode: familyCode,
-                                title: "Reward Request Declined",
-                                body: "Your request for \"\(desc)\" was declined." + (rejectReason.isEmpty ? "" : " Reason: \(rejectReason)"),
-                                category: "REWARD_REJECTED",
-                                senderAvatar: authManager.avatar,
-                                targetAppleUserID: targetID
-                            )
                         }
                     }
                     rejectTarget = nil
@@ -3746,20 +3611,8 @@ struct RedemptionApprovalsView: View {
         r.status = "approved"
         r.resolvedAt = Date()
         let familyCode = authManager.familyCode
-        let desc = r.itemDescription
-        let coins = r.coinAmount
-        let targetID = allMembers.first(where: { $0.name == r.childName })?.appleUserID ?? ""
         Task {
             _ = await cloudKitManager.pushRedemption(r, familyCode: familyCode)
-            await cloudKitManager.sendRemoteNotification(
-                familyCode: familyCode,
-                title: "Reward Approved!",
-                body: "Your request for \"\(desc)\" (\(coins) coins) was approved!",
-                category: "REWARD_APPROVED",
-                senderAvatar: authManager.avatar,
-                senderName: authManager.userName,
-                targetAppleUserID: targetID
-            )
         }
     }
 }
@@ -4256,9 +4109,236 @@ struct NotificationCenterView: View {
     }
 }
 
+// MARK: - Shopping Bag View
+
+struct ShoppingBagView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Query(sort: \ShoppingItem.createdAt) private var allItems: [ShoppingItem]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    @State private var newItemName = ""
+    @State private var editingItem: ShoppingItem?
+    @State private var editingName = ""
+    @FocusState private var isInputFocused: Bool
+
+    private var unboughtItems: [ShoppingItem] {
+        allItems.filter { !$0.isBought }
+    }
+
+    private var boughtItems: [ShoppingItem] {
+        allItems.filter { $0.isBought }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    addItemBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+
+                    if allItems.isEmpty {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            Image(systemName: "cart")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.white.opacity(0.3))
+                            Text("Shopping bag is empty")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text("Add items your family needs to buy")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        Spacer()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                                ForEach(unboughtItems) { item in
+                                    shoppingRow(item: item)
+                                }
+
+                                if !boughtItems.isEmpty {
+                                    HStack {
+                                        Text("Bought")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.white.opacity(0.4))
+                                        Spacer()
+                                        Button("Clear All") {
+                                            clearBoughtItems()
+                                        }
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.orange)
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.top, 12)
+
+                                    ForEach(boughtItems) { item in
+                                        shoppingRow(item: item)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 20)
+                        }
+                        .refreshable {
+                            guard !authManager.familyCode.isEmpty else { return }
+                            await cloudKitManager.syncShoppingOnly(context: modelContext, familyCode: authManager.familyCode)
+                        }
+                    }
+                }
+            }
+            .task {
+                guard !authManager.familyCode.isEmpty else { return }
+                await cloudKitManager.syncShoppingOnly(context: modelContext, familyCode: authManager.familyCode)
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationTitle("Family Shopping Bag")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .alert("Edit Item", isPresented: Binding(
+            get: { editingItem != nil },
+            set: { if !$0 { editingItem = nil } }
+        )) {
+            TextField("Item name", text: $editingName)
+            Button("Save") {
+                if let item = editingItem {
+                    let trimmed = editingName.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    item.name = trimmed
+                    let snap = CloudKitManager.ShoppingSnapshot(item)
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode) }
+                }
+                editingItem = nil
+            }
+            Button("Cancel", role: .cancel) { editingItem = nil }
+        }
+    }
+
+    private var addItemBar: some View {
+        HStack(spacing: 10) {
+            TextField("Add an item...", text: $newItemName)
+                .font(.body)
+                .foregroundStyle(.white)
+                .focused($isInputFocused)
+                .padding(12)
+                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                )
+                .submitLabel(.done)
+                .onSubmit { addItem() }
+
+            Button {
+                addItem()
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.white)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .disabled(newItemName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    private func shoppingRow(item: ShoppingItem) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                toggleBought(item)
+            } label: {
+                Image(systemName: item.isBought ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(item.isBought ? .green : .white.opacity(0.5))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.body)
+                    .foregroundStyle(item.isBought ? .white.opacity(0.35) : .white)
+                    .strikethrough(item.isBought, color: .white.opacity(0.3))
+
+                Text("Added by \(item.addedBy)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .onTapGesture {
+                editingName = item.name
+                editingItem = item
+            }
+
+            Spacer()
+
+            Button {
+                deleteItem(item)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.white.opacity(item.isBought ? 0.04 : 0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func addItem() {
+        let trimmed = newItemName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let item = ShoppingItem(name: trimmed, addedBy: authManager.userName)
+        modelContext.insert(item)
+        let snap = CloudKitManager.ShoppingSnapshot(item)
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode) }
+        newItemName = ""
+    }
+
+    private func toggleBought(_ item: ShoppingItem) {
+        item.isBought.toggle()
+        let snap = CloudKitManager.ShoppingSnapshot(item)
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode) }
+    }
+
+    private func deleteItem(_ item: ShoppingItem) {
+        let id = item.id
+        let familyCode = authManager.familyCode
+        modelContext.delete(item)
+        Task { await cloudKitManager.deleteShoppingItem(id: id, familyCode: familyCode) }
+    }
+
+    private func clearBoughtItems() {
+        let bought = boughtItems
+        let familyCode = authManager.familyCode
+        for item in bought {
+            let id = item.id
+            modelContext.delete(item)
+            Task { await cloudKitManager.deleteShoppingItem(id: id, familyCode: familyCode) }
+        }
+    }
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self], inMemory: true)
+        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self, ShoppingItem.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
         .environment(SubscriptionManager())

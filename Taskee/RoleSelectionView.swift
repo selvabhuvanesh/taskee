@@ -668,14 +668,6 @@ struct RoleSelectionView: View {
                             if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: code) {
                                 subscriptionManager.setFamilyTier(familyTier)
                             }
-                            await cloudKitManager.sendRemoteNotification(
-                                familyCode: code,
-                                title: "New Family Member Request",
-                                body: "\(trimmedName) wants to join your family. Tap to review.",
-                                category: "MEMBER_REQUEST",
-                                senderAvatar: selectedAvatar,
-                                targetAppleUserID: "parents"
-                            )
                             await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "child")
                         } else {
                             modelContext.delete(member)

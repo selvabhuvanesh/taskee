@@ -26,6 +26,7 @@ final class Item {
     var giftRevealed: Bool
     var createdBy: String
     var createdByID: String
+    var lastRemindedAt: Date?
 
     init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "") {
         self.id = id
@@ -41,6 +42,7 @@ final class Item {
         self.giftRevealed = false
         self.createdBy = createdBy
         self.createdByID = createdByID
+        self.lastRemindedAt = nil
     }
 
     var hasGift: Bool { !giftText.isEmpty }
@@ -78,6 +80,7 @@ final class FamilyMember {
     var isAccepted: Bool
     var totalEarned: Double
     var appleUserID: String
+    var lastPickupAt: Date?
 
     init(id: UUID = UUID(), name: String, memberRole: String = "child", avatar: String = "av01", isAccepted: Bool = true, totalEarned: Double = 0, appleUserID: String = "") {
         self.id = id
@@ -87,10 +90,17 @@ final class FamilyMember {
         self.isAccepted = isAccepted
         self.totalEarned = totalEarned
         self.appleUserID = appleUserID
+        self.lastPickupAt = nil
     }
 
     var isParent: Bool { memberRole == "parent" }
     var isChild: Bool { memberRole == "child" }
+
+    func recomputeEarned(from tasks: [Item], excluding taskID: UUID? = nil) {
+        totalEarned = tasks
+            .filter { $0.id != taskID && $0.assignedTo == name && $0.isApproved && $0.reward > 0 }
+            .reduce(0.0) { $0 + $1.reward }
+    }
 }
 
 @Model
@@ -161,6 +171,23 @@ final class SurpriseGift {
         self.taskName = taskName
         self.earnedDate = earnedDate
         self.isRedeemed = false
+    }
+}
+
+@Model
+final class ShoppingItem {
+    var id: UUID
+    var name: String
+    var addedBy: String
+    var isBought: Bool
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, addedBy: String, isBought: Bool = false, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.addedBy = addedBy
+        self.isBought = isBought
+        self.createdAt = createdAt
     }
 }
 
