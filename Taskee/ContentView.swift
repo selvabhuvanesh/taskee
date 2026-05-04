@@ -4525,7 +4525,6 @@ struct FamilyChatView: View {
     @State private var messageText = ""
     @State private var displayLimit = 50
     @State private var showReactionPicker: ChatMessage?
-    @State private var coinAwardedMessageIDs: Set<UUID> = []
     @FocusState private var isInputFocused: Bool
 
     private static let coinReactionKey = "⭐coin"
@@ -4674,8 +4673,11 @@ struct FamilyChatView: View {
         HStack(spacing: 4) {
             ForEach(message.reactionDict.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, users in
                 let isCoin = emoji == Self.coinReactionKey
+                let myCoin = isCoin && users.contains(authManager.userName) && authManager.role == "parent"
                 Button {
-                    if !isCoin {
+                    if myCoin {
+                        undoCoinAward(from: message)
+                    } else if !isCoin {
                         message.toggleReaction(emoji, by: authManager.userName)
                         pushReactionUpdate(message)
                     }
@@ -4683,6 +4685,7 @@ struct FamilyChatView: View {
                     HStack(spacing: 2) {
                         if isCoin {
                             Image(systemName: "star.circle.fill")
+                                .symbolRenderingMode(.monochrome)
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(Self.coinGradient)
                         } else {
@@ -4701,22 +4704,40 @@ struct FamilyChatView: View {
                         in: Capsule()
                     )
                 }
-                .disabled(isCoin)
+                .disabled(isCoin && !myCoin)
             }
         }
     }
 
     private func reactionPicker(for message: ChatMessage) -> some View {
-        HStack(spacing: 8) {
-            if canAwardCoin(to: message) {
+        let alreadyAwarded = message.reactionDict[Self.coinReactionKey]?.contains(authManager.userName) == true
+        return HStack(spacing: 8) {
+            if canShowCoinReaction(for: message) {
                 Button {
-                    awardCoin(to: message)
+                    if alreadyAwarded {
+                        undoCoinAward(from: message)
+                    } else {
+                        awardCoin(to: message)
+                    }
                     showReactionPicker = nil
                 } label: {
                     Image(systemName: "star.circle.fill")
+                        .symbolRenderingMode(.monochrome)
                         .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(Self.coinGradient)
-                        .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
+                        .foregroundStyle(
+                            alreadyAwarded
+                                ? LinearGradient(colors: [.gray], startPoint: .top, endPoint: .bottom)
+                                : Self.coinGradient
+                        )
+                        .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(alreadyAwarded ? 0 : 0.4), radius: 2, y: 1)
+                        .overlay(alignment: .bottomTrailing) {
+                            if alreadyAwarded {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.red)
+                                    .offset(x: 2, y: 2)
+                            }
+                        }
                 }
             }
 
@@ -4765,13 +4786,11 @@ struct FamilyChatView: View {
         .background(.black.opacity(0.2))
     }
 
-    private func canAwardCoin(to message: ChatMessage) -> Bool {
+    private func canShowCoinReaction(for message: ChatMessage) -> Bool {
         guard authManager.role == "parent" else { return false }
         guard message.senderAppleUserID != authManager.appleUserID else { return false }
         let senderMember = allMembers.first { $0.appleUserID == message.senderAppleUserID }
-        guard senderMember?.isChild == true else { return false }
-        let alreadyAwarded = message.reactionDict[Self.coinReactionKey]?.contains(authManager.userName) == true
-        return !alreadyAwarded
+        return senderMember?.isChild == true
     }
 
     private func awardCoin(to message: ChatMessage) {
@@ -4790,14 +4809,29 @@ struct FamilyChatView: View {
             createdBy: authManager.userName,
             createdByID: authManager.appleUserID
         )
+        task.giftText = message.id.uuidString
         modelContext.insert(task)
 
         child.recomputeEarned(from: allTasks + [task])
 
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+    }
 
-        coinAwardedMessageIDs.insert(message.id)
+    private func undoCoinAward(from message: ChatMessage) {
+        guard let child = allMembers.first(where: { $0.appleUserID == message.senderAppleUserID }),
+              child.isChild else { return }
+
+        message.toggleReaction(Self.coinReactionKey, by: authManager.userName)
+        pushReactionUpdate(message)
+
+        let msgID = message.id.uuidString
+        if let bonusTask = allTasks.first(where: { $0.giftText == msgID && $0.assignedTo == child.name && $0.name.hasPrefix("Chat Bonus") }) {
+            let taskID = bonusTask.id
+            modelContext.delete(bonusTask)
+            child.recomputeEarned(from: allTasks, excluding: taskID)
+            Task { await cloudKitManager.deleteRemoteTasks([taskID]) }
+        }
     }
 
     private func sendMessage() {
