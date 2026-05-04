@@ -42,7 +42,9 @@ struct ChildDashboardView: View {
     @State private var taskToDelete: Item?
     @State private var giftTaskToReveal: Item?
     @State private var showShoppingBag = false
+    @State private var showFamilyChat = false
     @Query private var shoppingItems: [ShoppingItem]
+    @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @Query private var allGifts: [SurpriseGift]
     @State private var flyingCoins: [FlyingCoin] = []
     @State private var earningsCardCenter: CGPoint = .zero
@@ -148,10 +150,13 @@ struct ChildDashboardView: View {
                         taskList
                     }
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 14) {
+                        familyChatButton
                         shoppingBagButton
                         addTaskButton
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 20)
                     .padding(.bottom, 16)
                 }
 
@@ -252,6 +257,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showShoppingBag) {
                 ShoppingBagView(theme: childTheme)
+            }
+            .sheet(isPresented: $showFamilyChat) {
+                FamilyChatView(theme: childTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -482,7 +490,20 @@ struct ChildDashboardView: View {
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
+    private static let dayDoneMessages = [
+        "You crushed it today! Time to relax and recharge.",
+        "All done! Today was YOUR day — own it!",
+        "Every task done. You're unstoppable!",
+        "That's a wrap! You should be proud of yourself.",
+        "Mission accomplished! Enjoy the rest of your day.",
+        "Boom! Zero tasks left. What a champ!",
+        "You showed up and got it done. That's what winners do!",
+    ]
+
     private func completeTask(_ task: Item) {
+        let wasLastToday = todayOpenCount == 1
+            && Calendar.current.isDateInToday(task.targetDate)
+
         if task.createdByChild {
             task.status = "approved"
             celebrationTitle = "Task Complete!"
@@ -496,6 +517,12 @@ struct ChildDashboardView: View {
             celebrationTitle = "Submitted for Review!"
             celebrationSubtitle = "Waiting for parent approval"
         }
+
+        if wasLastToday {
+            celebrationTitle = "You're Done for the Day!"
+            celebrationSubtitle = Self.dayDoneMessages.randomElement()!
+        }
+
         let snapshot = CloudKitManager.TaskSnapshot(task)
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
@@ -624,14 +651,39 @@ struct ChildDashboardView: View {
         Button {
             showAddTask = true
         } label: {
-            Label("Add Task", systemImage: "plus")
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 24)
-                .padding(.vertical, 10)
-                .background(.white.opacity(0.2), in: Capsule())
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(calmAccent, in: Circle())
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var familyChatButton: some View {
+        Button {
+            showFamilyChat = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.purple, in: Circle())
+
+                let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
+                let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
+                if unread > 0 {
+                    Text("\(unread)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
     }
 
     private var shoppingBagButton: some View {
@@ -640,9 +692,9 @@ struct ChildDashboardView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
                 let unboughtCount = shoppingItems.filter { !$0.isBought }.count
@@ -656,6 +708,7 @@ struct ChildDashboardView: View {
                 }
             }
         }
+        .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
     }
 
     private var earningsCard: some View {

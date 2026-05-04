@@ -191,6 +191,55 @@ final class ShoppingItem {
     }
 }
 
+@Model
+final class ChatMessage {
+    var id: UUID
+    var senderName: String
+    var senderAvatar: String
+    var senderAppleUserID: String
+    var text: String
+    var reactions: String
+    var sentAt: Date
+
+    init(id: UUID = UUID(), senderName: String, senderAvatar: String, senderAppleUserID: String, text: String, sentAt: Date = Date()) {
+        self.id = id
+        self.senderName = senderName
+        self.senderAvatar = senderAvatar
+        self.senderAppleUserID = senderAppleUserID
+        self.text = text
+        self.reactions = ""
+        self.sentAt = sentAt
+    }
+
+    var reactionDict: [String: [String]] {
+        guard !reactions.isEmpty, let data = reactions.data(using: .utf8),
+              let dict = try? JSONDecoder().decode([String: [String]].self, from: data) else { return [:] }
+        return dict
+    }
+
+    func setReactions(_ dict: [String: [String]]) {
+        if let data = try? JSONEncoder().encode(dict), let str = String(data: data, encoding: .utf8) {
+            reactions = str
+        }
+    }
+
+    func toggleReaction(_ emoji: String, by userName: String) {
+        var dict = reactionDict
+        var users = dict[emoji] ?? []
+        if users.contains(userName) {
+            users.removeAll { $0 == userName }
+        } else {
+            users.append(userName)
+        }
+        if users.isEmpty {
+            dict.removeValue(forKey: emoji)
+        } else {
+            dict[emoji] = users
+        }
+        setReactions(dict)
+    }
+}
+
 let redemptionTypes = [
     ("cash", "Cash", "banknote.fill"),
     ("toy", "Toy", "teddybear.fill"),

@@ -42,6 +42,7 @@ struct TaskeeApp: App {
             RewardRedemption.self,
             SurpriseGift.self,
             ShoppingItem.self,
+            ChatMessage.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,
@@ -379,6 +380,16 @@ struct TaskeeApp: App {
             case .pickupRequested(let childName):
                 guard myRole == "parent" else { continue }
                 notificationManager.sendPickupNotification(childName: childName)
+
+            case .chatReceived(let senderName, let text):
+                guard senderName != myName else { continue }
+                let preview = text.count > 50 ? String(text.prefix(50)) + "…" : text
+                notificationManager.deliverBeepNotification(
+                    title: "💬 \(senderName)",
+                    body: preview,
+                    category: "FAMILY_CHAT",
+                    senderName: senderName
+                )
             }
         }
     }

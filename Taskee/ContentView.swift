@@ -91,6 +91,8 @@ struct ContentView: View {
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
     @State private var showShoppingBag = false
+    @State private var showFamilyChat = false
+    @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
@@ -172,10 +174,13 @@ struct ContentView: View {
                         refreshUnreadCount()
                     }
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 14) {
+                        familyChatButton
                         shoppingBagButton
                         addTaskButton
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 20)
                     .padding(.bottom, 8)
                 }
 
@@ -326,6 +331,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showShoppingBag) {
                 ShoppingBagView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showFamilyChat) {
+                FamilyChatView(theme: parentTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -680,14 +688,39 @@ struct ContentView: View {
         Button {
             showingAddTask = true
         } label: {
-            Label("Add Task", systemImage: "plus")
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 24)
-                .padding(.vertical, 10)
-                .background(.white.opacity(0.2), in: Capsule())
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(calmAccent, in: Circle())
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var familyChatButton: some View {
+        Button {
+            showFamilyChat = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.purple, in: Circle())
+
+                let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
+                let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
+                if unread > 0 {
+                    Text("\(unread)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
     }
 
     @Query private var shoppingItems: [ShoppingItem]
@@ -698,9 +731,9 @@ struct ContentView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
                 let unboughtCount = shoppingItems.filter { !$0.isBought }.count
@@ -714,6 +747,7 @@ struct ContentView: View {
                 }
             }
         }
+        .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
     }
 }
 
@@ -774,11 +808,16 @@ struct DateTasksView: View {
     @State private var showEditChoice = false
     @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
+    @State private var showOpenOnly = true
+
+    private var filteredTasks: [Item] {
+        showOpenOnly ? tasks.filter { !$0.isApproved } : tasks
+    }
 
     private var taskListContent: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(tasks) { task in
+                ForEach(filteredTasks) { task in
                     TaskRow(
                         task: task,
                         showAssignee: true,
@@ -822,7 +861,20 @@ struct DateTasksView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                taskListContent
+                if filteredTasks.isEmpty {
+                    Spacer()
+                    VStack(spacing: 10) {
+                        Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.3))
+                        Text(showOpenOnly ? "All caught up!" : "No tasks yet")
+                            .font(.headline)
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    Spacer()
+                } else {
+                    taskListContent
+                }
 
                 Button {
                     showingAddTask = true
@@ -841,6 +893,20 @@ struct DateTasksView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationTitle(dateLabel)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.snappy) { showOpenOnly.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Text(showOpenOnly ? "Open Tasks" : "All Tasks")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+        }
         .sheet(isPresented: $showingAddTask) {
             AddTaskView(children: children, otherParent: otherParent, preselectedChild: otherParent?.name ?? "", theme: theme)
         }
@@ -4444,9 +4510,319 @@ struct ShoppingBagView: View {
     }
 }
 
+// MARK: - Family Chat View
+
+struct FamilyChatView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Query(sort: \ChatMessage.sentAt) private var allMessages: [ChatMessage]
+    @Query private var allMembers: [FamilyMember]
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    @State private var messageText = ""
+    @State private var displayLimit = 50
+    @State private var showReactionPicker: ChatMessage?
+    @State private var coinAwardedMessageIDs: Set<UUID> = []
+    @FocusState private var isInputFocused: Bool
+
+    private static let coinReactionKey = "⭐coin"
+    private static let reactions = ["👍", "❤️", "😂", "🎉", "👏", "🔥"]
+
+    private static let coinGradient = LinearGradient(
+        colors: [Color(red: 1.0, green: 0.95, blue: 0.4), Color(red: 1.0, green: 0.7, blue: 0.0)],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
+    private var visibleMessages: [ChatMessage] {
+        let sorted = allMessages.sorted { $0.sentAt < $1.sentAt }
+        if sorted.count <= displayLimit { return sorted }
+        return Array(sorted.suffix(displayLimit))
+    }
+
+    private var canLoadMore: Bool {
+        allMessages.count > displayLimit
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 4) {
+                                if canLoadMore {
+                                    Button {
+                                        withAnimation { displayLimit += 50 }
+                                    } label: {
+                                        Text("Load earlier messages")
+                                            .font(.caption)
+                                            .foregroundStyle(.white.opacity(0.5))
+                                            .padding(.vertical, 8)
+                                    }
+                                }
+
+                                ForEach(visibleMessages) { message in
+                                    let isMe = message.senderAppleUserID == authManager.appleUserID
+                                    chatBubble(message: message, isMe: isMe)
+                                        .id(message.id)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+                            .padding(.bottom, 4)
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        .onAppear {
+                            scrollToBottom(proxy: proxy)
+                        }
+                        .onChange(of: allMessages.count) {
+                            scrollToBottom(proxy: proxy)
+                        }
+                    }
+
+                    inputBar
+                }
+            }
+            .navigationTitle("Family Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onAppear {
+                markChatAsRead()
+            }
+            .onDisappear {
+                markChatAsRead()
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        if let last = visibleMessages.last {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(last.id, anchor: .bottom)
+            }
+        }
+    }
+
+    private func markChatAsRead() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastChatReadTime")
+    }
+
+    private func chatBubble(message: ChatMessage, isMe: Bool) -> some View {
+        VStack(alignment: isMe ? .trailing : .leading, spacing: 2) {
+            if !isMe {
+                HStack(spacing: 6) {
+                    AvatarView(avatarId: message.senderAvatar, size: 20)
+                    Text(message.senderName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(.leading, 4)
+            }
+
+            HStack {
+                if isMe { Spacer(minLength: 60) }
+
+                VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
+                    Text(message.text)
+                        .font(.body)
+                        .foregroundStyle(isMe ? .white : .white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            isMe ? calmAccent.opacity(0.7) : .white.opacity(0.15),
+                            in: RoundedRectangle(cornerRadius: 18)
+                        )
+
+                    if !message.reactionDict.isEmpty {
+                        reactionBadges(for: message)
+                    }
+                }
+                .onTapGesture {
+                    showReactionPicker = showReactionPicker?.id == message.id ? nil : message
+                }
+
+                if !isMe { Spacer(minLength: 60) }
+            }
+
+            if showReactionPicker?.id == message.id {
+                reactionPicker(for: message)
+            }
+
+            Text(message.sentAt, style: .time)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.3))
+                .padding(.horizontal, 8)
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+    }
+
+    private func reactionBadges(for message: ChatMessage) -> some View {
+        HStack(spacing: 4) {
+            ForEach(message.reactionDict.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, users in
+                let isCoin = emoji == Self.coinReactionKey
+                Button {
+                    if !isCoin {
+                        message.toggleReaction(emoji, by: authManager.userName)
+                        pushReactionUpdate(message)
+                    }
+                } label: {
+                    HStack(spacing: 2) {
+                        if isCoin {
+                            Image(systemName: "star.circle.fill")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Self.coinGradient)
+                        } else {
+                            Text(emoji)
+                                .font(.caption2)
+                        }
+                        Text("\(users.count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        isCoin ? Color.yellow.opacity(0.25) :
+                        users.contains(authManager.userName) ? calmAccent.opacity(0.4) : .white.opacity(0.12),
+                        in: Capsule()
+                    )
+                }
+                .disabled(isCoin)
+            }
+        }
+    }
+
+    private func reactionPicker(for message: ChatMessage) -> some View {
+        HStack(spacing: 8) {
+            if canAwardCoin(to: message) {
+                Button {
+                    awardCoin(to: message)
+                    showReactionPicker = nil
+                } label: {
+                    Image(systemName: "star.circle.fill")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(Self.coinGradient)
+                        .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
+                }
+            }
+
+            ForEach(Self.reactions, id: \.self) { emoji in
+                Button {
+                    message.toggleReaction(emoji, by: authManager.userName)
+                    pushReactionUpdate(message)
+                    showReactionPicker = nil
+                } label: {
+                    Text(emoji)
+                        .font(.title3)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    private func pushReactionUpdate(_ message: ChatMessage) {
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 10) {
+            TextField("Message", text: $messageText, axis: .vertical)
+                .lineLimit(1...4)
+                .font(.body)
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
+                .focused($isInputFocused)
+
+            Button {
+                sendMessage()
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.3) : calmAccent)
+            }
+            .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.2))
+    }
+
+    private func canAwardCoin(to message: ChatMessage) -> Bool {
+        guard authManager.role == "parent" else { return false }
+        guard message.senderAppleUserID != authManager.appleUserID else { return false }
+        let senderMember = allMembers.first { $0.appleUserID == message.senderAppleUserID }
+        guard senderMember?.isChild == true else { return false }
+        let alreadyAwarded = message.reactionDict[Self.coinReactionKey]?.contains(authManager.userName) == true
+        return !alreadyAwarded
+    }
+
+    private func awardCoin(to message: ChatMessage) {
+        guard let child = allMembers.first(where: { $0.appleUserID == message.senderAppleUserID }),
+              child.isChild else { return }
+
+        message.toggleReaction(Self.coinReactionKey, by: authManager.userName)
+        pushReactionUpdate(message)
+
+        let task = Item(
+            name: "Chat Bonus from \(authManager.userName)",
+            targetDate: Date(),
+            assignedTo: child.name,
+            reward: 1,
+            status: "approved",
+            createdBy: authManager.userName,
+            createdByID: authManager.appleUserID
+        )
+        modelContext.insert(task)
+
+        child.recomputeEarned(from: allTasks + [task])
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+
+        coinAwardedMessageIDs.insert(message.id)
+    }
+
+    private func sendMessage() {
+        let trimmed = messageText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        let message = ChatMessage(
+            senderName: authManager.userName,
+            senderAvatar: authManager.avatar,
+            senderAppleUserID: authManager.appleUserID,
+            text: trimmed
+        )
+        modelContext.insert(message)
+        messageText = ""
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
+
+        markChatAsRead()
+    }
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self, ShoppingItem.self], inMemory: true)
+        .modelContainer(for: [Item.self, FamilyMember.self, RewardRedemption.self, ShoppingItem.self, ChatMessage.self], inMemory: true)
         .environment(AuthManager())
         .environment(NotificationManager())
         .environment(SubscriptionManager())

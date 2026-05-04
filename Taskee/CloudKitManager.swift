@@ -689,6 +689,7 @@ final class CloudKitManager {
         case memberAccepted(name: String, appleUserID: String)
         case memberRequested(name: String)
         case pickupRequested(childName: String)
+        case chatReceived(senderName: String, text: String)
     }
 
     struct SyncResult {
@@ -959,6 +960,48 @@ final class CloudKitManager {
             for item in local where !remoteIDs.contains(item.id.uuidString) {
                 context.delete(item)
             }
+        }
+    }
+
+    // MARK: - Chat Messages
+
+    func pushChatMessage(_ message: ChatMessage, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+        let recordID = familyRecordID(name: message.id.uuidString)
+        let record = CKRecord(recordType: "ChatRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["senderName"] = message.senderName
+        record["senderAvatar"] = message.senderAvatar
+        record["senderAppleUserID"] = message.senderAppleUserID
+        record["text"] = message.text
+        record["reactions"] = message.reactions
+        record["sentAt"] = message.sentAt as NSDate
+        return await saveRecord(record, to: familyDatabase)
+    }
+
+    private func applyChatRecord(_ record: CKRecord, context: ModelContext) -> SyncChange? {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return nil }
+
+        let descriptor = FetchDescriptor<ChatMessage>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.text = record["text"] as? String ?? existing.text
+            existing.reactions = record["reactions"] as? String ?? existing.reactions
+            return nil
+        } else {
+            let msg = ChatMessage(
+                id: uuid,
+                senderName: record["senderName"] as? String ?? "",
+                senderAvatar: record["senderAvatar"] as? String ?? "",
+                senderAppleUserID: record["senderAppleUserID"] as? String ?? "",
+                text: record["text"] as? String ?? "",
+                sentAt: record["sentAt"] as? Date ?? Date()
+            )
+            msg.reactions = record["reactions"] as? String ?? ""
+            context.insert(msg)
+            return .chatReceived(senderName: msg.senderName, text: msg.text)
         }
     }
 
@@ -1447,6 +1490,10 @@ final class CloudKitManager {
             case "ShoppingRecord":
                 seenShoppingIDs.insert(idStr)
                 applyShoppingRecord(record, context: context)
+            case "ChatRecord":
+                if let change = applyChatRecord(record, context: context) {
+                    result.changes.append(change)
+                }
             default:
                 break
             }
@@ -1667,6 +1714,11 @@ final class CloudKitManager {
             let d = FetchDescriptor<RewardRedemption>()
             if let r = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
                 context.delete(r)
+            }
+        case "ChatRecord":
+            let d = FetchDescriptor<ChatMessage>()
+            if let m = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(m)
             }
         default:
             break
