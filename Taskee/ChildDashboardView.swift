@@ -18,6 +18,8 @@ struct ChildDashboardView: View {
     @Query private var allMembers: [FamilyMember]
     @State private var showAll = false
     @State private var isExpanded = true
+    @State private var showCalendarView = false
+    @State private var selectedCalendarDate = Date()
     @State private var showAddTask = false
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
@@ -125,6 +127,13 @@ struct ChildDashboardView: View {
             }
     }
 
+    private var childCalendarDayTasks: [Item] {
+        let calendar = Calendar.current
+        return myTasks
+            .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
+            .sorted { $0.targetDate < $1.targetDate }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -155,9 +164,38 @@ struct ChildDashboardView: View {
                         )
                         .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
 
-                    if myTasks.isEmpty {
+                    if showCalendarView {
+                        dashboardViewModeToggle
+                        WeekCalendarStrip(
+                            selectedDate: $selectedCalendarDate,
+                            tasks: myTasks,
+                            theme: childTheme
+                        )
+                        if childCalendarDayTasks.isEmpty {
+                            VStack(spacing: 10) {
+                                Image(systemName: "calendar.badge.checkmark")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.white.opacity(0.3))
+                                Text("No tasks on this day")
+                                    .font(.headline)
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(childCalendarDayTasks) { task in
+                                    childTaskRow(task: task)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                        }
+                    } else if myTasks.isEmpty {
+                        dashboardViewModeToggle
                         emptyState
                     } else {
+                        dashboardViewModeToggle
                         taskList
                     }
 
@@ -877,16 +915,32 @@ struct ChildDashboardView: View {
         }
     }
 
-    private var childExpandCollapseToggle: some View {
+    private var dashboardViewModeToggle: some View {
         HStack {
+            if !showCalendarView {
+                Button {
+                    withAnimation(.snappy) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(isExpanded ? "Collapse" : "Expand")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.1), in: Capsule())
+                }
+            }
             Spacer()
             Button {
-                withAnimation(.snappy) { isExpanded.toggle() }
+                withAnimation(.snappy) { showCalendarView.toggle() }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                    Image(systemName: showCalendarView ? "list.bullet" : "calendar")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(isExpanded ? "Collapse" : "Expand")
+                    Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
                 .foregroundStyle(.white.opacity(0.6))
@@ -903,8 +957,6 @@ struct ChildDashboardView: View {
     private var taskList: some View {
         ScrollView {
             VStack(spacing: 0) {
-                childExpandCollapseToggle
-
                 LazyVStack(spacing: 12) {
                     ForEach(groupedTasks, id: \.key) { group in
                         if isExpanded {

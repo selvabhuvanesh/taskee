@@ -62,6 +62,153 @@ func rescheduleTask(_ task: Item, toSameDayAs referenceDate: Date) {
     }
 }
 
+// MARK: - Week Calendar Strip
+
+struct WeekCalendarStrip: View {
+    @Binding var selectedDate: Date
+    let tasks: [Item]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    @State private var weekOffset = 0
+
+    private var weekDates: [Date] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let weekStart = calendar.date(byAdding: .day, value: weekOffset * 7, to: today)!
+        return (-1...5).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+    }
+
+    private var weekRangeLabel: String {
+        guard let first = weekDates.first, let last = weekDates.last else { return "" }
+        let calendar = Calendar.current
+        if calendar.component(.month, from: first) == calendar.component(.month, from: last) {
+            return "\(first.formatted(.dateTime.month(.abbreviated))) \(first.formatted(.dateTime.day()))–\(last.formatted(.dateTime.day()))"
+        }
+        return "\(first.formatted(.dateTime.month(.abbreviated).day())) – \(last.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    private func taskCount(for date: Date) -> Int {
+        let calendar = Calendar.current
+        return tasks.filter { calendar.isDate($0.targetDate, inSameDayAs: date) }.count
+    }
+
+    private func dayLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInTomorrow(date) { return "Tom" }
+        if calendar.isDateInYesterday(date) { return "Yest" }
+        return date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Button {
+                    withAnimation(.snappy) { weekOffset -= 1 }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 32, height: 32)
+                }
+
+                Spacer()
+
+                VStack(spacing: 2) {
+                    Text(weekRangeLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                    if weekOffset != 0 {
+                        Button {
+                            withAnimation(.snappy) {
+                                weekOffset = 0
+                                selectedDate = Date()
+                            }
+                        } label: {
+                            Text("Today")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(calmAccent)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.snappy) { weekOffset += 1 }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 32, height: 32)
+                }
+            }
+            .padding(.horizontal, 20)
+
+            HStack(spacing: 6) {
+                ForEach(weekDates, id: \.self) { date in
+                    let isSelected = Calendar.current.isDate(selectedDate, inSameDayAs: date)
+                    let count = taskCount(for: date)
+
+                    Button {
+                        withAnimation(.snappy) { selectedDate = date }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(dayLabel(for: date))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(isSelected ? .white : .white.opacity(0.5))
+
+                            Text(date.formatted(.dateTime.day()))
+                                .font(.system(size: 16, weight: isSelected ? .bold : .semibold))
+                                .foregroundStyle(isSelected ? .white : .white.opacity(0.7))
+
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(isSelected ? .white : calmAccent)
+                                    .frame(minWidth: 16, minHeight: 14)
+                                    .background(
+                                        isSelected ? calmAccent : .white.opacity(0.15),
+                                        in: Capsule()
+                                    )
+                            } else {
+                                Circle()
+                                    .fill(.white.opacity(0.15))
+                                    .frame(width: 6, height: 6)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            isSelected ? calmAccent.opacity(0.3) : .white.opacity(0.06),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(
+                                    isSelected ? calmAccent.opacity(0.6) : .clear,
+                                    lineWidth: 1.5
+                                )
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .gesture(
+            DragGesture(minimumDistance: 50)
+                .onEnded { value in
+                    if value.translation.width < -50 {
+                        withAnimation(.snappy) { weekOffset += 1 }
+                    } else if value.translation.width > 50 {
+                        withAnimation(.snappy) { weekOffset -= 1 }
+                    }
+                }
+        )
+    }
+}
+
 // MARK: - Parent Main View
 
 struct ContentView: View {
@@ -90,6 +237,8 @@ struct ContentView: View {
     @State private var showPendingApprovals = false
     @State private var showOpenOnly = true
     @State private var isExpanded = true
+    @State private var showCalendarView = false
+    @State private var selectedCalendarDate = Date()
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
     @State private var showNotificationCenter = false
@@ -139,6 +288,13 @@ struct ContentView: View {
         showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed } : myTasks
     }
 
+    private var calendarDayTasks: [Item] {
+        let calendar = Calendar.current
+        return filteredTasks
+            .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
+            .sorted { $0.targetDate < $1.targetDate }
+    }
+
     private var pendingReviewCount: Int {
         activeTasks.filter { $0.isInReview }.count
     }
@@ -174,18 +330,31 @@ struct ContentView: View {
                             .padding(.top, 8)
                     }
 
-                    if subscriptionManager.tier != .pro {
-                        tierBanner
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 6)
-                    }
+
 
                     ScrollView {
-                        if filteredTasks.isEmpty {
-                            emptyState
+                        if showCalendarView {
+                            VStack(spacing: 0) {
+                                viewModeToggle
+                                WeekCalendarStrip(
+                                    selectedDate: $selectedCalendarDate,
+                                    tasks: filteredTasks,
+                                    theme: parentTheme
+                                )
+                                if calendarDayTasks.isEmpty {
+                                    calendarEmptyState
+                                } else {
+                                    calendarTaskList
+                                }
+                            }
+                        } else if filteredTasks.isEmpty {
+                            VStack(spacing: 0) {
+                                viewModeToggle
+                                emptyState
+                            }
                         } else {
                             VStack(spacing: 0) {
-                                expandCollapseToggle
+                                viewModeToggle
                                 if isExpanded {
                                     expandedListContent
                                 } else {
@@ -676,16 +845,32 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var expandCollapseToggle: some View {
+    private var viewModeToggle: some View {
         HStack {
+            if !showCalendarView {
+                Button {
+                    withAnimation(.snappy) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(isExpanded ? "Collapse" : "Expand")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.1), in: Capsule())
+                }
+            }
             Spacer()
             Button {
-                withAnimation(.snappy) { isExpanded.toggle() }
+                withAnimation(.snappy) { showCalendarView.toggle() }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                    Image(systemName: showCalendarView ? "list.bullet" : "calendar")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(isExpanded ? "Collapse" : "Expand")
+                    Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
                 .foregroundStyle(.white.opacity(0.6))
@@ -697,6 +882,61 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+
+    private var calendarEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "calendar.badge.checkmark")
+                .font(.system(size: 40))
+                .foregroundStyle(.white.opacity(0.3))
+            Text("No tasks on this day")
+                .font(.headline)
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    private var calendarTaskList: some View {
+        LazyVStack(spacing: 10) {
+            ForEach(calendarDayTasks) { task in
+                TaskRow(
+                    task: task,
+                    showAssignee: false,
+                    currentUserName: authManager.userName,
+                    theme: parentTheme,
+                    onApprove: {
+                        if !task.canComplete {
+                            tooEarlyTask = task
+                            showTooEarlyAlert = true
+                        } else {
+                            taskToApprove = task
+                        }
+                    },
+                    onEdit: {
+                        if task.isRecurring {
+                            pendingEditTask = task
+                            showEditChoice = true
+                        } else {
+                            taskToEdit = task
+                        }
+                    },
+                    onDelete: { taskToDelete = task }
+                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 2)
+                .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                            lineWidth: 1
+                        )
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
     }
 
     private var expandedListContent: some View {
@@ -951,6 +1191,8 @@ struct DateTasksView: View {
     @State private var pendingEditTask: Item?
     @State private var showOpenOnly = true
     @State private var isExpanded = true
+    @State private var showCalendarView = false
+    @State private var selectedCalendarDate = Date()
 
     private var liveTasks: [Item] {
         if !memberName.isEmpty {
@@ -976,6 +1218,13 @@ struct DateTasksView: View {
                       let d2 = second.tasks.first?.targetDate else { return false }
                 return d1 < d2
             }
+    }
+
+    private var dateCalendarDayTasks: [Item] {
+        let calendar = Calendar.current
+        return filteredTasks
+            .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
+            .sorted { $0.targetDate < $1.targetDate }
     }
 
     private func dateTaskRowView(_ task: Item) -> some View {
@@ -1014,16 +1263,32 @@ struct DateTasksView: View {
         )
     }
 
-    private var dateExpandCollapseToggle: some View {
+    private var dateViewModeToggle: some View {
         HStack {
+            if !showCalendarView {
+                Button {
+                    withAnimation(.snappy) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(isExpanded ? "Collapse" : "Expand")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.1), in: Capsule())
+                }
+            }
             Spacer()
             Button {
-                withAnimation(.snappy) { isExpanded.toggle() }
+                withAnimation(.snappy) { showCalendarView.toggle() }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                    Image(systemName: showCalendarView ? "list.bullet" : "calendar")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(isExpanded ? "Collapse" : "Expand")
+                    Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
                 .foregroundStyle(.white.opacity(0.6))
@@ -1076,9 +1341,37 @@ struct DateTasksView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                dateExpandCollapseToggle
+                dateViewModeToggle
 
-                if filteredTasks.isEmpty {
+                if showCalendarView {
+                    WeekCalendarStrip(
+                        selectedDate: $selectedCalendarDate,
+                        tasks: filteredTasks,
+                        theme: theme
+                    )
+                    if dateCalendarDayTasks.isEmpty {
+                        Spacer()
+                        VStack(spacing: 10) {
+                            Image(systemName: "calendar.badge.checkmark")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.white.opacity(0.3))
+                            Text("No tasks on this day")
+                                .font(.headline)
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Spacer()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 10) {
+                                ForEach(dateCalendarDayTasks) { task in
+                                    dateTaskRowView(task)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                        }
+                    }
+                } else if filteredTasks.isEmpty {
                     Spacer()
                     VStack(spacing: 10) {
                         Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
@@ -1396,6 +1689,8 @@ struct ChildTasksView: View {
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var showOpenOnly = true
     @State private var isExpanded = true
+    @State private var showCalendarView = false
+    @State private var selectedCalendarDate = Date()
     @State private var taskToEdit: Item?
     @State private var taskToDelete: Item?
     @State private var taskToApprove: Item?
@@ -1408,6 +1703,13 @@ struct ChildTasksView: View {
     @State private var showEditChoice = false
     @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
+
+    private var childCalendarDayTasks: [Item] {
+        let calendar = Calendar.current
+        return filteredTasks
+            .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
+            .sorted { $0.targetDate < $1.targetDate }
+    }
 
     private var childTotalEarned: Int {
         allTasks
@@ -1440,16 +1742,32 @@ struct ChildTasksView: View {
             }
     }
 
-    private var childExpandCollapseToggle: some View {
+    private var childViewModeToggle: some View {
         HStack {
+            if !showCalendarView {
+                Button {
+                    withAnimation(.snappy) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(isExpanded ? "Collapse" : "Expand")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.1), in: Capsule())
+                }
+            }
             Spacer()
             Button {
-                withAnimation(.snappy) { isExpanded.toggle() }
+                withAnimation(.snappy) { showCalendarView.toggle() }
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                    Image(systemName: showCalendarView ? "list.bullet" : "calendar")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(isExpanded ? "Collapse" : "Expand")
+                    Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
                 .foregroundStyle(.white.opacity(0.6))
@@ -1502,8 +1820,6 @@ struct ChildTasksView: View {
     private var childTaskListContent: some View {
         ScrollView {
             VStack(spacing: 0) {
-                childExpandCollapseToggle
-
                 LazyVStack(spacing: isExpanded ? 10 : 12) {
                     ForEach(groupedTasks, id: \.key) { group in
                         if isExpanded {
@@ -1541,8 +1857,36 @@ struct ChildTasksView: View {
 
             VStack(spacing: 0) {
                 childHeader
+                childViewModeToggle
 
-                if filteredTasks.isEmpty {
+                if showCalendarView {
+                    WeekCalendarStrip(
+                        selectedDate: $selectedCalendarDate,
+                        tasks: filteredTasks,
+                        theme: theme
+                    )
+                    if childCalendarDayTasks.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "calendar.badge.checkmark")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.white.opacity(0.3))
+                            Text("No tasks on this day")
+                                .font(.headline)
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 10) {
+                                ForEach(childCalendarDayTasks) { task in
+                                    childTaskRowView(task)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                        }
+                    }
+                } else if filteredTasks.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
                             .font(.system(size: 56))
