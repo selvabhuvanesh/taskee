@@ -2121,7 +2121,7 @@ struct AddTaskView: View {
 
     @State private var taskName = ""
     @State private var targetDate = roundedToNext5Minutes()
-    @State private var selectedChild = ""
+    @State private var selectedChildren: Set<String> = []
     @State private var rewardText = ""
     @State private var recurrenceType: RecurrenceType = .none
     @State private var occurrences = 10
@@ -2135,7 +2135,7 @@ struct AddTaskView: View {
     @State private var includeGift = false
 
     private var isValid: Bool {
-        !taskName.trimmingCharacters(in: .whitespaces).isEmpty
+        !taskName.trimmingCharacters(in: .whitespaces).isEmpty && !selectedChildren.isEmpty
     }
 
     private var rewardValue: Double {
@@ -2344,24 +2344,40 @@ struct AddTaskView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Assign To")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                            HStack {
+                                Text("Assign To")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.5))
+                                Spacer()
+                                if allMemberNames.count > 1 {
+                                    Button {
+                                        if selectedChildren.count == allMemberNames.count {
+                                            selectedChildren = []
+                                        } else {
+                                            selectedChildren = Set(allMemberNames)
+                                        }
+                                    } label: {
+                                        Text(selectedChildren.count == allMemberNames.count ? "Deselect All" : "Select All")
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(calmAccent)
+                                    }
+                                }
+                            }
 
                             VStack(spacing: 8) {
-                                childChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
-                                    selectedChild = authManager.userName
+                                childChip(name: authManager.userName, isSelected: selectedChildren.contains(authManager.userName)) {
+                                    toggleMember(authManager.userName)
                                 }
 
                                 if let parent = otherParent {
-                                    childChip(name: parent.name, isSelected: selectedChild == parent.name) {
-                                        selectedChild = parent.name
+                                    childChip(name: parent.name, isSelected: selectedChildren.contains(parent.name)) {
+                                        toggleMember(parent.name)
                                     }
                                 }
 
                                 ForEach(children) { child in
-                                    childChip(name: child.name, isSelected: selectedChild == child.name) {
-                                        selectedChild = child.name
+                                    childChip(name: child.name, isSelected: selectedChildren.contains(child.name)) {
+                                        toggleMember(child.name)
                                     }
                                 }
                             }
@@ -2378,8 +2394,9 @@ struct AddTaskView: View {
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                if selectedChild.isEmpty {
-                    selectedChild = preselectedChild.isEmpty ? authManager.userName : preselectedChild
+                if selectedChildren.isEmpty {
+                    let initial = preselectedChild.isEmpty ? authManager.userName : preselectedChild
+                    selectedChildren = [initial]
                 }
             }
             .toolbar {
@@ -2397,26 +2414,28 @@ struct AddTaskView: View {
                         var createdTasks: [Item] = []
                         let recurring = recurrenceType != .none
                         let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
-                        for date in dates {
-                            let task = Item(
-                                name: trimmedName,
-                                targetDate: date,
-                                assignedTo: selectedChild,
-                                reward: rewardValue,
-                                isRecurring: recurring,
-                                giftText: trimmedGift,
-                                createdBy: authManager.userName,
-                                createdByID: authManager.appleUserID
-                            )
-                            modelContext.insert(task)
-                            createdTasks.append(task)
-                            subscriptionManager.recordTaskCreation()
-                            notificationManager.scheduleTaskReminder(
-                                taskId: task.id,
-                                taskName: trimmedName,
-                                assignedTo: selectedChild,
-                                dueDate: date
-                            )
+                        for member in selectedChildren {
+                            for date in dates {
+                                let task = Item(
+                                    name: trimmedName,
+                                    targetDate: date,
+                                    assignedTo: member,
+                                    reward: rewardValue,
+                                    isRecurring: recurring,
+                                    giftText: trimmedGift,
+                                    createdBy: authManager.userName,
+                                    createdByID: authManager.appleUserID
+                                )
+                                modelContext.insert(task)
+                                createdTasks.append(task)
+                                subscriptionManager.recordTaskCreation()
+                                notificationManager.scheduleTaskReminder(
+                                    taskId: task.id,
+                                    taskName: trimmedName,
+                                    assignedTo: member,
+                                    dueDate: date
+                                )
+                            }
                         }
                         let familyCode = authManager.familyCode
                         Task {
@@ -2679,7 +2698,8 @@ struct AddTaskView: View {
     private func applyParsedTask(_ parsed: ParsedTask) {
         taskName = parsed.name
         targetDate = parsed.targetDate
-        selectedChild = parsed.assignedTo.isEmpty ? (preselectedChild.isEmpty ? authManager.userName : preselectedChild) : parsed.assignedTo
+        let assignee = parsed.assignedTo.isEmpty ? (preselectedChild.isEmpty ? authManager.userName : preselectedChild) : parsed.assignedTo
+        selectedChildren = [assignee]
         rewardText = parsed.reward > 0 ? "\(parsed.reward)" : ""
         recurrenceType = parsed.recurrence
 
@@ -2697,7 +2717,7 @@ struct AddTaskView: View {
             let task = Item(
                 name: trimmedName,
                 targetDate: date,
-                assignedTo: selectedChild,
+                assignedTo: assignee,
                 reward: Double(rewardText) ?? 0,
                 isRecurring: recurring,
                 giftText: trimmedGiftSmart,
@@ -2765,6 +2785,23 @@ struct AddTaskView: View {
             return (0..<occurrences).compactMap { i in
                 calendar.date(byAdding: .month, value: i, to: targetDate)
             }
+        }
+    }
+
+    private var allMemberNames: [String] {
+        var names = [authManager.userName]
+        if let parent = otherParent {
+            names.append(parent.name)
+        }
+        names.append(contentsOf: children.map(\.name))
+        return names
+    }
+
+    private func toggleMember(_ name: String) {
+        if selectedChildren.contains(name) {
+            selectedChildren.remove(name)
+        } else {
+            selectedChildren.insert(name)
         }
     }
 
