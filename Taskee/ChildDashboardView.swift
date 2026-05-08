@@ -17,6 +17,7 @@ struct ChildDashboardView: View {
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allMembers: [FamilyMember]
     @State private var showAll = false
+    @State private var isExpanded = true
     @State private var showAddTask = false
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
@@ -110,7 +111,7 @@ struct ChildDashboardView: View {
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
         if showAll { return assigned }
-        return assigned.filter { !$0.isApproved || ($0.hasGift && !$0.giftRevealed) }
+        return assigned.filter { (!$0.isApproved && !$0.isMissed) || ($0.hasGift && !$0.giftRevealed) }
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -876,24 +877,55 @@ struct ChildDashboardView: View {
         }
     }
 
+    private var childExpandCollapseToggle: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(isExpanded ? "Collapse" : "Expand")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
     private var taskList: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(groupedTasks, id: \.key) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(group.key)
-                            .font(childTheme.font(.subheadline).weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .padding(.leading, 4)
+            VStack(spacing: 0) {
+                childExpandCollapseToggle
 
-                        ForEach(group.tasks) { task in
-                            childTaskRow(task: task)
+                LazyVStack(spacing: 12) {
+                    ForEach(groupedTasks, id: \.key) { group in
+                        if isExpanded {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(group.key)
+                                    .font(childTheme.font(.subheadline).weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .padding(.leading, 4)
+
+                                ForEach(group.tasks) { task in
+                                    childTaskRow(task: task)
+                                }
+                            }
+                        } else {
+                            GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
         }
         .refreshable {
             guard !authManager.familyCode.isEmpty else { return }
@@ -925,12 +957,14 @@ struct ChildDashboardView: View {
     private func statusColor(for task: Item) -> Color {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
+        if task.isMissed { return .red }
         return .white.opacity(0.4)
     }
 
     private func statusLabel(for task: Item) -> String {
         if task.isApproved { return "Done" }
         if task.isInReview { return "Review" }
+        if task.isMissed { return "Missed" }
         return "To Do"
     }
 
@@ -965,6 +999,13 @@ struct ChildDashboardView: View {
                             Image(systemName: "clock")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white)
+                        } else if task.isMissed {
+                            Circle()
+                                .fill(.red)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
                         }
                     }
                     Text(statusLabel(for: task))
@@ -979,11 +1020,15 @@ struct ChildDashboardView: View {
                 Text(task.name)
                     .font(childTheme.font(.body))
                     .lineLimit(1)
-                    .strikethrough(task.isApproved)
-                    .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
+                    .strikethrough(task.isApproved || task.isMissed)
+                    .foregroundStyle(task.isApproved || task.isMissed ? .white.opacity(0.35) : .white)
 
                 HStack(spacing: 6) {
-                    if task.isInReview {
+                    if task.isMissed {
+                        Text("Missed")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    } else if task.isInReview {
                         Text("In Review")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.orange)
@@ -1055,12 +1100,12 @@ struct ChildDashboardView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
-        .opacity(task.isApproved ? 0.7 : 1)
+        .opacity(task.isApproved || task.isMissed ? 0.7 : 1)
         .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
                     lineWidth: 1
                 )
         )

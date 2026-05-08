@@ -229,6 +229,7 @@ struct TaskeeApp: App {
             subscriptionManager.setFamilyTier(familyTier)
         }
         scheduleDailySummary()
+        sweepMissedTasks()
     }
 
     private func performInitialSync(familyCode: String) async {
@@ -253,11 +254,53 @@ struct TaskeeApp: App {
         }
         _ = await (backfill, subs, acceptance)
         scheduleDailySummary()
+        sweepMissedTasks()
     }
 
     private func scheduleDailySummary() {
         let allTasks = (try? sharedModelContainer.mainContext.fetch(FetchDescriptor<Item>())) ?? []
         notificationManager.scheduleDailySummary(tasks: allTasks, userName: authManager.userName)
+    }
+
+    private func sweepMissedTasks() {
+        let context = sharedModelContainer.mainContext
+        let allTasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        let now = Date()
+
+        let missed = allTasks.filter { task in
+            task.isOpen && !task.isArchived && task.targetDate < now
+                && !Calendar.current.isDateInToday(task.targetDate)
+        }
+        guard !missed.isEmpty else { return }
+
+        for task in missed {
+            task.status = "missed"
+            notificationManager.cancelTaskReminder(taskId: task.id)
+        }
+
+        let familyCode = authManager.familyCode
+        Task {
+            for task in missed {
+                await cloudKitManager.pushTask(task, familyCode: familyCode)
+            }
+        }
+
+        let grouped = Dictionary(grouping: missed) { $0.assignedTo }
+        for (assignee, tasks) in grouped {
+            let names = tasks.prefix(3).map { $0.name }
+            var body = names.map { "• \($0)" }.joined(separator: "\n")
+            if tasks.count > 3 {
+                body += "\n...and \(tasks.count - 3) more"
+            }
+            let title = assignee.isEmpty
+                ? "\(tasks.count) task\(tasks.count == 1 ? "" : "s") missed"
+                : "\(tasks.count) task\(tasks.count == 1 ? "" : "s") missed by \(assignee)"
+            notificationManager.deliverBeepNotification(
+                title: title,
+                body: body,
+                category: "TASK_MISSED"
+            )
+        }
     }
 
     private func scheduleRemindersForSyncedTasks(_ tasks: [CloudKitManager.SyncedTask]) {

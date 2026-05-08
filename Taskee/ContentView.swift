@@ -75,6 +75,7 @@ struct ContentView: View {
     @State private var showingChildren = false
     @State private var showPendingApprovals = false
     @State private var showOpenOnly = true
+    @State private var isExpanded = true
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
     @State private var showNotificationCenter = false
@@ -94,6 +95,14 @@ struct ContentView: View {
     @State private var showFamilyChat = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
+    @State private var taskToEdit: Item?
+    @State private var taskToDelete: Item?
+    @State private var taskToApprove: Item?
+    @State private var showTooEarlyAlert = false
+    @State private var tooEarlyTask: Item?
+    @State private var showEditChoice = false
+    @State private var editAllRecurring = false
+    @State private var pendingEditTask: Item?
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
 
@@ -113,7 +122,7 @@ struct ContentView: View {
     }
 
     private var filteredTasks: [Item] {
-        showOpenOnly ? myTasks.filter { !$0.isApproved } : myTasks
+        showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed } : myTasks
     }
 
     private var pendingReviewCount: Int {
@@ -161,7 +170,14 @@ struct ContentView: View {
                         if filteredTasks.isEmpty {
                             emptyState
                         } else {
-                            groupListContent
+                            VStack(spacing: 0) {
+                                expandCollapseToggle
+                                if isExpanded {
+                                    expandedListContent
+                                } else {
+                                    groupListContent
+                                }
+                            }
                         }
                     }
                     .refreshable {
@@ -384,6 +400,18 @@ struct ContentView: View {
             } message: {
                 Text("\(reminderSentChildName) has been reminded about today's tasks.")
             }
+            .modifier(ParentExpandedTaskAlerts(
+                taskToDelete: $taskToDelete,
+                taskToApprove: $taskToApprove,
+                taskToEdit: $taskToEdit,
+                showTooEarlyAlert: $showTooEarlyAlert,
+                tooEarlyTask: $tooEarlyTask,
+                tasks: tasks,
+                children: children,
+                otherParent: otherParent,
+                allMembers: allMembers,
+                theme: parentTheme
+            ))
             .task {
                 archiveOldTasks()
                 checkRecurringExtension()
@@ -464,6 +492,7 @@ struct ContentView: View {
                             tasks: activeTasks.filter { $0.assignedTo == parent.name },
                             children: children,
                             otherParent: parent,
+                            memberName: parent.name,
                             theme: parentTheme
                         )) {
                             VStack(spacing: 4) {
@@ -633,6 +662,80 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var expandCollapseToggle: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(isExpanded ? "Collapse" : "Expand")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private var expandedListContent: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(groupedTasks, id: \.key) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.key)
+                        .font(parentTheme.font(.subheadline).weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .padding(.leading, 4)
+
+                    ForEach(group.tasks) { task in
+                        TaskRow(
+                            task: task,
+                            showAssignee: false,
+                            currentUserName: authManager.userName,
+                            theme: parentTheme,
+                            onApprove: {
+                                if !task.canComplete {
+                                    tooEarlyTask = task
+                                    showTooEarlyAlert = true
+                                } else {
+                                    taskToApprove = task
+                                }
+                            },
+                            onEdit: {
+                                if task.isRecurring {
+                                    pendingEditTask = task
+                                    showEditChoice = true
+                                } else {
+                                    taskToEdit = task
+                                }
+                            },
+                            onDelete: { taskToDelete = task }
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 2)
+                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(
+                                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                                    lineWidth: 1
+                                )
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
     private var groupListContent: some View {
         LazyVStack(spacing: 12) {
             ForEach(groupedTasks, id: \.key) { group in
@@ -648,7 +751,7 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     private var tierBanner: some View {
@@ -796,6 +899,7 @@ struct DateTasksView: View {
     let tasks: [Item]
     let children: [FamilyMember]
     var otherParent: FamilyMember? = nil
+    var memberName: String = ""
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var taskToDelete: Item?
     @State private var taskToEdit: Item?
@@ -809,49 +913,117 @@ struct DateTasksView: View {
     @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
     @State private var showOpenOnly = true
+    @State private var isExpanded = true
+
+    private var liveTasks: [Item] {
+        if !memberName.isEmpty {
+            return allTasks.filter { $0.assignedTo == memberName }
+        }
+        return tasks
+    }
 
     private var filteredTasks: [Item] {
-        showOpenOnly ? tasks.filter { !$0.isApproved } : tasks
+        if showOpenOnly {
+            return liveTasks.filter { !$0.isArchived && !$0.isApproved && !$0.isMissed }
+        } else {
+            return liveTasks
+        }
+    }
+
+    private var dateGroupedTasks: [(key: String, tasks: [Item])] {
+        let grouped = Dictionary(grouping: filteredTasks) { $0.dueDateLabel }
+        return grouped
+            .map { (key: $0.key, tasks: $0.value) }
+            .sorted { first, second in
+                guard let d1 = first.tasks.first?.targetDate,
+                      let d2 = second.tasks.first?.targetDate else { return false }
+                return d1 < d2
+            }
+    }
+
+    private func dateTaskRowView(_ task: Item) -> some View {
+        TaskRow(
+            task: task,
+            showAssignee: true,
+            currentUserName: authManager.userName,
+            theme: theme,
+            onApprove: {
+                if !task.canComplete {
+                    tooEarlyTask = task
+                    showTooEarlyAlert = true
+                } else {
+                    taskToApprove = task
+                }
+            },
+            onEdit: {
+                if task.isRecurring {
+                    pendingEditTask = task
+                    showEditChoice = true
+                } else {
+                    taskToEdit = task
+                }
+            },
+            onDelete: { taskToDelete = task }
+        )
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    lineWidth: 1
+                )
+        )
+    }
+
+    private var dateExpandCollapseToggle: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(isExpanded ? "Collapse" : "Expand")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 
     private var taskListContent: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(filteredTasks) { task in
-                    TaskRow(
-                        task: task,
-                        showAssignee: true,
-                        currentUserName: authManager.userName,
-                        theme: theme,
-                        onApprove: {
-                            if !task.canComplete {
-                                tooEarlyTask = task
-                                showTooEarlyAlert = true
-                            } else {
-                                taskToApprove = task
+            VStack(spacing: 0) {
+                LazyVStack(spacing: isExpanded ? 10 : 12) {
+                    ForEach(dateGroupedTasks, id: \.key) { group in
+                        if isExpanded {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(group.key)
+                                    .font(theme.font(.subheadline).weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .padding(.leading, 4)
+
+                                ForEach(group.tasks) { task in
+                                    dateTaskRowView(task)
+                                }
                             }
-                        },
-                        onEdit: {
-                            if task.isRecurring {
-                                pendingEditTask = task
-                                showEditChoice = true
-                            } else {
-                                taskToEdit = task
-                            }
-                        },
-                        onDelete: { taskToDelete = task }
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 2)
-                    .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.25), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 16)
+                        } else {
+                            GroupCard(dateLabel: group.key, count: group.tasks.count)
+                        }
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
             }
-            .padding(.vertical, 12)
         }
     }
 
@@ -861,6 +1033,8 @@ struct DateTasksView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                dateExpandCollapseToggle
+
                 if filteredTasks.isEmpty {
                     Spacer()
                     VStack(spacing: 10) {
@@ -1163,6 +1337,7 @@ struct ChildTasksView: View {
     var otherParent: FamilyMember? = nil
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var showOpenOnly = true
+    @State private var isExpanded = true
     @State private var taskToEdit: Item?
     @State private var taskToDelete: Item?
     @State private var taskToApprove: Item?
@@ -1193,7 +1368,7 @@ struct ChildTasksView: View {
     }
 
     private var filteredTasks: [Item] {
-        showOpenOnly ? tasks.filter { !$0.isApproved } : tasks
+        showOpenOnly ? tasks.filter { !$0.isApproved && !$0.isMissed } : tasks
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -1207,55 +1382,90 @@ struct ChildTasksView: View {
             }
     }
 
+    private var childExpandCollapseToggle: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(isExpanded ? "Collapse" : "Expand")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private func childTaskRowView(_ task: Item) -> some View {
+        TaskRow(
+            task: task,
+            currentUserName: authManager.userName,
+            theme: theme,
+            onApprove: {
+                if !task.canComplete {
+                    tooEarlyTask = task
+                    showTooEarlyAlert = true
+                } else {
+                    taskToApprove = task
+                }
+            },
+            onEdit: {
+                if task.isRecurring {
+                    pendingEditTask = task
+                    showEditChoice = true
+                } else {
+                    taskToEdit = task
+                }
+            },
+            onDelete: { taskToDelete = task }
+        )
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    lineWidth: 1
+                )
+        )
+    }
+
     private var childTaskListContent: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(groupedTasks, id: \.key) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(group.key)
-                            .font(theme.font(.subheadline).weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .padding(.leading, 4)
+            VStack(spacing: 0) {
+                childExpandCollapseToggle
 
-                        ForEach(group.tasks) { task in
-                            TaskRow(
-                                task: task,
-                                currentUserName: authManager.userName,
-                                theme: theme,
-                                onApprove: {
-                                    if !task.canComplete {
-                                        tooEarlyTask = task
-                                        showTooEarlyAlert = true
-                                    } else {
-                                        taskToApprove = task
-                                    }
-                                },
-                                onEdit: {
-                                    if task.isRecurring {
-                                        pendingEditTask = task
-                                        showEditChoice = true
-                                    } else {
-                                        taskToEdit = task
-                                    }
-                                },
-                                onDelete: { taskToDelete = task }
-                            )
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 2)
-                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(
-                                        task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
-                                        lineWidth: 1
-                                    )
-                            )
+                LazyVStack(spacing: isExpanded ? 10 : 12) {
+                    ForEach(groupedTasks, id: \.key) { group in
+                        if isExpanded {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(group.key)
+                                    .font(theme.font(.subheadline).weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .padding(.leading, 4)
+
+                                ForEach(group.tasks) { task in
+                                    childTaskRowView(task)
+                                }
+                            }
+                        } else {
+                            GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         }
     }
 
@@ -1629,6 +1839,93 @@ struct ChildTasksView: View {
     }
 }
 
+// MARK: - Parent Expanded Task Alerts
+
+struct ParentExpandedTaskAlerts: ViewModifier {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+
+    @Binding var taskToDelete: Item?
+    @Binding var taskToApprove: Item?
+    @Binding var taskToEdit: Item?
+    @Binding var showTooEarlyAlert: Bool
+    @Binding var tooEarlyTask: Item?
+    let tasks: [Item]
+    let children: [FamilyMember]
+    var otherParent: FamilyMember?
+    let allMembers: [FamilyMember]
+    var theme: ChildTheme
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Not Yet! ⏰", isPresented: $showTooEarlyAlert) {
+                Button("Got It", role: .cancel) { tooEarlyTask = nil }
+            } message: {
+                if let task = tooEarlyTask {
+                    Text("This task is scheduled for \(task.dueDateLabel). It can be completed when the day arrives!")
+                }
+            }
+            .alert(
+                taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task",
+                isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } })
+            ) {
+                if let task = taskToDelete {
+                    Button("Delete", role: .destructive) {
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.deleteRemoteTasks([task.id]) }
+                        notificationManager.cancelTaskReminder(taskId: task.id)
+                        modelContext.delete(task)
+                        taskToDelete = nil
+                    }
+                    Button("Cancel", role: .cancel) { taskToDelete = nil }
+                }
+            }
+            .alert(
+                taskToApprove?.isInReview == true ? "Approve Task?" : "Mark as Complete?",
+                isPresented: Binding(get: { taskToApprove != nil }, set: { if !$0 { taskToApprove = nil } })
+            ) {
+                approveButtons
+            } message: {
+                approveMessage
+            }
+            .sheet(item: $taskToEdit) { task in
+                EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme)
+            }
+    }
+
+    @ViewBuilder
+    private var approveButtons: some View {
+        Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
+            if let task = taskToApprove {
+                task.status = "approved"
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                if task.reward > 0, !task.assignedTo.isEmpty {
+                    if let member = allMembers.first(where: { $0.name == task.assignedTo }) {
+                        member.recomputeEarned(from: tasks)
+                        Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
+                    }
+                }
+                taskToApprove = nil
+            }
+        }
+        Button("Cancel", role: .cancel) { taskToApprove = nil }
+    }
+
+    @ViewBuilder
+    private var approveMessage: some View {
+        if let task = taskToApprove {
+            if task.isInReview {
+                Text("\"\(task.name)\" is waiting for your approval.")
+            } else {
+                Text("Mark \"\(task.name)\" as complete? This cannot be undone.")
+            }
+        }
+    }
+}
+
 // MARK: - Task Row
 
 struct TaskRow: View {
@@ -1643,12 +1940,14 @@ struct TaskRow: View {
     private var statusColor: Color {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
+        if task.isMissed { return .red }
         return .white.opacity(0.4)
     }
 
     private var statusLabel: String {
         if task.isApproved { return "Done" }
         if task.isInReview { return "Review" }
+        if task.isMissed { return "Missed" }
         return "To Do"
     }
 
@@ -1680,6 +1979,13 @@ struct TaskRow: View {
                             Image(systemName: "clock")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white)
+                        } else if task.isMissed {
+                            Circle()
+                                .fill(.red)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
                         }
                     }
                     Text(statusLabel)
@@ -1688,17 +1994,21 @@ struct TaskRow: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(task.isApproved)
+            .disabled(task.isApproved || task.isMissed)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
                     .font(theme.font(.body))
                     .lineLimit(1)
-                    .strikethrough(task.isApproved)
-                    .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
+                    .strikethrough(task.isApproved || task.isMissed)
+                    .foregroundStyle(task.isApproved || task.isMissed ? .white.opacity(0.35) : .white)
 
                 HStack(spacing: 6) {
-                    if task.isInReview {
+                    if task.isMissed {
+                        Text("Missed")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    } else if task.isInReview {
                         Text("In Review")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.orange)
@@ -1775,7 +2085,7 @@ struct TaskRow: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
-        .opacity(task.isApproved ? 0.7 : 1)
+        .opacity(task.isApproved || task.isMissed ? 0.7 : 1)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 onDelete?()

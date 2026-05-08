@@ -599,7 +599,7 @@ final class CloudKitManager {
 
         let descriptor = FetchDescriptor<Item>()
         let localTasks = (try? context.fetch(descriptor)) ?? []
-        let toArchive = localTasks.filter { $0.isApproved && $0.targetDate < cutoff }
+        let toArchive = localTasks.filter { ($0.isApproved || $0.isMissed) && $0.targetDate < cutoff }
         guard !toArchive.isEmpty else { return }
 
         var savedRecords: [CKRecord] = []
@@ -783,7 +783,8 @@ final class CloudKitManager {
                 local.reward = (record["reward"] as? NSNumber)?.doubleValue ?? local.reward
                 local.status = record["status"] as? String ?? local.status
                 local.createdByChild = ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1
-                local.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+                let remoteArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+                local.isArchived = local.isMissed ? false : remoteArchived
                 local.isRecurring = ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
                 local.giftText = record["giftText"] as? String ?? local.giftText
                 local.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
@@ -809,7 +810,7 @@ final class CloudKitManager {
                     createdBy: record["createdBy"] as? String ?? "",
                     createdByID: record["createdByID"] as? String ?? ""
                 )
-                item.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+                item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
                 context.insert(item)
 
@@ -1562,7 +1563,8 @@ final class CloudKitManager {
             local.reward = reward
             local.status = newStatus
             local.createdByChild = ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1
-            local.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+            let deltaArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+            local.isArchived = newStatus == "missed" ? false : deltaArchived
             local.isRecurring = ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1
             local.giftText = giftText
             local.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
@@ -1606,7 +1608,7 @@ final class CloudKitManager {
             createdBy: record["createdBy"] as? String ?? "",
             createdByID: record["createdByID"] as? String ?? ""
         )
-        item.isArchived = ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
+        item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
         item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
         item.lastRemindedAt = record["lastRemindedAt"] as? Date
         context.insert(item)

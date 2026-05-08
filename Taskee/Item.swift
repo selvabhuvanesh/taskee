@@ -17,7 +17,7 @@ final class Item {
     var targetDate: Date
     var assignedTo: String
     var reward: Double
-    // "open", "inReview", "approved"
+    // "open", "inReview", "approved", "missed"
     var status: String
     var createdByChild: Bool
     var isArchived: Bool
@@ -50,6 +50,7 @@ final class Item {
     var isOpen: Bool { status == "open" }
     var isInReview: Bool { status == "inReview" }
     var isApproved: Bool { status == "approved" }
+    var isMissed: Bool { status == "missed" }
 
     var isDueInFuture: Bool {
         !Calendar.current.isDateInToday(targetDate) && targetDate > Date()
