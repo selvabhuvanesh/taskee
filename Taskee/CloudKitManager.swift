@@ -506,6 +506,12 @@ final class CloudKitManager {
         if let pickup = member.lastPickupAt {
             record["lastPickupAt"] = pickup as NSDate
         }
+        if let ack = member.lastPickupAckAt {
+            record["lastPickupAckAt"] = ack as NSDate
+        }
+        if !member.lastPickupAckBy.isEmpty {
+            record["lastPickupAckBy"] = member.lastPickupAckBy
+        }
 
         if avatar.hasPrefix("photo_") {
             let photoID = String(avatar.dropFirst(6))
@@ -689,6 +695,7 @@ final class CloudKitManager {
         case memberAccepted(name: String, appleUserID: String)
         case memberRequested(name: String)
         case pickupRequested(childName: String)
+        case pickupAcknowledged(parentName: String)
         case chatReceived(senderName: String, text: String)
     }
 
@@ -838,10 +845,13 @@ final class CloudKitManager {
             cacheAvatarPhotoIfNeeded(avatar: remoteAvatar, record: record)
             let remoteAccepted = ((record["isAccepted"] as? NSNumber)?.intValue ?? 1) == 1
             let remotePickupAt = record["lastPickupAt"] as? Date
+            let remoteAckAt = record["lastPickupAckAt"] as? Date
+            let remoteAckBy = record["lastPickupAckBy"] as? String ?? ""
 
             if let local = localByID[idStr] {
                 let wasAccepted = local.isAccepted
                 let oldPickup = local.lastPickupAt
+                let oldAck = local.lastPickupAckAt
 
                 local.name = record["name"] as? String ?? local.name
                 local.memberRole = record["memberRole"] as? String ?? local.memberRole
@@ -850,12 +860,17 @@ final class CloudKitManager {
                 local.appleUserID = record["appleUserID"] as? String ?? local.appleUserID
                 local.isAccepted = remoteAccepted
                 if let rp = remotePickupAt { local.lastPickupAt = rp }
+                if let ra = remoteAckAt { local.lastPickupAckAt = ra }
+                if !remoteAckBy.isEmpty { local.lastPickupAckBy = remoteAckBy }
 
                 if !wasAccepted && remoteAccepted {
                     changes.append(.memberAccepted(name: local.name, appleUserID: local.appleUserID))
                 }
                 if let rp = remotePickupAt, rp != oldPickup, rp.timeIntervalSinceNow > -600 {
                     changes.append(.pickupRequested(childName: local.name))
+                }
+                if let ra = remoteAckAt, ra != oldAck, ra.timeIntervalSinceNow > -600 {
+                    changes.append(.pickupAcknowledged(parentName: remoteAckBy))
                 }
             } else if let uuid = UUID(uuidString: idStr) {
                 let name = record["name"] as? String ?? ""
@@ -869,6 +884,8 @@ final class CloudKitManager {
                 )
                 member.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0
                 if let rp = remotePickupAt { member.lastPickupAt = rp }
+                if let ra = remoteAckAt { member.lastPickupAckAt = ra }
+                member.lastPickupAckBy = remoteAckBy
                 context.insert(member)
 
                 if !remoteAccepted {

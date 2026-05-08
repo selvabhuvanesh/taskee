@@ -81,6 +81,8 @@ final class FamilyMember {
     var totalEarned: Double
     var appleUserID: String
     var lastPickupAt: Date?
+    var lastPickupAckAt: Date?
+    var lastPickupAckBy: String
 
     init(id: UUID = UUID(), name: String, memberRole: String = "child", avatar: String = "av01", isAccepted: Bool = true, totalEarned: Double = 0, appleUserID: String = "") {
         self.id = id
@@ -91,6 +93,8 @@ final class FamilyMember {
         self.totalEarned = totalEarned
         self.appleUserID = appleUserID
         self.lastPickupAt = nil
+        self.lastPickupAckAt = nil
+        self.lastPickupAckBy = ""
     }
 
     var isParent: Bool { memberRole == "parent" }

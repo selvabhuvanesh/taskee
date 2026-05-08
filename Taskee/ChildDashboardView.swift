@@ -27,6 +27,8 @@ struct ChildDashboardView: View {
     @State private var tooEarlyTask: Item?
     @State private var showPickupSent = false
     @State private var showPickupLimit = false
+    @State private var showPickupAck = false
+    @State private var pickupAckParentName = ""
     @State private var pickupPosition: CGPoint = .zero
     @State private var pickupInitialized = false
     @State private var showNotificationCenter = false
@@ -53,6 +55,14 @@ struct ChildDashboardView: View {
     @State private var showRecurringExtension = false
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @Query private var allRedemptions: [RewardRedemption]
+
+    private var myMember: FamilyMember? {
+        allMembers.first { $0.appleUserID == authManager.appleUserID }
+    }
+
+    private var pickupAckTimestamp: Double {
+        myMember?.lastPickupAckAt?.timeIntervalSince1970 ?? 0
+    }
 
     private var myRedemptions: [RewardRedemption] {
         allRedemptions.filter { $0.childName == authManager.userName }
@@ -170,6 +180,11 @@ struct ChildDashboardView: View {
                 FlyingCoinsOverlay(coins: $flyingCoins)
 
                 pickupFloatingButton
+                    .alert("On the way!", isPresented: $showPickupAck) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("\(pickupAckParentName) is coming to pick you up!")
+                    }
 
                 if let note = stickyNote {
                     VStack {
@@ -269,6 +284,11 @@ struct ChildDashboardView: View {
             }
             .onAppear {
                 refreshUnreadCount()
+            }
+            .onChange(of: pickupAckTimestamp) { oldVal, newVal in
+                guard newVal != oldVal, newVal > 0, Date(timeIntervalSince1970: newVal).timeIntervalSinceNow > -60 else { return }
+                pickupAckParentName = myMember?.lastPickupAckBy ?? "A parent"
+                showPickupAck = true
             }
             .sheet(isPresented: $showRedeemSheet) {
                 RedeemRewardsView(availableCoins: collectableCoins, childName: authManager.userName, theme: childTheme)

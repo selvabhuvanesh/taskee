@@ -660,7 +660,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(subscriptionManager.tier == .family ? calmAccent : .orange)
 
-                Text(subscriptionManager.tier == .free ? "Free Plan" : "Family Plan")
+                Text(subscriptionManager.tier == .pro ? "Pro Plan" : subscriptionManager.tier == .family ? "Basic Plan" : "Free Plan")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
 
@@ -3839,7 +3839,7 @@ struct SubscriptionView: View {
             ),
             PlanInfo(
                 tier: .family,
-                name: "Family",
+                name: "Basic",
                 icon: "person.3.fill",
                 color: calmAccent,
                 price: "$4.99",
@@ -4117,11 +4117,15 @@ struct SubscriptionView: View {
 
 struct NotificationCenterView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Query private var allMembers: [FamilyMember]
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var notifications: [NotificationManager.LocalNotification] = []
     @State private var showClearAllConfirm = false
+    @State private var acknowledgedPickups: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -4211,6 +4215,19 @@ struct NotificationCenterView: View {
         }
     }
 
+    private func acknowledgePickupFromNotification(_ notif: NotificationManager.LocalNotification) {
+        let childName = notif.senderName
+        guard let child = allMembers.first(where: { $0.name == childName && $0.isChild }) else { return }
+
+        child.lastPickupAckAt = Date()
+        child.lastPickupAckBy = authManager.userName
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
+
+        withAnimation { acknowledgedPickups.insert(notif.id) }
+    }
+
     private func notificationRow(_ notif: NotificationManager.LocalNotification) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
@@ -4234,6 +4251,35 @@ struct NotificationCenterView: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.8))
                     .lineLimit(3)
+
+                if notif.category == "PICKUP_REQUEST" && notif.createdAt.timeIntervalSinceNow > -600 && authManager.role == "parent" {
+                    if acknowledgedPickups.contains(notif.id) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption)
+                            Text("On My Way!")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.top, 2)
+                    } else {
+                        Button {
+                            acknowledgePickupFromNotification(notif)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "car.fill")
+                                    .font(.caption2)
+                                Text("On My Way!")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(calmAccent, in: Capsule())
+                        }
+                        .padding(.top, 2)
+                    }
+                }
 
                 Text(notif.createdAt, format: .relative(presentation: .named))
                     .font(.caption2)

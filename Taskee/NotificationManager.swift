@@ -9,8 +9,11 @@ import UserNotifications
 @Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     var showPendingApprovals = false
+    var pickupAckChildName: String?
+    var onPickupAcknowledged: ((String) -> Void)?
     private static let snoozeActionID = "SNOOZE_ACTION"
     private static let dismissActionID = "DISMISS_ACTION"
+    private static let pickupAckActionID = "PICKUP_ACK_ACTION"
     private static let taskReminderCategoryID = "TASK_REMINDER"
     private static let snoozeDuration: TimeInterval = 5 * 60
 
@@ -48,9 +51,15 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             intentIdentifiers: []
         )
 
+        let pickupAck = UNNotificationAction(
+            identifier: Self.pickupAckActionID,
+            title: "On My Way!",
+            options: .foreground
+        )
+
         let pickup = UNNotificationCategory(
             identifier: "PICKUP_REQUEST",
-            actions: [],
+            actions: [pickupAck],
             intentIdentifiers: []
         )
 
@@ -172,6 +181,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.sound = UNNotificationSound(named: UNNotificationSoundName("pickup.wav"))
         content.categoryIdentifier = "PICKUP_REQUEST"
         content.interruptionLevel = .timeSensitive
+        content.userInfo = ["childName": childName]
 
         let request = UNNotificationRequest(identifier: "pickup-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
@@ -188,6 +198,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         if category == "TASK_REVIEW" {
             DispatchQueue.main.async {
                 self.showPendingApprovals = true
+            }
+        }
+
+        if response.actionIdentifier == Self.pickupAckActionID {
+            let childName = response.notification.request.content.userInfo["childName"] as? String ?? ""
+            DispatchQueue.main.async {
+                self.pickupAckChildName = childName
+                self.onPickupAcknowledged?(childName)
             }
         }
 

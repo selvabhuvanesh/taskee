@@ -106,6 +106,9 @@ struct TaskeeApp: App {
                 notificationManager.requestPermission()
                 SoundManager.shared.installNotificationSound()
                 UNUserNotificationCenter.current().setBadgeCount(0)
+                notificationManager.onPickupAcknowledged = { childName in
+                    acknowledgePickup(childName: childName)
+                }
                 Task {
                     async let tier: Void = subscriptionManager.refreshTier()
                     async let products: Void = subscriptionManager.loadProducts()
@@ -275,6 +278,20 @@ struct TaskeeApp: App {
         }
     }
 
+    private func acknowledgePickup(childName: String) {
+        let context = sharedModelContainer.mainContext
+        let descriptor = FetchDescriptor<FamilyMember>()
+        guard let members = try? context.fetch(descriptor) else { return }
+
+        guard let childMember = members.first(where: { $0.name == childName && $0.isChild }) else { return }
+
+        childMember.lastPickupAckAt = Date()
+        childMember.lastPickupAckBy = authManager.userName
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushMember(childMember, familyCode: familyCode) }
+    }
+
     private func handleSyncChanges(_ changes: [CloudKitManager.SyncChange]) {
         let myName = authManager.userName
         let myRole = authManager.role
@@ -380,6 +397,15 @@ struct TaskeeApp: App {
             case .pickupRequested(let childName):
                 guard myRole == "parent" else { continue }
                 notificationManager.sendPickupNotification(childName: childName)
+
+            case .pickupAcknowledged(let parentName):
+                guard myRole == "child" else { continue }
+                notificationManager.deliverBeepNotification(
+                    title: "On the way!",
+                    body: "\(parentName) is coming to pick you up!",
+                    category: "PICKUP_ACK",
+                    senderName: parentName
+                )
 
             case .chatReceived(let senderName, let text):
                 guard senderName != myName else { continue }
