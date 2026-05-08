@@ -48,6 +48,20 @@ struct UserAvatarHeader: View {
     }
 }
 
+// MARK: - Drag & Drop Helpers
+
+func rescheduleTask(_ task: Item, toSameDayAs referenceDate: Date) {
+    let calendar = Calendar.current
+    let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: task.targetDate)
+    var dayComponents = calendar.dateComponents([.year, .month, .day], from: referenceDate)
+    dayComponents.hour = timeComponents.hour
+    dayComponents.minute = timeComponents.minute
+    dayComponents.second = timeComponents.second
+    if let newDate = calendar.date(from: dayComponents) {
+        task.targetDate = newDate
+    }
+}
+
 // MARK: - Parent Main View
 
 struct ContentView: View {
@@ -728,7 +742,15 @@ struct ContentView: View {
                                     lineWidth: 1
                                 )
                         )
+                        .draggable(TaskTransfer(id: task.id))
                     }
+                }
+                .dropDestination(for: TaskTransfer.self) { items, _ in
+                    guard let transfer = items.first,
+                          let refDate = group.tasks.first?.targetDate else { return false }
+                    return handleTaskDrop(taskId: transfer.id, toDate: refDate)
+                } isTargeted: { isTargeted in
+                    // visual feedback handled by system
                 }
             }
         }
@@ -851,6 +873,21 @@ struct ContentView: View {
             }
         }
         .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private func handleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
+        guard let task = tasks.first(where: { $0.id == taskId }) else { return false }
+        rescheduleTask(task, toSameDayAs: referenceDate)
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        notificationManager.scheduleTaskReminder(
+            taskId: task.id,
+            taskName: task.name,
+            assignedTo: task.assignedTo,
+            dueDate: task.targetDate
+        )
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        return true
     }
 }
 
@@ -1014,8 +1051,14 @@ struct DateTasksView: View {
 
                                 ForEach(group.tasks) { task in
                                     dateTaskRowView(task)
+                                        .draggable(TaskTransfer(id: task.id))
                                 }
                             }
+                            .dropDestination(for: TaskTransfer.self) { items, _ in
+                                guard let transfer = items.first,
+                                      let refDate = group.tasks.first?.targetDate else { return false }
+                                return dateHandleTaskDrop(taskId: transfer.id, toDate: refDate)
+                            } isTargeted: { _ in }
                         } else {
                             GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
@@ -1320,6 +1363,21 @@ struct DateTasksView: View {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
         }
     }
+
+    private func dateHandleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
+        guard let task = allTasks.first(where: { $0.id == taskId }) else { return false }
+        rescheduleTask(task, toSameDayAs: referenceDate)
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        notificationManager.scheduleTaskReminder(
+            taskId: task.id,
+            taskName: task.name,
+            assignedTo: task.assignedTo,
+            dueDate: task.targetDate
+        )
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        return true
+    }
 }
 
 // MARK: - Child Tasks View
@@ -1409,6 +1467,7 @@ struct ChildTasksView: View {
         TaskRow(
             task: task,
             currentUserName: authManager.userName,
+            canActOnBehalf: true,
             theme: theme,
             onApprove: {
                 if !task.canComplete {
@@ -1456,8 +1515,14 @@ struct ChildTasksView: View {
 
                                 ForEach(group.tasks) { task in
                                     childTaskRowView(task)
+                                        .draggable(TaskTransfer(id: task.id))
                                 }
                             }
+                            .dropDestination(for: TaskTransfer.self) { items, _ in
+                                guard let transfer = items.first,
+                                      let refDate = group.tasks.first?.targetDate else { return false }
+                                return childHandleTaskDrop(taskId: transfer.id, toDate: refDate)
+                            } isTargeted: { _ in }
                         } else {
                             GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
@@ -1837,6 +1902,21 @@ struct ChildTasksView: View {
         }
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
+
+    private func childHandleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
+        guard let task = allTasks.first(where: { $0.id == taskId }) else { return false }
+        rescheduleTask(task, toSameDayAs: referenceDate)
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        notificationManager.scheduleTaskReminder(
+            taskId: task.id,
+            taskName: task.name,
+            assignedTo: task.assignedTo,
+            dueDate: task.targetDate
+        )
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        return true
+    }
 }
 
 // MARK: - Parent Expanded Task Alerts
@@ -1932,10 +2012,12 @@ struct TaskRow: View {
     @Bindable var task: Item
     var showAssignee: Bool = false
     var currentUserName: String = ""
+    var canActOnBehalf: Bool = false
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onApprove: (() -> Void)?
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
+    @State private var showDetail = false
 
     private var statusColor: Color {
         if task.isApproved { return .green }
@@ -1953,10 +2035,15 @@ struct TaskRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white.opacity(0.25))
+                .frame(width: 20)
+
             Button {
                 guard task.isOpen || task.isInReview else { return }
                 let isMyTask = currentUserName.isEmpty || task.assignedTo == currentUserName
-                guard isMyTask || task.isInReview else { return }
+                guard isMyTask || task.isInReview || canActOnBehalf else { return }
                 onApprove?()
             } label: {
                 VStack(spacing: 3) {
@@ -2048,6 +2135,8 @@ struct TaskRow: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { showDetail = true }
 
             Spacer()
 
@@ -2101,6 +2190,204 @@ struct TaskRow: View {
             }
             .tint(calmAccent)
         }
+        .sheet(isPresented: $showDetail) {
+            TaskDetailView(
+                task: task,
+                theme: theme,
+                canEdit: onEdit != nil,
+                canDelete: onDelete != nil,
+                onEdit: { showDetail = false; onEdit?() },
+                onDelete: { showDetail = false; onDelete?() }
+            )
+            .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+// MARK: - Task Detail View
+
+struct TaskDetailView: View {
+    let task: Item
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var canEdit: Bool = false
+    var canDelete: Bool = false
+    var onEdit: (() -> Void)?
+    var onDelete: (() -> Void)?
+    @Environment(\.dismiss) private var dismiss
+
+    private var statusText: String {
+        if task.isApproved { return "Approved" }
+        if task.isInReview { return "In Review" }
+        if task.isMissed { return "Missed" }
+        return "Open"
+    }
+
+    private var statusColor: Color {
+        if task.isApproved { return .green }
+        if task.isInReview { return .orange }
+        if task.isMissed { return .red }
+        return calmAccent
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Spacer().frame(height: 8)
+
+                        // Status badge
+                        HStack {
+                            Image(systemName: task.isApproved ? "checkmark.circle.fill" : task.isInReview ? "clock.fill" : task.isMissed ? "xmark.circle.fill" : "circle")
+                                .font(.title2)
+                                .foregroundStyle(statusColor)
+                            Text(statusText)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(statusColor)
+                            Spacer()
+                            if task.isRecurring {
+                                Label("Recurring", systemImage: "repeat")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(.white.opacity(0.1), in: Capsule())
+                            }
+                        }
+
+                        // Task name
+                        detailRow(icon: "text.alignleft", label: "Task Name") {
+                            Text(task.name)
+                                .font(theme.font(.body).weight(.medium))
+                                .foregroundStyle(.white)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        // Due date
+                        detailRow(icon: "calendar", label: "Due Date") {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(task.dueDateLabel)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(.white)
+                                Text(task.targetDate, format: .dateTime.month(.wide).day().year().hour().minute())
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                        }
+
+                        // Assigned to
+                        if !task.assignedTo.isEmpty {
+                            detailRow(icon: "person.fill", label: "Assigned To") {
+                                Text(task.assignedTo)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+
+                        // Reward
+                        if task.reward > 0 {
+                            detailRow(icon: "star.circle.fill", label: "Reward") {
+                                CoinDisplay(count: Int(task.reward), earned: task.isApproved)
+                            }
+                        }
+
+                        // Gift
+                        if task.hasGift {
+                            detailRow(icon: "gift.fill", label: "Surprise Gift") {
+                                Text(task.giftRevealed ? task.giftText : "Hidden until approved")
+                                    .font(.body)
+                                    .foregroundStyle(task.giftRevealed ? .white : .white.opacity(0.5))
+                                    .italic(!task.giftRevealed)
+                            }
+                        }
+
+                        // Created by
+                        if !task.createdBy.isEmpty {
+                            detailRow(icon: "person.badge.plus", label: "Created By") {
+                                Text(task.createdBy)
+                                    .font(.body)
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+
+                        // Actions
+                        if canEdit || canDelete {
+                            HStack(spacing: 16) {
+                                if canEdit {
+                                    Button {
+                                        onEdit?()
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(calmAccent.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                                            .foregroundStyle(.white)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(calmAccent.opacity(0.4), lineWidth: 1)
+                                            )
+                                    }
+                                }
+
+                                if canDelete {
+                                    Button {
+                                        onDelete?()
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(.red.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                                            .foregroundStyle(.red)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(.red.opacity(0.3), lineWidth: 1)
+                                            )
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .navigationTitle("Task Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func detailRow<Content: View>(icon: String, label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -2210,7 +2497,7 @@ struct AddTaskView: View {
                                         .font(.caption.weight(.medium))
                                         .foregroundStyle(.white.opacity(0.7))
                                     Spacer()
-                                    Text(subscriptionManager.tier.rawValue.capitalized)
+                                    Text(subscriptionManager.tier.displayName)
                                         .font(.caption2.weight(.bold))
                                         .foregroundStyle(.white.opacity(0.5))
                                         .padding(.horizontal, 8)
@@ -2459,7 +2746,7 @@ struct AddTaskView: View {
         } message: {
             if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) {
                 if let limit = subscriptionManager.maxTasksPerMonth {
-                    Text("You've used all \(limit) tasks for this month on the \(subscriptionManager.tier.rawValue.capitalized) plan. Upgrade your plan for more tasks, or wait until next month.")
+                    Text("You've used all \(limit) tasks for this month on the \(subscriptionManager.tier.displayName) plan. Upgrade your plan for more tasks, or wait until next month.")
                 }
             } else {
                 Text("You're creating tasks too quickly. Please wait a moment and try again.")
@@ -3365,7 +3652,7 @@ struct ChildrenManagementView: View {
                     Text("Member limit reached")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text("Your \(subscriptionManager.tier.rawValue.capitalized) plan allows up to \(subscriptionManager.maxMembers) members.")
+                    Text("Your \(subscriptionManager.tier.displayName) plan allows up to \(subscriptionManager.maxMembers) members.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                 }
@@ -4210,7 +4497,7 @@ struct SubscriptionView: View {
                 period: "/month",
                 features: [
                     PlanFeature(text: "Up to 10 family members", included: true),
-                    PlanFeature(text: "Unlimited tasks", included: true),
+                    PlanFeature(text: "999 tasks per month", included: true),
                     PlanFeature(text: "Unlimited pickup requests", included: true),
                     PlanFeature(text: "All notifications", included: true),
                     PlanFeature(text: "Priority support", included: true),
@@ -4276,7 +4563,7 @@ struct SubscriptionView: View {
                 Text("Current Plan")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.7))
-                Text(subscriptionManager.tier.rawValue.capitalized)
+                Text(subscriptionManager.tier.displayName)
                     .font(.headline)
                     .foregroundStyle(.white)
             }

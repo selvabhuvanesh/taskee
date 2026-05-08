@@ -916,8 +916,14 @@ struct ChildDashboardView: View {
 
                                 ForEach(group.tasks) { task in
                                     childTaskRow(task: task)
+                                        .draggable(TaskTransfer(id: task.id))
                                 }
                             }
+                            .dropDestination(for: TaskTransfer.self) { items, _ in
+                                guard let transfer = items.first,
+                                      let refDate = group.tasks.first?.targetDate else { return false }
+                                return dashboardHandleTaskDrop(taskId: transfer.id, toDate: refDate)
+                            } isTargeted: { _ in }
                         } else {
                             GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
@@ -936,6 +942,21 @@ struct ChildDashboardView: View {
             }
             refreshUnreadCount()
         }
+    }
+
+    private func dashboardHandleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
+        guard let task = allTasks.first(where: { $0.id == taskId }) else { return false }
+        rescheduleTask(task, toSameDayAs: referenceDate)
+        notificationManager.cancelTaskReminder(taskId: task.id)
+        notificationManager.scheduleTaskReminder(
+            taskId: task.id,
+            taskName: task.name,
+            assignedTo: task.assignedTo,
+            dueDate: task.targetDate
+        )
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        return true
     }
 
     private func scheduleStickyNote(from tips: [String]) {

@@ -25,6 +25,14 @@ final class SubscriptionManager {
     enum Tier: String, Comparable {
         case free, family, pro
 
+        var displayName: String {
+            switch self {
+            case .free: return "Free"
+            case .family: return "Basic"
+            case .pro: return "Pro"
+            }
+        }
+
         static func < (lhs: Tier, rhs: Tier) -> Bool {
             let order: [Tier] = [.free, .family, .pro]
             return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
@@ -49,7 +57,7 @@ final class SubscriptionManager {
         switch tier {
         case .free:   return 50
         case .family: return 350
-        case .pro:    return nil
+        case .pro:    return 999
         }
     }
 

@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 import SwiftData
 import UIKit
+import UniformTypeIdentifiers
 
 @Model
 final class Item {
@@ -69,6 +70,18 @@ final class Item {
         } else {
             return targetDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
         }
+    }
+}
+
+extension UTType {
+    static let taskItem = UTType(exportedAs: "com.taskee.taskitem")
+}
+
+struct TaskTransfer: Codable, Transferable {
+    let id: UUID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .taskItem)
     }
 }
 
