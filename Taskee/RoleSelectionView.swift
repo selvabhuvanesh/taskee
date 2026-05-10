@@ -69,7 +69,7 @@ struct RoleSelectionView: View {
                     .font(.system(size: 52))
                     .foregroundStyle(calmAccent)
 
-                Text("Welcome to Taskee!")
+                Text("Welcome to taskoot!")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
 
@@ -99,7 +99,7 @@ struct RoleSelectionView: View {
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
 
-                Text("A parent or guardian must verify and consent before a child can use Taskee.")
+                Text("A parent or guardian must verify and consent before a child can use taskoot.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)

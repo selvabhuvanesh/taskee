@@ -1195,9 +1195,9 @@ struct FiveMinuteDatePicker: UIViewRepresentable {
 // MARK: - App Share
 
 let appStoreURL = URL(string: "https://apps.apple.com/app/taskee/id0000000000")!
-let parentShareMessage = "Hey! Taskee has been a game-changer for our family — my kids actually WANT to do their chores now. They earn coins, redeem real rewards, and it's taught them so much about responsibility. Seriously the best parenting hack I've found. You've gotta try it!"
+let parentShareMessage = "Hey! taskoot has been a game-changer for our family — my kids actually WANT to do their chores now. They earn coins, redeem real rewards, and it's taught them so much about responsibility. Seriously the best parenting hack I've found. You've gotta try it!"
 
-let childShareMessage = "Okay so my parents got this app called Taskee and it's actually really fun?? You get coins every time you finish a task and you can save up for REAL rewards like toys or movie nights. It turns chores into a game — tell your parents to download it!"
+let childShareMessage = "Okay so my parents got this app called taskoot and it's actually really fun?? You get coins every time you finish a task and you can save up for REAL rewards like toys or movie nights. It turns chores into a game — tell your parents to download it!"
 
 let privacyPolicyURL = URL(string: "https://selvabhuvanesh.github.io/taskee/privacy")!
 let termsOfUseURL = URL(string: "https://selvabhuvanesh.github.io/taskee/terms")!
@@ -1229,7 +1229,7 @@ class ShareTextWithLink: NSObject, UIActivityItemSource {
     }
 
     func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
-        return "Check out Taskee!"
+        return "Check out taskoot!"
     }
 }
 

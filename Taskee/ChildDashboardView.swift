@@ -45,6 +45,8 @@ struct ChildDashboardView: View {
     @State private var stickyNote: (message: String, color: Color)?
     @State private var unreadNotifCount = 0
     @State private var taskToDelete: Item?
+    @State private var missedTaskToHandle: Item?
+    @State private var showMissedOptions = false
     @State private var giftTaskToReveal: Item?
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
@@ -118,13 +120,27 @@ struct ChildDashboardView: View {
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
         let grouped = Dictionary(grouping: myTasks) { $0.dueDateLabel }
-        return grouped
+        let sorted = grouped
             .map { (key: $0.key, tasks: $0.value) }
             .sorted { first, second in
                 guard let d1 = first.tasks.first?.targetDate,
                       let d2 = second.tasks.first?.targetDate else { return false }
                 return d1 < d2
             }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let past = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) < startOfToday }
+        let current = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday }
+        return past + current
+    }
+
+    private var childDashPastTaskCount: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return myTasks.filter { $0.targetDate < startOfToday }.count
+    }
+
+    private var childDashTodayGroupIndex: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
     }
 
     private var childCalendarDayTasks: [Item] {
@@ -464,6 +480,19 @@ struct ChildDashboardView: View {
                 )
             }
         }
+        .confirmationDialog("This task was missed", isPresented: $showMissedOptions, titleVisibility: .visible) {
+            Button("Reopen Task") {
+                missedTaskToHandle?.status = "open"
+                missedTaskToHandle = nil
+            }
+            Button("Mark as Closed") {
+                missedTaskToHandle?.status = "approved"
+                missedTaskToHandle = nil
+            }
+            Button("Cancel", role: .cancel) { missedTaskToHandle = nil }
+        } message: {
+            Text("Would you like to reopen this task or close it?")
+        }
     }
 
     private func checkRecurringExtension() {
@@ -657,7 +686,7 @@ struct ChildDashboardView: View {
                 ZStack {
                     Image(systemName: "car.fill")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .offset(x: -2, y: -4)
                     Image(systemName: "clock.fill")
                         .font(.system(size: 14, weight: .bold))
@@ -713,7 +742,7 @@ struct ChildDashboardView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
                 .background(calmAccent, in: Circle())
         }
@@ -727,7 +756,7 @@ struct ChildDashboardView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(.purple, in: Circle())
 
@@ -736,7 +765,7 @@ struct ChildDashboardView: View {
                 if unread > 0 {
                     Text("\(unread)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -753,7 +782,7 @@ struct ChildDashboardView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
@@ -761,7 +790,7 @@ struct ChildDashboardView: View {
                 if unboughtCount > 0 {
                     Text("\(unboughtCount)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -956,34 +985,51 @@ struct ChildDashboardView: View {
     }
 
     private var taskList: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                LazyVStack(spacing: 12) {
-                    ForEach(groupedTasks, id: \.key) { group in
-                        if isExpanded {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(group.key)
-                                    .font(childTheme.font(.subheadline).weight(.semibold))
-                                    .foregroundStyle(.primary.opacity(0.6))
-                                    .padding(.leading, 4)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(spacing: 12) {
+                        ForEach(Array(groupedTasks.enumerated()), id: \.element.key) { index, group in
+                            if index == childDashTodayGroupIndex && childDashPastTaskCount > 0 {
+                                PastTasksDivider(count: childDashPastTaskCount)
+                            }
 
-                                ForEach(group.tasks) { task in
-                                    childTaskRow(task: task)
-                                        .draggable(TaskTransfer(id: task.id))
+                            VStack(alignment: .leading, spacing: 8) {
+                                if isExpanded {
+                                    Text(group.key)
+                                        .font(childTheme.font(.subheadline).weight(.semibold))
+                                        .foregroundStyle(.primary.opacity(0.6))
+                                        .padding(.leading, 4)
+
+                                    ForEach(group.tasks) { task in
+                                        childTaskRow(task: task)
+                                            .draggable(TaskTransfer(id: task.id))
+                                    }
+                                } else {
+                                    GroupCard(dateLabel: group.key, count: group.tasks.count)
                                 }
                             }
+                            .id(group.key)
                             .dropDestination(for: TaskTransfer.self) { items, _ in
                                 guard let transfer = items.first,
                                       let refDate = group.tasks.first?.targetDate else { return false }
                                 return dashboardHandleTaskDrop(taskId: transfer.id, toDate: refDate)
                             } isTargeted: { _ in }
-                        } else {
-                            GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                }
+            }
+            .onChange(of: showAll) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                }
             }
         }
         .refreshable {
@@ -1045,6 +1091,11 @@ struct ChildDashboardView: View {
     private func childTaskRow(task: Item) -> some View {
         HStack(spacing: 14) {
             Button {
+                if task.isMissed {
+                    missedTaskToHandle = task
+                    showMissedOptions = true
+                    return
+                }
                 guard task.isOpen else { return }
                 if !task.canComplete {
                     tooEarlyTask = task
@@ -1088,14 +1139,14 @@ struct ChildDashboardView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(!task.isOpen)
+            .disabled(task.isApproved)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
                     .font(childTheme.font(.body))
                     .lineLimit(1)
-                    .strikethrough(task.isApproved || task.isMissed)
-                    .foregroundStyle(task.isApproved || task.isMissed ? .white.opacity(0.35) : .white)
+                    .strikethrough(task.isApproved)
+                    .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
 
                 HStack(spacing: 6) {
                     if task.isMissed {
@@ -1134,6 +1185,7 @@ struct ChildDashboardView: View {
                             .symbolEffect(.pulse, options: .repeating, isActive: task.isApproved && !task.giftRevealed)
                     }
                 }
+                .lineLimit(1)
             }
 
             Spacer()
@@ -1174,7 +1226,7 @@ struct ChildDashboardView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
-        .opacity(task.isApproved || task.isMissed ? 0.7 : 1)
+        .opacity(task.isApproved ? 0.7 : 1)
         .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)

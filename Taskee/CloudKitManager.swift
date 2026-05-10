@@ -159,7 +159,7 @@ final class CloudKitManager {
 
             let share = CKShare(recordZoneID: zoneID)
             share.publicPermission = .readWrite
-            share[CKShare.SystemFieldKey.title] = "Taskee Family"
+            share[CKShare.SystemFieldKey.title] = "taskoot Family"
 
             try await privateDatabase.save(share)
             if let url = share.url {
@@ -183,7 +183,7 @@ final class CloudKitManager {
 
         let share = CKShare(recordZoneID: zoneID)
         share.publicPermission = .readWrite
-        share[CKShare.SystemFieldKey.title] = "Taskee Family"
+        share[CKShare.SystemFieldKey.title] = "taskoot Family"
 
         do {
             try await privateDatabase.save(share)
@@ -631,7 +631,7 @@ final class CloudKitManager {
                 let end = min(start + batchSize, savedRecords.count)
                 let saveBatch = Array(savedRecords[start..<end])
                 let deleteBatch = Array(deleteIDs[start..<end])
-                try await db.modifyRecords(saving: saveBatch, deleting: deleteBatch)
+                _ = try await db.modifyRecords(saving: saveBatch, deleting: deleteBatch)
             }
 
             for task in toArchive {
@@ -1116,12 +1116,12 @@ final class CloudKitManager {
         do {
             let (results, _) = try await database.records(matching: query)
             for (recordID, _) in results {
-                try? await database.deleteRecord(withID: recordID)
+                _ = try? await database.deleteRecord(withID: recordID)
             }
         } catch { }
 
         let legacyID = CKRecord.ID(recordName: idStr)
-        try? await database.deleteRecord(withID: legacyID)
+        _ = try? await database.deleteRecord(withID: legacyID)
 
         pending.remove(idStr)
         UserDefaults.standard.set(Array(pending), forKey: Self.pendingShoppingDeletesKey)
@@ -1207,7 +1207,7 @@ final class CloudKitManager {
         }
 
         for dupID in duplicateRecordIDs {
-            try? await database.deleteRecord(withID: dupID)
+            _ = try? await database.deleteRecord(withID: dupID)
         }
 
         let descriptor = FetchDescriptor<ShoppingItem>()
@@ -1814,7 +1814,7 @@ final class CloudKitManager {
             for start in stride(from: 0, to: recordsToSave.count, by: batchSize) {
                 let end = min(start + batchSize, recordsToSave.count)
                 let batch = Array(recordsToSave[start..<end])
-                try await db.modifyRecords(saving: batch, deleting: [], savePolicy: .allKeys)
+                _ = try await db.modifyRecords(saving: batch, deleting: [], savePolicy: .allKeys)
             }
             UserDefaults.standard.set(true, forKey: key)
             print("[CloudKit] Migration complete: \(recordsToSave.count) records copied to private zone (public records kept as fallback)")

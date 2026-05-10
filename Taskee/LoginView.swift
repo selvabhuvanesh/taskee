@@ -54,7 +54,7 @@ struct LoginView: View {
                 .font(.system(size: 72))
                 .foregroundStyle(calmAccent)
 
-            Text("Taskee")
+            Text("taskoot")
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(.white)
 

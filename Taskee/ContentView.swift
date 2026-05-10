@@ -305,13 +305,27 @@ struct ContentView: View {
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
         let grouped = Dictionary(grouping: filteredTasks) { $0.dueDateLabel }
-        return grouped
+        let sorted = grouped
             .map { (key: $0.key, tasks: $0.value) }
             .sorted { first, second in
                 guard let d1 = first.tasks.first?.targetDate,
                       let d2 = second.tasks.first?.targetDate else { return false }
                 return d1 < d2
             }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let past = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) < startOfToday }
+        let current = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday }
+        return past + current
+    }
+
+    private var pastTaskCount: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return filteredTasks.filter { $0.targetDate < startOfToday }.count
+    }
+
+    private var todayGroupIndex: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
     }
 
     var body: some View {
@@ -332,34 +346,46 @@ struct ContentView: View {
 
 
 
-                    ScrollView {
-                        if showCalendarView {
-                            VStack(spacing: 0) {
-                                viewModeToggle
-                                WeekCalendarStrip(
-                                    selectedDate: $selectedCalendarDate,
-                                    tasks: filteredTasks,
-                                    theme: parentTheme
-                                )
-                                if calendarDayTasks.isEmpty {
-                                    calendarEmptyState
-                                } else {
-                                    calendarTaskList
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            if showCalendarView {
+                                VStack(spacing: 0) {
+                                    viewModeToggle
+                                    WeekCalendarStrip(
+                                        selectedDate: $selectedCalendarDate,
+                                        tasks: filteredTasks,
+                                        theme: parentTheme
+                                    )
+                                    if calendarDayTasks.isEmpty {
+                                        calendarEmptyState
+                                    } else {
+                                        calendarTaskList
+                                    }
+                                }
+                            } else if filteredTasks.isEmpty {
+                                VStack(spacing: 0) {
+                                    viewModeToggle
+                                    emptyState
+                                }
+                            } else {
+                                VStack(spacing: 0) {
+                                    viewModeToggle
+                                    if isExpanded {
+                                        expandedListContent
+                                    } else {
+                                        groupListContent
+                                    }
                                 }
                             }
-                        } else if filteredTasks.isEmpty {
-                            VStack(spacing: 0) {
-                                viewModeToggle
-                                emptyState
+                        }
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                withAnimation { proxy.scrollTo("Today", anchor: .top) }
                             }
-                        } else {
-                            VStack(spacing: 0) {
-                                viewModeToggle
-                                if isExpanded {
-                                    expandedListContent
-                                } else {
-                                    groupListContent
-                                }
+                        }
+                        .onChange(of: showOpenOnly) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                withAnimation { proxy.scrollTo("Today", anchor: .top) }
                             }
                         }
                     }
@@ -649,7 +675,6 @@ struct ContentView: View {
                     assignedTo: group.assignedTo,
                     dueDate: date
                 )
-                let snapshot = CloudKitManager.TaskSnapshot(task)
                 let familyCode = authManager.familyCode
                 Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 totalCreated += 1
@@ -711,7 +736,7 @@ struct ContentView: View {
                                         .font(.system(size: 9, weight: .semibold))
                                         .fixedSize()
                                 }
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(.orange, in: Capsule())
@@ -756,7 +781,7 @@ struct ContentView: View {
                                         .font(.system(size: 9, weight: .semibold))
                                         .fixedSize()
                                 }
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(.orange, in: Capsule())
@@ -942,7 +967,11 @@ struct ContentView: View {
 
     private var expandedListContent: some View {
         LazyVStack(spacing: 12) {
-            ForEach(groupedTasks, id: \.key) { group in
+            ForEach(Array(groupedTasks.enumerated()), id: \.element.key) { index, group in
+                if index == todayGroupIndex && pastTaskCount > 0 {
+                    PastTasksDivider(count: pastTaskCount)
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text(group.key)
                         .font(parentTheme.font(.subheadline).weight(.semibold))
@@ -986,6 +1015,7 @@ struct ContentView: View {
                         .draggable(TaskTransfer(id: task.id))
                     }
                 }
+                .id(group.key)
                 .dropDestination(for: TaskTransfer.self) { items, _ in
                     guard let transfer = items.first,
                           let refDate = group.tasks.first?.targetDate else { return false }
@@ -1001,7 +1031,11 @@ struct ContentView: View {
 
     private var groupListContent: some View {
         LazyVStack(spacing: 12) {
-            ForEach(groupedTasks, id: \.key) { group in
+            ForEach(Array(groupedTasks.enumerated()), id: \.element.key) { index, group in
+                if index == todayGroupIndex && pastTaskCount > 0 {
+                    PastTasksDivider(count: pastTaskCount)
+                }
+
                 NavigationLink(destination: DateTasksView(
                     dateLabel: group.key,
                     tasks: group.tasks,
@@ -1011,6 +1045,7 @@ struct ContentView: View {
                 )) {
                     GroupCard(dateLabel: group.key, count: group.tasks.count)
                 }
+                .id(group.key)
             }
         }
         .padding(.horizontal, 16)
@@ -1056,7 +1091,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
                 .background(calmAccent, in: Circle())
         }
@@ -1070,7 +1105,7 @@ struct ContentView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(.purple, in: Circle())
 
@@ -1079,7 +1114,7 @@ struct ContentView: View {
                 if unread > 0 {
                     Text("\(unread)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -1098,7 +1133,7 @@ struct ContentView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
@@ -1106,7 +1141,7 @@ struct ContentView: View {
                 if unboughtCount > 0 {
                     Text("\(unboughtCount)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -1144,6 +1179,7 @@ struct GroupCard: View {
                 Text(dateLabel)
                     .font(.headline)
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
 
                 Text("\(count) task\(count == 1 ? "" : "s")")
                     .font(.subheadline)
@@ -1162,6 +1198,32 @@ struct GroupCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Past Tasks Divider
+
+struct PastTasksDivider: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(.primary.opacity(0.15))
+                .frame(height: 1)
+            HStack(spacing: 4) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("\(count) past task\(count == 1 ? "" : "s")")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(.primary.opacity(0.4))
+            .fixedSize()
+            Rectangle()
+                .fill(.primary.opacity(0.15))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 8)
     }
 }
 
@@ -1212,13 +1274,27 @@ struct DateTasksView: View {
 
     private var dateGroupedTasks: [(key: String, tasks: [Item])] {
         let grouped = Dictionary(grouping: filteredTasks) { $0.dueDateLabel }
-        return grouped
+        let sorted = grouped
             .map { (key: $0.key, tasks: $0.value) }
             .sorted { first, second in
                 guard let d1 = first.tasks.first?.targetDate,
                       let d2 = second.tasks.first?.targetDate else { return false }
                 return d1 < d2
             }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let past = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) < startOfToday }
+        let current = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday }
+        return past + current
+    }
+
+    private var datePastTaskCount: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return filteredTasks.filter { $0.targetDate < startOfToday }.count
+    }
+
+    private var dateTodayGroupIndex: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return dateGroupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? dateGroupedTasks.count
     }
 
     private var dateCalendarDayTasks: [Item] {
@@ -1304,36 +1380,111 @@ struct DateTasksView: View {
     }
 
     private var taskListContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                LazyVStack(spacing: isExpanded ? 10 : 12) {
-                    ForEach(dateGroupedTasks, id: \.key) { group in
-                        if isExpanded {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(group.key)
-                                    .font(theme.font(.subheadline).weight(.semibold))
-                                    .foregroundStyle(.primary.opacity(0.6))
-                                    .padding(.leading, 4)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(spacing: isExpanded ? 10 : 12) {
+                        ForEach(Array(dateGroupedTasks.enumerated()), id: \.element.key) { index, group in
+                            if index == dateTodayGroupIndex && datePastTaskCount > 0 {
+                                PastTasksDivider(count: datePastTaskCount)
+                            }
 
-                                ForEach(group.tasks) { task in
-                                    dateTaskRowView(task)
-                                        .draggable(TaskTransfer(id: task.id))
+                            VStack(alignment: .leading, spacing: 8) {
+                                if isExpanded {
+                                    Text(group.key)
+                                        .font(theme.font(.subheadline).weight(.semibold))
+                                        .foregroundStyle(.primary.opacity(0.6))
+                                        .padding(.leading, 4)
+
+                                    ForEach(group.tasks) { task in
+                                        dateTaskRowView(task)
+                                            .draggable(TaskTransfer(id: task.id))
+                                    }
+                                } else {
+                                    GroupCard(dateLabel: group.key, count: group.tasks.count)
                                 }
                             }
+                            .id(group.key)
                             .dropDestination(for: TaskTransfer.self) { items, _ in
                                 guard let transfer = items.first,
                                       let refDate = group.tasks.first?.targetDate else { return false }
                                 return dateHandleTaskDrop(taskId: transfer.id, toDate: refDate)
                             } isTargeted: { _ in }
-                        } else {
-                            GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                }
+            }
+            .onChange(of: showOpenOnly) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                }
             }
         }
+    }
+
+    private var memberHeader: some View {
+        HStack(spacing: 14) {
+            AvatarView(avatarId: otherParent?.avatar ?? "", size: 56)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(memberName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Text("\(liveTasks.filter { $0.isApproved }.count)/\(liveTasks.count) completed")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary.opacity(0.5))
+            }
+
+            Spacer()
+
+            if !todayOpenTasks.isEmpty {
+                Button {
+                    sendMemberReminder()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 10))
+                        Text("Remind (\(todayOpenTasks.count) today)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .fixedSize()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.orange, in: Capsule())
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var todayOpenTasks: [Item] {
+        liveTasks.filter { $0.isOpen && Calendar.current.isDateInToday($0.targetDate) }
+    }
+
+    @State private var showMemberReminderSent = false
+
+    private func sendMemberReminder() {
+        let now = Date()
+        let familyCode = authManager.familyCode
+        for task in todayOpenTasks {
+            task.lastRemindedAt = now
+        }
+        Task {
+            for task in todayOpenTasks {
+                await cloudKitManager.pushTask(task, familyCode: familyCode)
+            }
+        }
+        showMemberReminderSent = true
     }
 
     var body: some View {
@@ -1342,6 +1493,10 @@ struct DateTasksView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                if !memberName.isEmpty {
+                    memberHeader
+                }
+
                 dateViewModeToggle
 
                 if showCalendarView {
@@ -1395,7 +1550,7 @@ struct DateTasksView: View {
                         .padding(.horizontal, 24)
                         .padding(.vertical, 10)
                         .background(.primary.opacity(0.2), in: Capsule())
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                 }
                 .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
                 .padding(.bottom, 16)
@@ -1456,6 +1611,11 @@ struct DateTasksView: View {
             if let task = tooEarlyTask {
                 Text("This task is scheduled for \(task.dueDateLabel). It can be completed when the day arrives!")
             }
+        }
+        .alert("Reminder Sent!", isPresented: $showMemberReminderSent) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("\(memberName) has been reminded about today's tasks.")
         }
         .overlay {
             CelebrationOverlay(
@@ -1735,13 +1895,27 @@ struct ChildTasksView: View {
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
         let grouped = Dictionary(grouping: filteredTasks) { $0.dueDateLabel }
-        return grouped
+        let sorted = grouped
             .map { (key: $0.key, tasks: $0.value) }
             .sorted { first, second in
                 guard let d1 = first.tasks.first?.targetDate,
                       let d2 = second.tasks.first?.targetDate else { return false }
                 return d1 < d2
             }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let past = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) < startOfToday }
+        let current = sorted.filter { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday }
+        return past + current
+    }
+
+    private var childPastTaskCount: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return filteredTasks.filter { $0.targetDate < startOfToday }.count
+    }
+
+    private var childTodayGroupIndex: Int {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
     }
 
     private var childViewModeToggle: some View {
@@ -1820,12 +1994,17 @@ struct ChildTasksView: View {
     }
 
     private var childTaskListContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                LazyVStack(spacing: isExpanded ? 10 : 12) {
-                    ForEach(groupedTasks, id: \.key) { group in
-                        if isExpanded {
-                            VStack(alignment: .leading, spacing: 8) {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(spacing: isExpanded ? 10 : 12) {
+                        ForEach(Array(groupedTasks.enumerated()), id: \.element.key) { index, group in
+                            if index == childTodayGroupIndex && childPastTaskCount > 0 {
+                                PastTasksDivider(count: childPastTaskCount)
+                            }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            if isExpanded {
                                 Text(group.key)
                                     .font(theme.font(.subheadline).weight(.semibold))
                                     .foregroundStyle(.primary.opacity(0.6))
@@ -1835,20 +2014,32 @@ struct ChildTasksView: View {
                                     childTaskRowView(task)
                                         .draggable(TaskTransfer(id: task.id))
                                 }
+                            } else {
+                                GroupCard(dateLabel: group.key, count: group.tasks.count)
                             }
-                            .dropDestination(for: TaskTransfer.self) { items, _ in
-                                guard let transfer = items.first,
-                                      let refDate = group.tasks.first?.targetDate else { return false }
-                                return childHandleTaskDrop(taskId: transfer.id, toDate: refDate)
-                            } isTargeted: { _ in }
-                        } else {
-                            GroupCard(dateLabel: group.key, count: group.tasks.count)
                         }
+                        .id(group.key)
+                        .dropDestination(for: TaskTransfer.self) { items, _ in
+                            guard let transfer = items.first,
+                                  let refDate = group.tasks.first?.targetDate else { return false }
+                            return childHandleTaskDrop(taskId: transfer.id, toDate: refDate)
+                        } isTargeted: { _ in }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
             }
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation { proxy.scrollTo("Today", anchor: .top) }
+            }
+        }
+        .onChange(of: showOpenOnly) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation { proxy.scrollTo("Today", anchor: .top) }
+            }
+        }
         }
     }
 
@@ -1907,7 +2098,7 @@ struct ChildTasksView: View {
                 } label: {
                     Label("Add Task", systemImage: "plus.circle.fill")
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(calmAccent, in: RoundedRectangle(cornerRadius: 16))
@@ -2102,7 +2293,7 @@ struct ChildTasksView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .fixedSize()
                         }
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(.orange, in: Capsule())
@@ -2300,7 +2491,6 @@ struct ParentExpandedTaskAlerts: ViewModifier {
             ) {
                 if let task = taskToDelete {
                     Button("Delete", role: .destructive) {
-                        let familyCode = authManager.familyCode
                         Task { await cloudKitManager.deleteRemoteTasks([task.id]) }
                         notificationManager.cancelTaskReminder(taskId: task.id)
                         modelContext.delete(task)
@@ -2365,6 +2555,7 @@ struct TaskRow: View {
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
     @State private var showDetail = false
+    @State private var showMissedOptions = false
 
     private var statusColor: Color {
         if task.isApproved { return .green }
@@ -2388,6 +2579,10 @@ struct TaskRow: View {
                 .frame(width: 20)
 
             Button {
+                if task.isMissed {
+                    showMissedOptions = true
+                    return
+                }
                 guard task.isOpen || task.isInReview else { return }
                 let isMyTask = currentUserName.isEmpty || task.assignedTo == currentUserName
                 guard isMyTask || task.isInReview || canActOnBehalf else { return }
@@ -2428,14 +2623,14 @@ struct TaskRow: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(task.isApproved || task.isMissed)
+            .disabled(task.isApproved)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
                     .font(theme.font(.body))
                     .lineLimit(1)
-                    .strikethrough(task.isApproved || task.isMissed)
-                    .foregroundStyle(Color.primary.opacity(task.isApproved || task.isMissed ? 0.35 : 1))
+                    .strikethrough(task.isApproved)
+                    .foregroundStyle(Color.primary.opacity(task.isApproved ? 0.35 : 1))
 
                 HStack(spacing: 6) {
                     if task.isMissed {
@@ -2479,8 +2674,10 @@ struct TaskRow: View {
                         Label(task.assignedTo, systemImage: "person.fill")
                             .font(.caption)
                             .foregroundStyle(calmAccent.opacity(0.8))
+                            .lineLimit(1)
                     }
                 }
+                .lineLimit(1)
             }
             .contentShape(Rectangle())
             .onTapGesture { showDetail = true }
@@ -2521,7 +2718,7 @@ struct TaskRow: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
-        .opacity(task.isApproved || task.isMissed ? 0.7 : 1)
+        .opacity(task.isApproved ? 0.7 : 1)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 onDelete?()
@@ -2547,6 +2744,18 @@ struct TaskRow: View {
                 onDelete: { showDetail = false; onDelete?() }
             )
             .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog("This task was missed", isPresented: $showMissedOptions, titleVisibility: .visible) {
+            Button("Reopen & Replan") {
+                task.status = "open"
+                onEdit?()
+            }
+            Button("Mark as Closed") {
+                task.status = "approved"
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Would you like to reopen this task to replan it, or close it?")
         }
     }
 }
@@ -3851,7 +4060,7 @@ struct ChildrenManagementView: View {
                 .foregroundStyle(.primary.opacity(0.35))
 
             ShareLink(
-                item: "Join my family on Taskee! Use invite code: \(authManager.familyCode)"
+                item: "Join my family on taskoot! Use invite code: \(authManager.familyCode)"
             ) {
                 Label("Share Invite", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.medium))
@@ -4391,7 +4600,7 @@ struct ParentOnboardingView: View {
                 .multilineTextAlignment(.center)
 
             ShareLink(
-                item: "Join my family on Taskee! Use invite code: \(authManager.familyCode)"
+                item: "Join my family on taskoot! Use invite code: \(authManager.familyCode)"
             ) {
                 Label("Share Invite", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.medium))
@@ -4959,7 +5168,7 @@ struct SubscriptionView: View {
             }
 
             if subscriptionManager.tier == .free && subscriptionManager.isTrialExpired {
-                Text("Your free trial has expired. Upgrade to continue using Taskee.")
+                Text("Your free trial has expired. Upgrade to continue using taskoot.")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .multilineTextAlignment(.leading)
@@ -5278,7 +5487,7 @@ struct NotificationCenterView: View {
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
 
-        withAnimation { acknowledgedPickups.insert(notif.id) }
+        _ = withAnimation { acknowledgedPickups.insert(notif.id) }
     }
 
     private func notificationRow(_ notif: NotificationManager.LocalNotification) -> some View {

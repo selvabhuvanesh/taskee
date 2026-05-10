@@ -267,9 +267,9 @@ struct TaskeeApp: App {
         let allTasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
         let now = Date()
 
+        let oneWeekAgo = Calendar.current.date(byAdding: .day, value: -7, to: now)!
         let missed = allTasks.filter { task in
-            task.isOpen && !task.isArchived && task.targetDate < now
-                && !Calendar.current.isDateInToday(task.targetDate)
+            task.isOpen && !task.isArchived && task.targetDate < oneWeekAgo
         }
         guard !missed.isEmpty else { return }
 
@@ -485,7 +485,7 @@ struct PendingApprovalView: View {
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
 
-                Text("Your request to join the family has been sent. Ask your parent to open Taskee and approve your request.")
+                Text("Your request to join the family has been sent. Ask your parent to open taskoot and approve your request.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
