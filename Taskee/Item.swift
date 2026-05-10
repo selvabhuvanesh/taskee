@@ -1128,7 +1128,7 @@ struct AvatarView: View {
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: size * 0.9))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
                     .frame(width: size, height: size)
             }
         } else if let config = avatarConfig(for: avatarId) {
@@ -1327,7 +1327,7 @@ struct GiftRevealView: View {
                         if phase == 0 {
                             Text("Tap to open!")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.8))
+                                .foregroundStyle(.primary.opacity(0.8))
                                 .offset(y: 70)
                         }
                     }
@@ -1343,7 +1343,7 @@ struct GiftRevealView: View {
 
                         Text("Surprise Gift!")
                             .font(.title2.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
 
                         Text(giftText)
                             .font(.title.weight(.heavy))
@@ -1359,7 +1359,7 @@ struct GiftRevealView: View {
 
                         Text("Tap anywhere to close")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                             .padding(.top, 8)
                     }
                     .scaleEffect(textScale)
@@ -1464,6 +1464,7 @@ struct ThemePreset: Identifiable {
     let name: String
     let emoji: String
     let gradientColors: [Color]
+    var isLight: Bool = false
 }
 
 let themePresets: [ThemePreset] = [
@@ -1515,6 +1516,30 @@ let themePresets: [ThemePreset] = [
         Color(red: 0.15, green: 0.35, blue: 0.6),
         Color(red: 0.1, green: 0.2, blue: 0.4)
     ]),
+    ThemePreset(id: "cream", name: "Cream", emoji: "☀️", gradientColors: [
+        Color(red: 1.0, green: 0.97, blue: 0.92),
+        Color(red: 0.98, green: 0.93, blue: 0.85),
+        Color(red: 0.95, green: 0.88, blue: 0.78),
+        Color(red: 0.92, green: 0.85, blue: 0.75)
+    ], isLight: true),
+    ThemePreset(id: "sky", name: "Sky", emoji: "🏖️", gradientColors: [
+        Color(red: 0.85, green: 0.93, blue: 1.0),
+        Color(red: 0.75, green: 0.88, blue: 0.98),
+        Color(red: 0.65, green: 0.82, blue: 0.95),
+        Color(red: 0.55, green: 0.75, blue: 0.92)
+    ], isLight: true),
+    ThemePreset(id: "mint", name: "Mint", emoji: "🍃", gradientColors: [
+        Color(red: 0.88, green: 0.97, blue: 0.92),
+        Color(red: 0.78, green: 0.93, blue: 0.85),
+        Color(red: 0.68, green: 0.88, blue: 0.80),
+        Color(red: 0.60, green: 0.83, blue: 0.75)
+    ], isLight: true),
+    ThemePreset(id: "blush", name: "Blush", emoji: "🌸", gradientColors: [
+        Color(red: 1.0, green: 0.92, blue: 0.94),
+        Color(red: 0.97, green: 0.85, blue: 0.88),
+        Color(red: 0.93, green: 0.78, blue: 0.83),
+        Color(red: 0.90, green: 0.72, blue: 0.78)
+    ], isLight: true),
 ]
 
 struct FontStylePreset: Identifiable {
@@ -1537,6 +1562,14 @@ struct ChildTheme {
 
     var gradientColors: [Color] {
         (themePresets.first { $0.id == themeId } ?? themePresets[0]).gradientColors
+    }
+
+    var isLight: Bool {
+        (themePresets.first { $0.id == themeId } ?? themePresets[0]).isLight
+    }
+
+    var colorScheme: ColorScheme {
+        isLight ? .light : .dark
     }
 
     var fontName: String? {
@@ -1838,11 +1871,11 @@ struct RecurringExtensionSheet: View {
 
                             Text("Extend Recurring Tasks")
                                 .font(.title3.weight(.bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
 
                             Text("Your recurring tasks are ending soon. Extend them for next month?")
                                 .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
                                 .multilineTextAlignment(.center)
                         }
 
@@ -1852,7 +1885,7 @@ struct RecurringExtensionSheet: View {
                                     .foregroundStyle(.cyan)
                                 Text("\(limit) tasks remaining in your plan this month")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(.primary.opacity(0.7))
                             }
                             .padding(10)
                             .background(.cyan.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
@@ -1867,7 +1900,7 @@ struct RecurringExtensionSheet: View {
                         VStack(spacing: 8) {
                             Text("\(totalNewTasks) new tasks will be created")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
 
                             Button {
                                 onConfirm()
@@ -1878,7 +1911,7 @@ struct RecurringExtensionSheet: View {
                                     Text("Extend All")
                                 }
                                 .font(.headline)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(.green, in: RoundedRectangle(cornerRadius: 14))
@@ -1891,7 +1924,7 @@ struct RecurringExtensionSheet: View {
                             } label: {
                                 Text("Not Now")
                                     .font(.subheadline)
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                             }
                         }
 
@@ -1900,7 +1933,8 @@ struct RecurringExtensionSheet: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Recurring Tasks")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1926,7 +1960,7 @@ struct RecurringExtensionSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.name)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
@@ -1937,7 +1971,7 @@ struct RecurringExtensionSheet: View {
                     }
                     Text(group.frequency.rawValue)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.primary.opacity(0.5))
                     if group.reward > 0 {
                         Text("\(Int(group.reward)) coins")
                             .font(.caption)
@@ -1953,10 +1987,10 @@ struct RecurringExtensionSheet: View {
                 .foregroundStyle(.green)
         }
         .padding(14)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.15), lineWidth: 1)
         )
     }
 }

@@ -175,10 +175,10 @@ struct ChildDashboardView: View {
                             VStack(spacing: 10) {
                                 Image(systemName: "calendar.badge.checkmark")
                                     .font(.system(size: 40))
-                                    .foregroundStyle(.white.opacity(0.3))
+                                    .foregroundStyle(.primary.opacity(0.3))
                                 Text("No tasks on this day")
                                     .font(.headline)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.top, 40)
@@ -238,7 +238,8 @@ struct ChildDashboardView: View {
             }
             .coordinateSpace(name: "childDashboard")
             .onAppear { scheduleStickyNote(from: childTips) }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(childTheme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, childTheme.colorScheme)
             .navigationTitle("\(authManager.userName)'s Tasks")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -256,7 +257,7 @@ struct ChildDashboardView: View {
                                     if badgeCount > 0 {
                                         Text("\(badgeCount)")
                                             .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(.primary)
                                             .frame(minWidth: 14, minHeight: 14)
                                             .background(.red, in: Circle())
                                             .offset(x: 6, y: -6)
@@ -656,7 +657,7 @@ struct ChildDashboardView: View {
                 ZStack {
                     Image(systemName: "car.fill")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .offset(x: -2, y: -4)
                     Image(systemName: "clock.fill")
                         .font(.system(size: 14, weight: .bold))
@@ -712,7 +713,7 @@ struct ChildDashboardView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .frame(width: 44, height: 44)
                 .background(calmAccent, in: Circle())
         }
@@ -726,7 +727,7 @@ struct ChildDashboardView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 44, height: 44)
                     .background(.purple, in: Circle())
 
@@ -735,7 +736,7 @@ struct ChildDashboardView: View {
                 if unread > 0 {
                     Text("\(unread)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -752,7 +753,7 @@ struct ChildDashboardView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
@@ -760,7 +761,7 @@ struct ChildDashboardView: View {
                 if unboughtCount > 0 {
                     Text("\(unboughtCount)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -783,7 +784,7 @@ struct ChildDashboardView: View {
                         .contentTransition(.numericText())
                     Text("Ready to Redeem")
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.primary.opacity(0.7))
                 }
                 .frame(maxWidth: .infinity)
 
@@ -803,7 +804,7 @@ struct ChildDashboardView: View {
                         .contentTransition(.numericText())
                     Text("Awaiting Approval")
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.primary.opacity(0.7))
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -818,7 +819,7 @@ struct ChildDashboardView: View {
                         Text("Collect Rewards")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
@@ -838,15 +839,15 @@ struct ChildDashboardView: View {
                         if myUnredeemedGifts > 0 {
                             Text("\(myUnredeemedGifts)")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .frame(minWidth: 16, minHeight: 16)
                                 .background(.pink, in: Circle())
                         }
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                 }
 
                 Button {
@@ -858,15 +859,15 @@ struct ChildDashboardView: View {
                         Text("History")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
         .padding(18)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.green.opacity(0.2), lineWidth: 1)
@@ -893,13 +894,13 @@ struct ChildDashboardView: View {
                 Spacer().frame(height: 80)
                 Image(systemName: showAll ? "tray" : "checkmark.circle")
                     .font(.system(size: 56))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.primary.opacity(0.3))
                 Text(showAll ? "No tasks yet" : "All done!")
                     .font(childTheme.font(.title3))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.primary.opacity(0.7))
                 Text(showAll ? "Your parent hasn't assigned any tasks yet." : "You've completed all your active tasks.")
                     .font(childTheme.font(.subheadline))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.primary.opacity(0.4))
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 32)
@@ -927,10 +928,10 @@ struct ChildDashboardView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.white.opacity(0.1), in: Capsule())
+                    .background(.primary.opacity(0.1), in: Capsule())
                 }
             }
             Spacer()
@@ -943,10 +944,10 @@ struct ChildDashboardView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.primary.opacity(0.6))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.white.opacity(0.1), in: Capsule())
+                .background(.primary.opacity(0.1), in: Capsule())
             }
         }
         .padding(.horizontal, 16)
@@ -963,7 +964,7 @@ struct ChildDashboardView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(group.key)
                                     .font(childTheme.font(.subheadline).weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                                     .padding(.leading, 4)
 
                                 ForEach(group.tasks) { task in
@@ -1064,26 +1065,26 @@ struct ChildDashboardView: View {
                                 .frame(width: 32, height: 32)
                             Image(systemName: "checkmark")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         } else if task.isInReview {
                             Circle()
                                 .fill(.orange)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "clock")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         } else if task.isMissed {
                             Circle()
                                 .fill(.red)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         }
                     }
                     Text(statusLabel(for: task))
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
             }
             .buttonStyle(.plain)
@@ -1113,11 +1114,11 @@ struct ChildDashboardView: View {
 
                     Text(task.targetDate, format: .dateTime.hour().minute())
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     if task.reward > 0 {
                         Text("•")
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         CoinDisplay(count: Int(task.reward), earned: task.isApproved)
                     }
 
@@ -1128,7 +1129,7 @@ struct ChildDashboardView: View {
                             .overlay(
                                 Image(systemName: task.giftRevealed ? "gift.circle" : "gift")
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                             )
                             .symbolEffect(.pulse, options: .repeating, isActive: task.isApproved && !task.giftRevealed)
                     }
@@ -1147,7 +1148,7 @@ struct ChildDashboardView: View {
                         Text("Open")
                             .font(.caption.weight(.bold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .background(
@@ -1164,7 +1165,7 @@ struct ChildDashboardView: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(width: 32, height: 32)
                         .background(.red.opacity(0.7), in: Circle())
                 }
@@ -1174,7 +1175,7 @@ struct ChildDashboardView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .opacity(task.isApproved || task.isMissed ? 0.7 : 1)
-        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
@@ -1296,7 +1297,7 @@ struct AddChildTaskView: View {
                                         .foregroundStyle(remaining == 0 ? .red : remaining <= 10 ? .orange : .cyan)
                                     Text(remaining == 0 ? "Task limit reached" : "\(remaining) tasks remaining this month")
                                         .font(.caption.weight(.medium))
-                                        .foregroundStyle(.white.opacity(0.85))
+                                        .foregroundStyle(.primary.opacity(0.85))
                                     Spacer()
                                 }
 
@@ -1324,40 +1325,40 @@ struct AddChildTaskView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             TextField("What do you need to do?", text: $taskName)
                                 .font(.body)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(14)
-                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                                 )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text(recurrenceType == .none ? "Due Date" : "Start Date")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             FiveMinuteDatePicker(selection: $targetDate, minimumDate: Date())
                             .frame(height: 44)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.2), lineWidth: 1)
                             )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Assign To")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             VStack(spacing: 8) {
                                 assignChip(name: childName, isSelected: assignedTo.isEmpty || assignedTo == childName) {
@@ -1387,7 +1388,8 @@ struct AddChildTaskView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1457,7 +1459,7 @@ struct AddChildTaskView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Quick Templates")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.primary.opacity(0.7))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -1497,7 +1499,7 @@ struct AddChildTaskView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recurrence")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
 
             Picker("Recurrence", selection: $recurrenceType) {
                 ForEach(RecurrenceType.allCases, id: \.self) { type in
@@ -1550,19 +1552,19 @@ struct AddChildTaskView: View {
                 Stepper(value: $occurrences, in: 2...stepperMax) {
                     HStack {
                         Text("Repeat for")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Spacer()
                         Text("\(occurrences) \(recurrenceUnitLabel)")
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                     }
                     .font(.subheadline)
                 }
-                .tint(.white)
+                .tint(.primary)
                 .padding(12)
-                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                 )
 
                 let taskCount = generateTaskDates().count
@@ -1581,18 +1583,18 @@ struct AddChildTaskView: View {
                         .foregroundStyle(.yellow)
                     Text("Describe your task in plain English")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.primary.opacity(0.5))
                 }
 
                 TextField("e.g. Read a book tomorrow 4pm daily", text: $smartInput, axis: .vertical)
                     .font(.body)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .lineLimit(3)
                     .padding(14)
-                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                     )
                     .onSubmit { parseSmartInput() }
 
@@ -1604,7 +1606,7 @@ struct AddChildTaskView: View {
                         Text("Parse")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
@@ -1619,7 +1621,7 @@ struct AddChildTaskView: View {
                             .foregroundStyle(.green)
                         Text("Parsed Result")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Spacer()
                     }
                     .padding(12)
@@ -1633,7 +1635,7 @@ struct AddChildTaskView: View {
                     }
                     .padding(12)
                 }
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(.green.opacity(0.2), lineWidth: 1)
@@ -1647,7 +1649,7 @@ struct AddChildTaskView: View {
                         Text("Create Task")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .background(parsed.name.isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
@@ -1661,15 +1663,15 @@ struct AddChildTaskView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 20)
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 70, alignment: .leading)
             Text(value)
                 .font(.subheadline)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Spacer()
         }
     }
@@ -1778,7 +1780,7 @@ struct AddChildTaskView: View {
                     .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Spacer()
             }
             .padding(12)
@@ -1837,17 +1839,17 @@ struct RedeemRewardsView: View {
 
                             Text("\(availableCoins) coins available")
                                 .font(.title3.weight(.bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
 
                             Text("Choose how you'd like to use your coins!")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("What would you like?")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
                                 ForEach(redemptionTypes, id: \.0) { type in
@@ -1882,7 +1884,7 @@ struct RedeemRewardsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("How many coins?")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             HStack(spacing: 10) {
                                 Image(systemName: "star.circle.fill")
@@ -1890,7 +1892,7 @@ struct RedeemRewardsView: View {
 
                                 TextField("0", text: $coinAmount)
                                     .font(.body)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .keyboardType(.numberPad)
 
                                 Spacer()
@@ -1902,10 +1904,10 @@ struct RedeemRewardsView: View {
                                 .foregroundStyle(.orange)
                             }
                             .padding(14)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
 
                             if amount > availableCoins {
@@ -1918,16 +1920,16 @@ struct RedeemRewardsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Describe what you want")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             TextField("e.g., LEGO Star Wars set", text: $description)
                                 .font(.body)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(14)
-                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                                 )
                         }
 
@@ -1936,7 +1938,8 @@ struct RedeemRewardsView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Collect Rewards")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2126,13 +2129,13 @@ struct RewardsHistoryView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "star.circle")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                         Text("No coin activity yet")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(.primary.opacity(0.85))
                         Text(isParent ? "Coin activity will appear here as tasks are completed." : "Complete tasks and redeem your coins!")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.primary.opacity(0.6))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
@@ -2173,7 +2176,8 @@ struct RewardsHistoryView: View {
             }
             .navigationTitle("Coin History")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -2224,10 +2228,10 @@ struct RewardsHistoryView: View {
             summaryStat(value: summaryRedeemed, label: "Redeemed", color: calmAccent)
         }
         .padding(.vertical, 14)
-        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+        .background(.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.15), lineWidth: 1)
         )
     }
 
@@ -2239,11 +2243,11 @@ struct RewardsHistoryView: View {
                     .foregroundStyle(color)
                 Text("\(value)")
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.primary.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
     }
@@ -2282,7 +2286,7 @@ struct RewardsHistoryView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(2)
 
                     HStack(spacing: 6) {
@@ -2292,7 +2296,7 @@ struct RewardsHistoryView: View {
                                 .foregroundStyle(calmAccent.opacity(0.8))
 
                             Text("•")
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                         }
 
                         HStack(spacing: 3) {
@@ -2306,10 +2310,10 @@ struct RewardsHistoryView: View {
 
                         if let r = event.redemption {
                             Text("•")
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                             Text(r.typeLabel)
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
                         }
                     }
 
@@ -2341,7 +2345,7 @@ struct RewardsHistoryView: View {
 
                         Text(event.date, format: .relative(presentation: .named))
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.primary.opacity(0.55))
                     }
 
                     if let r = event.redemption, r.isRejected, !r.rejectReason.isEmpty {
@@ -2365,7 +2369,7 @@ struct RewardsHistoryView: View {
                             Text("I Received This")
                                 .font(.caption.weight(.semibold))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .background(.green, in: RoundedRectangle(cornerRadius: 10))
@@ -2401,7 +2405,7 @@ struct RewardsHistoryView: View {
             }
         }
         .padding(14)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(event.kindColor.opacity(0.2), lineWidth: 1)
@@ -2467,13 +2471,13 @@ struct MyGiftsView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "gift")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         Text("No gifts yet")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                         Text("Complete tasks with surprise gifts to see them here!")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.primary.opacity(0.4))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
@@ -2499,7 +2503,8 @@ struct MyGiftsView: View {
                     }
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("My Gifts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2514,10 +2519,10 @@ struct MyGiftsView: View {
         HStack {
             Text(title)
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Text("\(count)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(.pink.opacity(0.3), in: Capsule())
@@ -2534,13 +2539,13 @@ struct MyGiftsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(gift.giftDescription)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("From: \(gift.taskName)")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
                 Text(gift.earnedDate, format: .dateTime.month().day())
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.primary.opacity(0.4))
             }
 
             Spacer()
@@ -2551,7 +2556,7 @@ struct MyGiftsView: View {
                 } label: {
                     Text("Redeem")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background(.pink, in: Capsule())
@@ -2563,7 +2568,7 @@ struct MyGiftsView: View {
             }
         }
         .padding(14)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(gift.isRedeemed ? .green.opacity(0.2) : .pink.opacity(0.3), lineWidth: 1)
@@ -2594,7 +2599,7 @@ struct ChildThemePickerView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Background")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                                 ForEach(themePresets) { preset in
@@ -2622,14 +2627,14 @@ struct ChildThemePickerView: View {
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 12)
                                                     .strokeBorder(
-                                                        theme.themeId == preset.id ? .white : .white.opacity(0.15),
+                                                        Color.primary.opacity(theme.themeId == preset.id ? 1 : 0.15),
                                                         lineWidth: theme.themeId == preset.id ? 2.5 : 1
                                                     )
                                             )
 
                                             Text(preset.name)
                                                 .font(.caption2.weight(.medium))
-                                                .foregroundStyle(theme.themeId == preset.id ? .white : .white.opacity(0.6))
+                                                .foregroundStyle(Color.primary.opacity(theme.themeId == preset.id ? 1 : 0.6))
                                         }
                                     }
                                 }
@@ -2639,7 +2644,7 @@ struct ChildThemePickerView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Font Style")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             ForEach(fontStylePresets) { preset in
                                 Button {
@@ -2648,30 +2653,31 @@ struct ChildThemePickerView: View {
                                         theme.save()
                                     }
                                 } label: {
+                                    let isActive = theme.fontId == preset.id
                                     HStack(spacing: 14) {
-                                        Image(systemName: theme.fontId == preset.id ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(theme.fontId == preset.id ? .green : .white.opacity(0.3))
+                                        Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(isActive ? Color.green : Color.primary.opacity(0.3))
                                             .font(.title3)
 
                                         Text("The quick brown fox jumps")
                                             .font(preset.fontName != nil ? .custom(preset.fontName!, size: 16) : .body)
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(.primary)
 
                                         Spacer()
 
                                         Text(preset.name)
                                             .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.white.opacity(0.5))
+                                            .foregroundStyle(Color.primary.opacity(0.5))
                                     }
                                     .padding(14)
                                     .background(
-                                        theme.fontId == preset.id ? .white.opacity(0.15) : .white.opacity(0.08),
+                                        Color.primary.opacity(isActive ? 0.15 : 0.08),
                                         in: RoundedRectangle(cornerRadius: 12)
                                     )
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
                                             .strokeBorder(
-                                                theme.fontId == preset.id ? .white.opacity(0.4) : .white.opacity(0.1),
+                                                Color.primary.opacity(isActive ? 0.4 : 0.1),
                                                 lineWidth: 1
                                             )
                                     )
@@ -2681,29 +2687,29 @@ struct ChildThemePickerView: View {
 
                         Text("Preview")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                         HStack(spacing: 14) {
                             Circle()
-                                .strokeBorder(.white.opacity(0.4), lineWidth: 2)
+                                .strokeBorder(.primary.opacity(0.4), lineWidth: 2)
                                 .frame(width: 32, height: 32)
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Clean my room")
                                     .font(theme.font(.body))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                 Text("Today at 5:00 PM")
                                     .font(theme.font(.caption))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                             }
                             Spacer()
                         }
                         .padding(14)
-                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                                .strokeBorder(.primary.opacity(0.25), lineWidth: 1)
                         )
 
                         Spacer()
@@ -2711,7 +2717,8 @@ struct ChildThemePickerView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Customize Theme")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

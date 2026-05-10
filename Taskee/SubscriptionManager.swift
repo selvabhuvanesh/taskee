@@ -43,11 +43,42 @@ final class SubscriptionManager {
     var products: [Product] = []
     var purchaseError: String?
 
+    // MARK: - Free Trial (1 week)
+
+    private static let trialStartKey = "freeTrialStartDate"
+    private static let trialDuration: TimeInterval = 7 * 24 * 60 * 60
+
+    var trialStartDate: Date {
+        if let stored = UserDefaults.standard.object(forKey: Self.trialStartKey) as? Date {
+            return stored
+        }
+        let now = Date()
+        UserDefaults.standard.set(now, forKey: Self.trialStartKey)
+        return now
+    }
+
+    var isTrialActive: Bool {
+        guard tier == .free else { return false }
+        return Date().timeIntervalSince(trialStartDate) < Self.trialDuration
+    }
+
+    var isTrialExpired: Bool {
+        guard tier == .free else { return false }
+        return !isTrialActive
+    }
+
+    var trialDaysRemaining: Int {
+        guard tier == .free else { return 0 }
+        let elapsed = Date().timeIntervalSince(trialStartDate)
+        let remaining = Self.trialDuration - elapsed
+        return max(0, Int(ceil(remaining / (24 * 60 * 60))))
+    }
+
     // MARK: - Tier Limits
 
     var maxMembers: Int {
         switch tier {
-        case .free:   return 4
+        case .free:   return isTrialActive ? 4 : 0
         case .family: return 6
         case .pro:    return 10
         }
@@ -55,9 +86,9 @@ final class SubscriptionManager {
 
     var maxTasksPerMonth: Int? {
         switch tier {
-        case .free:   return 50
-        case .family: return 350
-        case .pro:    return 999
+        case .free:   return isTrialActive ? 50 : 0
+        case .family: return 500
+        case .pro:    return 2000
         }
     }
 

@@ -39,7 +39,7 @@ struct UserAvatarHeader: View {
 
             Text("Hi, \(name)")
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
 
             Spacer()
         }
@@ -107,7 +107,7 @@ struct WeekCalendarStrip: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                         .frame(width: 32, height: 32)
                 }
 
@@ -116,7 +116,7 @@ struct WeekCalendarStrip: View {
                 VStack(spacing: 2) {
                     Text(weekRangeLabel)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.primary.opacity(0.7))
                     if weekOffset != 0 {
                         Button {
                             withAnimation(.snappy) {
@@ -138,7 +138,7 @@ struct WeekCalendarStrip: View {
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                         .frame(width: 32, height: 32)
                 }
             }
@@ -155,24 +155,24 @@ struct WeekCalendarStrip: View {
                         VStack(spacing: 4) {
                             Text(dayLabel(for: date))
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(isSelected ? .white : .white.opacity(0.5))
+                                .foregroundStyle(Color.primary.opacity(isSelected ? 1 : 0.5))
 
                             Text(date.formatted(.dateTime.day()))
                                 .font(.system(size: 16, weight: isSelected ? .bold : .semibold))
-                                .foregroundStyle(isSelected ? .white : .white.opacity(0.7))
+                                .foregroundStyle(Color.primary.opacity(isSelected ? 1 : 0.7))
 
                             if count > 0 {
                                 Text("\(count)")
                                     .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(isSelected ? .white : calmAccent)
+                                    .foregroundStyle(isSelected ? Color.primary : calmAccent)
                                     .frame(minWidth: 16, minHeight: 14)
                                     .background(
-                                        isSelected ? calmAccent : .white.opacity(0.15),
+                                        isSelected ? calmAccent : Color.primary.opacity(0.15),
                                         in: Capsule()
                                     )
                             } else {
                                 Circle()
-                                    .fill(.white.opacity(0.15))
+                                    .fill(.primary.opacity(0.15))
                                     .frame(width: 6, height: 6)
                                     .padding(.vertical, 4)
                             }
@@ -180,7 +180,7 @@ struct WeekCalendarStrip: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(
-                            isSelected ? calmAccent.opacity(0.3) : .white.opacity(0.06),
+                            isSelected ? calmAccent.opacity(0.3) : Color.primary.opacity(0.06),
                             in: RoundedRectangle(cornerRadius: 12)
                         )
                         .overlay(
@@ -403,7 +403,8 @@ struct ContentView: View {
 
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, parentTheme.colorScheme)
             .navigationTitle("\(authManager.userName)'s Tasks")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -416,7 +417,7 @@ struct ContentView: View {
                             } label: {
                                 Text("\(pendingReviewCount) pending")
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
                                     .background(.orange, in: Capsule())
@@ -433,7 +434,7 @@ struct ContentView: View {
                                     Text("\(pendingRedemptions.count)")
                                 }
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(.purple, in: Capsule())
@@ -453,7 +454,7 @@ struct ContentView: View {
                                     if badgeCount > 0 {
                                         Text("\(badgeCount)")
                                             .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(.primary)
                                             .frame(minWidth: 14, minHeight: 14)
                                             .background(.red, in: Circle())
                                             .offset(x: 6, y: -6)
@@ -689,7 +690,7 @@ struct ContentView: View {
 
                                 Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(.primary.opacity(0.7))
                                     .lineLimit(1)
                             }
                         }
@@ -710,7 +711,7 @@ struct ContentView: View {
                                         .font(.system(size: 9, weight: .semibold))
                                         .fixedSize()
                                 }
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(.orange, in: Capsule())
@@ -734,7 +735,7 @@ struct ContentView: View {
 
                                 Text(child.name.count > 6 ? "\(child.name.prefix(6)).." : child.name)
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(.primary.opacity(0.7))
                                     .lineLimit(1)
                             }
                         }
@@ -755,7 +756,7 @@ struct ContentView: View {
                                         .font(.system(size: 9, weight: .semibold))
                                         .fixedSize()
                                 }
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(.orange, in: Capsule())
@@ -834,13 +835,13 @@ struct ContentView: View {
         VStack(spacing: 12) {
             Image(systemName: showOpenOnly ? "checkmark.circle" : "checklist")
                 .font(.system(size: 56))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(.primary.opacity(0.3))
             Text(showOpenOnly ? "All caught up!" : "No tasks yet")
                 .font(.title3)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.primary.opacity(0.7))
             Text(showOpenOnly ? "No open tasks remaining." : "Tap the button below to get started.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.primary.opacity(0.4))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -857,10 +858,10 @@ struct ContentView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.white.opacity(0.1), in: Capsule())
+                    .background(.primary.opacity(0.1), in: Capsule())
                 }
             }
             Spacer()
@@ -873,10 +874,10 @@ struct ContentView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.primary.opacity(0.6))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.white.opacity(0.1), in: Capsule())
+                .background(.primary.opacity(0.1), in: Capsule())
             }
         }
         .padding(.horizontal, 16)
@@ -888,10 +889,10 @@ struct ContentView: View {
         VStack(spacing: 10) {
             Image(systemName: "calendar.badge.checkmark")
                 .font(.system(size: 40))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(.primary.opacity(0.3))
             Text("No tasks on this day")
                 .font(.headline)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -925,11 +926,11 @@ struct ContentView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
-                .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(
-                            task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                            task.isMissed ? Color.red.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
                             lineWidth: 1
                         )
                 )
@@ -945,7 +946,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(group.key)
                         .font(parentTheme.font(.subheadline).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                         .padding(.leading, 4)
 
                     ForEach(group.tasks) { task in
@@ -974,11 +975,11 @@ struct ContentView: View {
                         )
                         .padding(.horizontal, 16)
                         .padding(.vertical, 2)
-                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
                                 .strokeBorder(
-                                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                                    task.isMissed ? Color.red.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
                                     lineWidth: 1
                                 )
                         )
@@ -1027,7 +1028,7 @@ struct ContentView: View {
 
                 Text(subscriptionManager.tier == .pro ? "Pro Plan" : subscriptionManager.tier == .family ? "Basic Plan" : "Free Plan")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.primary.opacity(0.85))
 
                 Spacer()
 
@@ -1055,7 +1056,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .frame(width: 44, height: 44)
                 .background(calmAccent, in: Circle())
         }
@@ -1069,7 +1070,7 @@ struct ContentView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 44, height: 44)
                     .background(.purple, in: Circle())
 
@@ -1078,7 +1079,7 @@ struct ContentView: View {
                 if unread > 0 {
                     Text("\(unread)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -1097,7 +1098,7 @@ struct ContentView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bag.fill")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 44, height: 44)
                     .background(.orange, in: Circle())
 
@@ -1105,7 +1106,7 @@ struct ContentView: View {
                 if unboughtCount > 0 {
                     Text("\(unboughtCount)")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(minWidth: 16, minHeight: 16)
                         .background(.red, in: Circle())
                         .offset(x: 4, y: -4)
@@ -1142,24 +1143,24 @@ struct GroupCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(dateLabel)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
 
                 Text("\(count) task\(count == 1 ? "" : "s")")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.primary.opacity(0.55))
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.primary.opacity(0.35))
         }
         .padding(16)
-        .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
+        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
     }
 }
@@ -1253,11 +1254,11 @@ struct DateTasksView: View {
         )
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
-        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    task.isMissed ? Color.red.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
                     lineWidth: 1
                 )
         )
@@ -1275,10 +1276,10 @@ struct DateTasksView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.white.opacity(0.1), in: Capsule())
+                    .background(.primary.opacity(0.1), in: Capsule())
                 }
             }
             Spacer()
@@ -1291,10 +1292,10 @@ struct DateTasksView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.primary.opacity(0.6))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.white.opacity(0.1), in: Capsule())
+                .background(.primary.opacity(0.1), in: Capsule())
             }
         }
         .padding(.horizontal, 16)
@@ -1311,7 +1312,7 @@ struct DateTasksView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(group.key)
                                     .font(theme.font(.subheadline).weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                                     .padding(.leading, 4)
 
                                 ForEach(group.tasks) { task in
@@ -1354,10 +1355,10 @@ struct DateTasksView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "calendar.badge.checkmark")
                                 .font(.system(size: 40))
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.primary.opacity(0.3))
                             Text("No tasks on this day")
                                 .font(.headline)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                         }
                         Spacer()
                     } else {
@@ -1376,10 +1377,10 @@ struct DateTasksView: View {
                     VStack(spacing: 10) {
                         Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
                             .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         Text(showOpenOnly ? "All caught up!" : "No tasks yet")
                             .font(.headline)
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                     }
                     Spacer()
                 } else {
@@ -1393,14 +1394,15 @@ struct DateTasksView: View {
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 24)
                         .padding(.vertical, 10)
-                        .background(.white.opacity(0.2), in: Capsule())
-                        .foregroundStyle(.white)
+                        .background(.primary.opacity(0.2), in: Capsule())
+                        .foregroundStyle(.primary)
                 }
                 .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
                 .padding(.bottom, 16)
             }
         }
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
         .navigationTitle(dateLabel)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -1413,7 +1415,7 @@ struct DateTasksView: View {
                         Text(showOpenOnly ? "Open Tasks" : "All Tasks")
                             .font(.caption)
                     }
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.primary.opacity(0.7))
                 }
             }
         }
@@ -1754,10 +1756,10 @@ struct ChildTasksView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.white.opacity(0.1), in: Capsule())
+                    .background(.primary.opacity(0.1), in: Capsule())
                 }
             }
             Spacer()
@@ -1770,10 +1772,10 @@ struct ChildTasksView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.primary.opacity(0.6))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.white.opacity(0.1), in: Capsule())
+                .background(.primary.opacity(0.1), in: Capsule())
             }
         }
         .padding(.horizontal, 16)
@@ -1807,11 +1809,11 @@ struct ChildTasksView: View {
         )
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
-        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    task.isMissed ? Color.red.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
                     lineWidth: 1
                 )
         )
@@ -1826,7 +1828,7 @@ struct ChildTasksView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(group.key)
                                     .font(theme.font(.subheadline).weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                                     .padding(.leading, 4)
 
                                 ForEach(group.tasks) { task in
@@ -1869,10 +1871,10 @@ struct ChildTasksView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "calendar.badge.checkmark")
                                 .font(.system(size: 40))
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.primary.opacity(0.3))
                             Text("No tasks on this day")
                                 .font(.headline)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -1890,10 +1892,10 @@ struct ChildTasksView: View {
                     VStack(spacing: 12) {
                         Image(systemName: showOpenOnly ? "checkmark.circle" : "tray")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         Text(showOpenOnly ? "All caught up!" : "No tasks yet")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -1905,7 +1907,7 @@ struct ChildTasksView: View {
                 } label: {
                     Label("Add Task", systemImage: "plus.circle.fill")
                         .font(.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(calmAccent, in: RoundedRectangle(cornerRadius: 16))
@@ -1916,7 +1918,8 @@ struct ChildTasksView: View {
             }
 
         }
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
         .navigationTitle("\(child.name)'s Tasks")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { childFilterToolbar }
@@ -2075,7 +2078,7 @@ struct ChildTasksView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(child.name)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
 
                 HStack(spacing: 8) {
                     Text("\(childAvailableCoins) coins")
@@ -2084,7 +2087,7 @@ struct ChildTasksView: View {
                     if childRedeemedCoins > 0 {
                         Text("(\(childRedeemedCoins) redeemed)")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.primary.opacity(0.4))
                     }
                 }
 
@@ -2099,7 +2102,7 @@ struct ChildTasksView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .fixedSize()
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(.orange, in: Capsule())
@@ -2112,10 +2115,10 @@ struct ChildTasksView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(tasks.filter { $0.isApproved }.count)/\(tasks.count)")
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("completed")
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.primary.opacity(0.4))
             }
         }
         .padding(.horizontal, 16)
@@ -2367,7 +2370,7 @@ struct TaskRow: View {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
-        return .white.opacity(0.4)
+        return Color.primary.opacity(0.4)
     }
 
     private var statusLabel: String {
@@ -2381,7 +2384,7 @@ struct TaskRow: View {
         HStack(spacing: 14) {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(.primary.opacity(0.25))
                 .frame(width: 20)
 
             Button {
@@ -2402,26 +2405,26 @@ struct TaskRow: View {
                                 .frame(width: 32, height: 32)
                             Image(systemName: "checkmark")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         } else if task.isInReview {
                             Circle()
                                 .fill(.orange)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "clock")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         } else if task.isMissed {
                             Circle()
                                 .fill(.red)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         }
                     }
                     Text(statusLabel)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
             }
             .buttonStyle(.plain)
@@ -2432,7 +2435,7 @@ struct TaskRow: View {
                     .font(theme.font(.body))
                     .lineLimit(1)
                     .strikethrough(task.isApproved || task.isMissed)
-                    .foregroundStyle(task.isApproved || task.isMissed ? .white.opacity(0.35) : .white)
+                    .foregroundStyle(Color.primary.opacity(task.isApproved || task.isMissed ? 0.35 : 1))
 
                 HStack(spacing: 6) {
                     if task.isMissed {
@@ -2451,11 +2454,11 @@ struct TaskRow: View {
 
                     Text(task.targetDate, format: .dateTime.hour().minute())
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     if task.reward > 0 {
                         Text("•")
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         CoinDisplay(count: Int(task.reward), earned: task.isApproved)
                     }
 
@@ -2466,13 +2469,13 @@ struct TaskRow: View {
                             .overlay(
                                 Image(systemName: "gift")
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                             )
                     }
 
                     if showAssignee && !task.assignedTo.isEmpty {
                         Text("•")
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         Label(task.assignedTo, systemImage: "person.fill")
                             .font(.caption)
                             .foregroundStyle(calmAccent.opacity(0.8))
@@ -2492,7 +2495,7 @@ struct TaskRow: View {
                         } label: {
                             Image(systemName: "pencil")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .frame(width: 34, height: 34)
                                 .background(calmAccent.opacity(0.6), in: Circle())
                                 .overlay(Circle().strokeBorder(calmAccent.opacity(0.4), lineWidth: 1))
@@ -2506,7 +2509,7 @@ struct TaskRow: View {
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .frame(width: 34, height: 34)
                                 .background(.red.opacity(0.5), in: Circle())
                                 .overlay(Circle().strokeBorder(.red.opacity(0.4), lineWidth: 1))
@@ -2595,10 +2598,10 @@ struct TaskDetailView: View {
                             if task.isRecurring {
                                 Label("Recurring", systemImage: "repeat")
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
-                                    .background(.white.opacity(0.1), in: Capsule())
+                                    .background(.primary.opacity(0.1), in: Capsule())
                             }
                         }
 
@@ -2606,7 +2609,7 @@ struct TaskDetailView: View {
                         detailRow(icon: "text.alignleft", label: "Task Name") {
                             Text(task.name)
                                 .font(theme.font(.body).weight(.medium))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
@@ -2615,10 +2618,10 @@ struct TaskDetailView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(task.dueDateLabel)
                                     .font(.body.weight(.medium))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                 Text(task.targetDate, format: .dateTime.month(.wide).day().year().hour().minute())
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.primary.opacity(0.6))
                             }
                         }
 
@@ -2627,7 +2630,7 @@ struct TaskDetailView: View {
                             detailRow(icon: "person.fill", label: "Assigned To") {
                                 Text(task.assignedTo)
                                     .font(.body.weight(.medium))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                             }
                         }
 
@@ -2643,7 +2646,7 @@ struct TaskDetailView: View {
                             detailRow(icon: "gift.fill", label: "Surprise Gift") {
                                 Text(task.giftRevealed ? task.giftText : "Hidden until approved")
                                     .font(.body)
-                                    .foregroundStyle(task.giftRevealed ? .white : .white.opacity(0.5))
+                                    .foregroundStyle(Color.primary.opacity(task.giftRevealed ? 1 : 0.5))
                                     .italic(!task.giftRevealed)
                             }
                         }
@@ -2653,7 +2656,7 @@ struct TaskDetailView: View {
                             detailRow(icon: "person.badge.plus", label: "Created By") {
                                 Text(task.createdBy)
                                     .font(.body)
-                                    .foregroundStyle(.white.opacity(0.8))
+                                    .foregroundStyle(.primary.opacity(0.8))
                             }
                         }
 
@@ -2669,7 +2672,7 @@ struct TaskDetailView: View {
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 12)
                                             .background(calmAccent.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(.primary)
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 12)
                                                     .strokeBorder(calmAccent.opacity(0.4), lineWidth: 1)
@@ -2704,7 +2707,8 @@ struct TaskDetailView: View {
             }
             .navigationTitle("Task Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -2718,19 +2722,19 @@ struct TaskDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
                 Text(label)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
             }
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
         )
     }
 }
@@ -2839,14 +2843,14 @@ struct AddTaskView: View {
                                         .foregroundStyle(remaining == 0 ? .red : remaining <= 10 ? .orange : .cyan)
                                     Text(remaining == 0 ? "Task limit reached" : "\(remaining) tasks remaining this month")
                                         .font(.caption.weight(.medium))
-                                        .foregroundStyle(.white.opacity(0.7))
+                                        .foregroundStyle(.primary.opacity(0.7))
                                     Spacer()
                                     Text(subscriptionManager.tier.displayName)
                                         .font(.caption2.weight(.bold))
-                                        .foregroundStyle(.white.opacity(0.5))
+                                        .foregroundStyle(.primary.opacity(0.5))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 3)
-                                        .background(.white.opacity(0.1), in: Capsule())
+                                        .background(.primary.opacity(0.1), in: Capsule())
                                 }
 
                                 if remaining <= 10 {
@@ -2875,8 +2879,10 @@ struct AddTaskView: View {
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(
-                                        remaining == 0 ? .red.opacity(0.2) : remaining <= 10 ? .orange.opacity(0.2) : .cyan.opacity(0.15),
+                                    .strokeBorder({
+                                        if remaining == 0 { return Color.red.opacity(0.2) }
+                                        return remaining <= 10 ? Color.orange.opacity(0.2) : Color.cyan.opacity(0.15)
+                                    }(),
                                         lineWidth: 1
                                     )
                             )
@@ -2885,33 +2891,33 @@ struct AddTaskView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             TextField("What needs to be done?", text: $taskName)
                                 .font(.title3.weight(.medium))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(16)
-                                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                                .background(.primary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 14)
-                                        .strokeBorder(taskName.isEmpty ? .white.opacity(0.35) : .green.opacity(0.6), lineWidth: 1.5)
+                                        .strokeBorder(taskName.isEmpty ? Color.primary.opacity(0.35) : Color.green.opacity(0.6), lineWidth: 1.5)
                                 )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text(recurrenceType == .none ? "Due Date" : "Start Date")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             FiveMinuteDatePicker(selection: $targetDate, minimumDate: Date())
                             .frame(height: 44)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.2), lineWidth: 1)
                             )
                         }
 
@@ -2920,7 +2926,7 @@ struct AddTaskView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Reward (coins)")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             HStack(spacing: 10) {
                                 Image(systemName: "star.circle.fill")
@@ -2928,14 +2934,14 @@ struct AddTaskView: View {
 
                                 TextField("0", text: $rewardText)
                                     .font(.body)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .keyboardType(.decimalPad)
                             }
                             .padding(14)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
                         }
 
@@ -2946,27 +2952,27 @@ struct AddTaskView: View {
                                         .foregroundStyle(.pink)
                                     Text("Add Surprise Gift")
                                         .font(.body)
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                 }
                             }
                             .tint(.pink)
                             .padding(14)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
 
                             if includeGift {
                                 Text("Gift Description")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
 
                                 TextField("e.g. New shoes, Movie of choice", text: $giftText)
                                     .font(.body)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .padding(14)
-                                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
                                             .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
@@ -2978,7 +2984,7 @@ struct AddTaskView: View {
                             HStack {
                                 Text("Assign To")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
                                 Spacer()
                                 if allMemberNames.count > 1 {
                                     Button {
@@ -3021,7 +3027,8 @@ struct AddTaskView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
@@ -3102,7 +3109,7 @@ struct AddTaskView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Quick Templates")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.primary.opacity(0.7))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -3113,21 +3120,21 @@ struct AddTaskView: View {
                             VStack(spacing: 6) {
                                 Image(systemName: template.icon)
                                     .font(.title3)
-                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : template.color)
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? Color.primary : template.color)
                                 Text(template.name)
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : .white.opacity(0.7))
+                                    .foregroundStyle(Color.primary.opacity(selectedTemplate?.name == template.name ? 1 : 0.7))
                                     .lineLimit(1)
                             }
                             .frame(width: 90, height: 70)
                             .background(
-                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : .white.opacity(0.1),
+                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : .primary.opacity(0.1),
                                 in: RoundedRectangle(cornerRadius: 12)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(
-                                        selectedTemplate?.name == template.name ? template.color : .white.opacity(0.1),
+                                        selectedTemplate?.name == template.name ? template.color : .primary.opacity(0.1),
                                         lineWidth: 1
                                     )
                             )
@@ -3142,7 +3149,7 @@ struct AddTaskView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recurrence")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
 
             Picker("Recurrence", selection: $recurrenceType) {
                 ForEach(RecurrenceType.allCases, id: \.self) { type in
@@ -3182,10 +3189,10 @@ struct AddTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? calmAccent : .white.opacity(0.15),
+                                        selectedWeekdays.contains(day) ? calmAccent : .primary.opacity(0.15),
                                         in: Circle()
                                     )
-                                    .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
+                                    .foregroundStyle(Color.primary.opacity(selectedWeekdays.contains(day) ? 1 : 0.5))
                             }
                         }
                     }
@@ -3195,19 +3202,19 @@ struct AddTaskView: View {
                 Stepper(value: $occurrences, in: 2...stepperMax) {
                     HStack {
                         Text("Repeat for")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Spacer()
                         Text("\(occurrences) \(recurrenceUnitLabel)")
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                     }
                     .font(.subheadline)
                 }
-                .tint(.white)
+                .tint(.primary)
                 .padding(12)
-                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                 )
 
                 let taskCount = generateTaskDates().count
@@ -3226,18 +3233,18 @@ struct AddTaskView: View {
                         .foregroundStyle(.yellow)
                     Text("Describe your task in plain English")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.primary.opacity(0.5))
                 }
 
                 TextField("e.g. Study time for Arya tomorrow 5pm 3 coins daily", text: $smartInput, axis: .vertical)
                     .font(.body)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .lineLimit(3)
                     .padding(14)
-                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                     )
                     .onSubmit { parseSmartInput() }
 
@@ -3249,10 +3256,10 @@ struct AddTaskView: View {
                         Text("Parse")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(smartInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -3264,7 +3271,7 @@ struct AddTaskView: View {
                             .foregroundStyle(.green)
                         Text("Parsed Result")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Spacer()
                     }
                     .padding(12)
@@ -3279,7 +3286,7 @@ struct AddTaskView: View {
                     }
                     .padding(12)
                 }
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(.green.opacity(0.2), lineWidth: 1)
@@ -3293,10 +3300,10 @@ struct AddTaskView: View {
                         Text("Create Task")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(parsed.name.isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(parsed.name.isEmpty ? .primary.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(parsed.name.isEmpty)
             }
@@ -3307,15 +3314,15 @@ struct AddTaskView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 20)
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 70, alignment: .leading)
             Text(value)
                 .font(.subheadline)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Spacer()
         }
     }
@@ -3440,21 +3447,21 @@ struct AddTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : Color.primary.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Spacer()
             }
             .padding(12)
             .background(
-                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : Color.primary.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : Color.primary.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -3523,40 +3530,40 @@ struct EditTaskView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             TextField("What needs to be done?", text: $taskName)
                                 .font(.title3.weight(.medium))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(16)
-                                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                                .background(.primary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 14)
-                                        .strokeBorder(taskName.isEmpty ? .white.opacity(0.35) : .green.opacity(0.6), lineWidth: 1.5)
+                                        .strokeBorder(taskName.isEmpty ? Color.primary.opacity(0.35) : Color.green.opacity(0.6), lineWidth: 1.5)
                                 )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Due Date")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             FiveMinuteDatePicker(selection: $targetDate)
                             .frame(height: 44)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.2), lineWidth: 1)
                             )
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Reward (coins)")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             HStack(spacing: 10) {
                                 Image(systemName: "star.circle.fill")
@@ -3564,14 +3571,14 @@ struct EditTaskView: View {
 
                                 TextField("0", text: $rewardText)
                                     .font(.body)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .keyboardType(.decimalPad)
                             }
                             .padding(14)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
                         }
 
@@ -3582,27 +3589,27 @@ struct EditTaskView: View {
                                         .foregroundStyle(.pink)
                                     Text("Surprise Gift")
                                         .font(.body)
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                 }
                             }
                             .tint(.pink)
                             .padding(14)
-                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
 
                             if includeGift {
                                 Text("Gift Description")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
 
                                 TextField("e.g. New shoes, Movie of choice", text: $giftText)
                                     .font(.body)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                                     .padding(14)
-                                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
                                             .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
@@ -3613,7 +3620,7 @@ struct EditTaskView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Assign To")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
 
                             VStack(spacing: 8) {
                                 editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
@@ -3639,7 +3646,8 @@ struct EditTaskView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Edit Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3716,21 +3724,21 @@ struct EditTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : Color.primary.opacity(0.3))
                 Text(name)
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Spacer()
             }
             .padding(12)
             .background(
-                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : Color.primary.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : Color.primary.opacity(0.15),
                         lineWidth: 1
                     )
             )
@@ -3797,7 +3805,8 @@ struct ChildrenManagementView: View {
                     .padding(.top, 16)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("My Family")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3830,16 +3839,16 @@ struct ChildrenManagementView: View {
         VStack(spacing: 12) {
             Text("Family Invite Code")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
 
             Text(authManager.familyCode)
                 .font(.system(size: 32, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .tracking(6)
 
             Text("New members can use this code to join your family")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.primary.opacity(0.35))
 
             ShareLink(
                 item: "Join my family on Taskee! Use invite code: \(authManager.familyCode)"
@@ -3849,15 +3858,15 @@ struct ChildrenManagementView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(calmAccent, in: Capsule())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(20)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
     }
 
@@ -3878,10 +3887,10 @@ struct ChildrenManagementView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(member.name)
                             .font(.body)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Text("Wants to join your family")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                     }
 
                     Spacer()
@@ -3905,7 +3914,7 @@ struct ChildrenManagementView: View {
                     } label: {
                         Text("Accept")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(.green, in: Capsule())
@@ -3925,7 +3934,7 @@ struct ChildrenManagementView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
 
             if members.isEmpty {
                 HStack {
@@ -3933,10 +3942,10 @@ struct ChildrenManagementView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.badge.plus")
                             .font(.title2)
-                            .foregroundStyle(.white.opacity(0.25))
+                            .foregroundStyle(.primary.opacity(0.25))
                         Text("No members yet")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(.primary.opacity(0.35))
                     }
                     .padding(.vertical, 24)
                     Spacer()
@@ -3949,7 +3958,7 @@ struct ChildrenManagementView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(member.name)
                                 .font(.body)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
 
                             if member.isChild {
                                 let earned = allTasks.filter { $0.assignedTo == member.name && $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
@@ -3959,7 +3968,7 @@ struct ChildrenManagementView: View {
                             } else {
                                 Text("Parent")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.4))
+                                    .foregroundStyle(.primary.opacity(0.4))
                             }
                         }
 
@@ -3970,15 +3979,15 @@ struct ChildrenManagementView: View {
                                 memberToRemove = member
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.white.opacity(0.3))
+                                    .foregroundStyle(.primary.opacity(0.3))
                             }
                         }
                     }
                     .padding(14)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                            .strokeBorder(.primary.opacity(0.15), lineWidth: 1)
                     )
                 }
             }
@@ -3995,10 +4004,10 @@ struct ChildrenManagementView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Member limit reached")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Text("Your \(subscriptionManager.tier.displayName) plan allows up to \(subscriptionManager.maxMembers) members.")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.primary.opacity(0.7))
                 }
 
                 Spacer()
@@ -4016,7 +4025,7 @@ struct ChildrenManagementView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .padding(12)
                 .background(.orange, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -4056,13 +4065,13 @@ struct PendingApprovalsView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.seal")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.primary.opacity(0.3))
                         Text("All caught up!")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                         Text("No tasks pending approval.")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.primary.opacity(0.4))
                     }
                 } else {
                     ScrollView {
@@ -4078,7 +4087,8 @@ struct PendingApprovalsView: View {
             }
             .navigationTitle("Pending Approvals")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -4139,7 +4149,7 @@ struct PendingApprovalsView: View {
                     Text(task.name)
                         .font(.body.weight(.medium))
                         .lineLimit(1)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     HStack(spacing: 6) {
                         if !task.assignedTo.isEmpty {
@@ -4150,11 +4160,11 @@ struct PendingApprovalsView: View {
 
                         Text(task.dueDateLabel)
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.45))
+                            .foregroundStyle(.primary.opacity(0.45))
 
                         if task.reward > 0 {
                             Text("•")
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.primary.opacity(0.3))
                             Label("\(Int(task.reward)) coins", systemImage: "star.circle.fill")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.yellow.opacity(0.85))
@@ -4215,7 +4225,7 @@ struct PendingApprovalsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
@@ -4261,11 +4271,11 @@ struct ParentOnboardingView: View {
 
                             Text("You're all set, \(authManager.userName)!")
                                 .font(.title2.weight(.bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
 
                             Text("Share the invite code below with your family members so they can join. You can also add children here to get started right away!")
                                 .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                                 .multilineTextAlignment(.center)
                         }
 
@@ -4275,7 +4285,7 @@ struct ParentOnboardingView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Children (\(children.count)/\(subscriptionManager.maxMembers))")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
 
                                 ForEach(children) { child in
                                     HStack {
@@ -4283,15 +4293,15 @@ struct ParentOnboardingView: View {
 
                                         Text(child.name)
                                             .font(.body)
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(.primary)
 
                                         Spacer()
                                     }
                                     .padding(14)
-                                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                                            .strokeBorder(.primary.opacity(0.15), lineWidth: 1)
                                     )
                                 }
                             }
@@ -4301,17 +4311,17 @@ struct ParentOnboardingView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Add Child")
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
+                                    .foregroundStyle(.primary.opacity(0.5))
 
                                 HStack(spacing: 10) {
                                     TextField("Child's name", text: $newChildName)
                                         .font(.body)
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                         .padding(12)
-                                        .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                                        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
-                                                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                                         )
 
                                     Button {
@@ -4334,7 +4344,7 @@ struct ParentOnboardingView: View {
                                     .foregroundStyle(.orange)
                                 Text("Upgrade your plan to add more members")
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.8))
+                                    .foregroundStyle(.primary.opacity(0.8))
                             }
                             .padding(12)
                             .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
@@ -4349,7 +4359,8 @@ struct ParentOnboardingView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Welcome!")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -4367,16 +4378,16 @@ struct ParentOnboardingView: View {
         VStack(spacing: 12) {
             Text("Your Family Invite Code")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
 
             Text(authManager.familyCode)
                 .font(.system(size: 32, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .tracking(6)
 
             Text("Send this code to your children and other family members so they can join from their own device")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.primary.opacity(0.35))
                 .multilineTextAlignment(.center)
 
             ShareLink(
@@ -4387,15 +4398,15 @@ struct ParentOnboardingView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(calmAccent, in: Capsule())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(20)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
     }
 }
@@ -4442,7 +4453,7 @@ struct EditProfileView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Choose Avatar")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             HStack(spacing: 16) {
                                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
@@ -4460,16 +4471,16 @@ struct EditProfileView: View {
                                         } else {
                                             ZStack {
                                                 Circle()
-                                                    .fill(.white.opacity(0.15))
+                                                    .fill(.primary.opacity(0.15))
                                                     .frame(width: 50, height: 50)
                                                 Image(systemName: "camera.fill")
                                                     .font(.system(size: 20))
-                                                    .foregroundStyle(.white.opacity(0.7))
+                                                    .foregroundStyle(.primary.opacity(0.7))
                                             }
                                         }
                                         Text("Photo")
                                             .font(.caption2)
-                                            .foregroundStyle(.white.opacity(0.5))
+                                            .foregroundStyle(.primary.opacity(0.5))
                                     }
                                 }
                                 .onChange(of: selectedPhotoItem) { _, item in
@@ -4505,7 +4516,7 @@ struct EditProfileView: View {
 
                             Text("Animals")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.primary.opacity(0.5))
                                 .padding(.top, 4)
 
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
@@ -4525,16 +4536,16 @@ struct EditProfileView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Your Name")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
 
                             TextField("Enter your name", text: $name)
                                 .font(.body)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(14)
-                                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                                 )
                         }
 
@@ -4543,7 +4554,8 @@ struct EditProfileView: View {
                     .padding(.horizontal, 24)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -4614,13 +4626,13 @@ struct RedemptionApprovalsView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "gift")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                         Text("No pending requests")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(.primary.opacity(0.85))
                         Text("All reward requests have been handled.")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.primary.opacity(0.6))
                     }
                 } else {
                     ScrollView {
@@ -4636,7 +4648,8 @@ struct RedemptionApprovalsView: View {
             }
             .navigationTitle("Reward Requests")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -4683,7 +4696,7 @@ struct RedemptionApprovalsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(r.itemDescription)
                         .font(.body.weight(.medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     HStack(spacing: 6) {
                         Label(r.childName, systemImage: "person.fill")
@@ -4691,23 +4704,23 @@ struct RedemptionApprovalsView: View {
                             .foregroundStyle(calmAccent.opacity(0.8))
 
                         Text("•")
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
 
                         Label("\(r.coinAmount) coins", systemImage: "star.circle.fill")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.yellow.opacity(0.85))
 
                         Text("•")
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
 
                         Text(r.typeLabel)
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                     }
 
                     Text(r.createdAt, format: .relative(presentation: .named))
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(.primary.opacity(0.55))
                 }
 
                 Spacer()
@@ -4752,7 +4765,7 @@ struct RedemptionApprovalsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(.purple.opacity(0.2), lineWidth: 1)
@@ -4800,15 +4813,14 @@ struct SubscriptionView: View {
         [
             PlanInfo(
                 tier: .free,
-                name: "Free",
+                name: "Free Trial",
                 icon: "person.2.fill",
                 color: .gray,
                 price: "$0",
-                period: "forever",
+                period: "7 days",
                 features: [
                     PlanFeature(text: "Up to 4 family members", included: true),
                     PlanFeature(text: "50 tasks per month", included: true),
-                    PlanFeature(text: "20 pickup requests per day", included: true),
                     PlanFeature(text: "Basic notifications", included: true),
                     PlanFeature(text: "Priority support", included: false),
                 ],
@@ -4824,9 +4836,9 @@ struct SubscriptionView: View {
                 period: "/month",
                 features: [
                     PlanFeature(text: "Up to 6 family members", included: true),
-                    PlanFeature(text: "350 tasks per month", included: true),
-                    PlanFeature(text: "30 pickup requests per day", included: true),
+                    PlanFeature(text: "500 tasks per month", included: true),
                     PlanFeature(text: "All notifications", included: true),
+                    PlanFeature(text: "Cancel anytime, pro-rated refund", included: true),
                     PlanFeature(text: "Priority support", included: false),
                 ],
                 monthlyID: SubscriptionManager.familyMonthly,
@@ -4841,9 +4853,9 @@ struct SubscriptionView: View {
                 period: "/month",
                 features: [
                     PlanFeature(text: "Up to 10 family members", included: true),
-                    PlanFeature(text: "999 tasks per month", included: true),
-                    PlanFeature(text: "Unlimited pickup requests", included: true),
+                    PlanFeature(text: "2000 tasks per month", included: true),
                     PlanFeature(text: "All notifications", included: true),
+                    PlanFeature(text: "Cancel anytime, pro-rated refund", included: true),
                     PlanFeature(text: "Priority support", included: true),
                 ],
                 monthlyID: SubscriptionManager.proMonthly,
@@ -4866,6 +4878,10 @@ struct SubscriptionView: View {
                             planCard(plan)
                         }
 
+                        if subscriptionManager.tier != .free {
+                            cancelSubscriptionButton
+                        }
+
                         restoreButton
 
                         if let error = subscriptionManager.purchaseError {
@@ -4885,7 +4901,8 @@ struct SubscriptionView: View {
             }
             .navigationTitle("Subscription")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -4898,37 +4915,64 @@ struct SubscriptionView: View {
     }
 
     private var currentPlanBadge: some View {
-        HStack(spacing: 10) {
-            Image(systemName: subscriptionManager.tier == .pro ? "crown.fill" : subscriptionManager.tier == .family ? "person.3.fill" : "person.2.fill")
-                .font(.title3)
-                .foregroundStyle(subscriptionManager.tier == .pro ? .orange : subscriptionManager.tier == .family ? calmAccent : .gray)
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: subscriptionManager.tier == .pro ? "crown.fill" : subscriptionManager.tier == .family ? "person.3.fill" : "person.2.fill")
+                    .font(.title3)
+                    .foregroundStyle(subscriptionManager.tier == .pro ? .orange : subscriptionManager.tier == .family ? calmAccent : .gray)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Current Plan")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-                Text(subscriptionManager.tier.displayName)
-                    .font(.headline)
-                    .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current Plan")
+                        .font(.caption)
+                        .foregroundStyle(.primary.opacity(0.7))
+                    Text(subscriptionManager.tier == .free ? "Free Trial" : subscriptionManager.tier.displayName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                if subscriptionManager.tier == .free {
+                    if subscriptionManager.isTrialActive {
+                        Text("\(subscriptionManager.trialDaysRemaining)d left")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.3), in: Capsule())
+                    } else {
+                        Text("Expired")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.red.opacity(0.3), in: Capsule())
+                    }
+                } else {
+                    Text("Active")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.green.opacity(0.3), in: Capsule())
+                }
             }
 
-            Spacer()
-
-            Text(subscriptionManager.tier == .free ? "Free" : "Active")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    (subscriptionManager.tier == .free ? Color.gray : Color.green).opacity(0.3),
-                    in: Capsule()
-                )
+            if subscriptionManager.tier == .free && subscriptionManager.isTrialExpired {
+                Text("Your free trial has expired. Upgrade to continue using Taskee.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .padding(16)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                .strokeBorder(
+                    subscriptionManager.isTrialExpired ? Color.red.opacity(0.4) : .primary.opacity(0.15),
+                    lineWidth: subscriptionManager.isTrialExpired ? 2 : 1
+                )
         )
     }
 
@@ -4945,16 +4989,16 @@ struct SubscriptionView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.name)
                         .font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
 
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(planPrice(plan))
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         if plan.tier != .free {
                             Text(plan.period)
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.primary.opacity(0.7))
                         }
                     }
                 }
@@ -4976,11 +5020,11 @@ struct SubscriptionView: View {
                     HStack(spacing: 10) {
                         Image(systemName: feature.included ? "checkmark.circle.fill" : "xmark.circle")
                             .font(.subheadline)
-                            .foregroundStyle(feature.included ? .green : .white.opacity(0.25))
+                            .foregroundStyle(feature.included ? Color.green : Color.primary.opacity(0.25))
 
                         Text(feature.text)
                             .font(.subheadline)
-                            .foregroundStyle(feature.included ? .white.opacity(0.8) : .white.opacity(0.3))
+                            .foregroundStyle(Color.primary.opacity(feature.included ? 0.8 : 0.3))
 
                         Spacer()
                     }
@@ -4996,13 +5040,13 @@ struct SubscriptionView: View {
         }
         .padding(18)
         .background(
-            isCurrent ? plan.color.opacity(0.08) : .white.opacity(0.08),
+            isCurrent ? plan.color.opacity(0.08) : .primary.opacity(0.08),
             in: RoundedRectangle(cornerRadius: 16)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(
-                    isCurrent ? plan.color.opacity(0.4) : .white.opacity(0.1),
+                    isCurrent ? plan.color.opacity(0.4) : .primary.opacity(0.1),
                     lineWidth: isCurrent ? 2 : 1
                 )
         )
@@ -5033,7 +5077,7 @@ struct SubscriptionView: View {
                 } else {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.white)
+                        .tint(.primary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -5042,7 +5086,7 @@ struct SubscriptionView: View {
                 isAnnual ? plan.color : plan.color.opacity(0.4),
                 in: RoundedRectangle(cornerRadius: 12)
             )
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
         }
         .disabled(product == nil || isPurchasing)
     }
@@ -5053,6 +5097,36 @@ struct SubscriptionView: View {
             return product.displayPrice
         }
         return plan.price
+    }
+
+    private var cancelSubscriptionButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle")
+                        .font(.subheadline)
+                    Text("Cancel Subscription")
+                        .font(.subheadline.weight(.medium))
+                }
+                .foregroundStyle(.red.opacity(0.8))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.red.opacity(0.2), lineWidth: 1)
+                )
+            }
+
+            Text("You can cancel anytime. Unused time will be pro-rated on a monthly basis and refunded to your Apple ID.")
+                .font(.caption2)
+                .foregroundStyle(.primary.opacity(0.5))
+                .multilineTextAlignment(.center)
+        }
     }
 
     private var restoreButton: some View {
@@ -5066,16 +5140,16 @@ struct SubscriptionView: View {
         } label: {
             Text("Restore Purchases")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.primary.opacity(0.7))
                 .padding(.vertical, 8)
         }
     }
 
     private var subscriptionLegalText: some View {
         VStack(spacing: 12) {
-            Text("Payment will be charged to your Apple ID account at confirmation of purchase. Subscriptions automatically renew unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage and cancel your subscriptions in your App Store account settings.")
+            Text("Payment will be charged to your Apple ID account at confirmation of purchase. Subscriptions automatically renew unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can cancel anytime and unused time will be pro-rated on a monthly basis and refunded. Manage subscriptions in your App Store account settings.")
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.primary.opacity(0.4))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
 
@@ -5085,7 +5159,7 @@ struct SubscriptionView: View {
                 Link("Manage Subscriptions", destination: manageSubscriptionsURL)
             }
             .font(.caption2.weight(.medium))
-            .tint(.white.opacity(0.6))
+            .tint(Color.primary.opacity(0.6))
         }
         .padding(.top, 8)
     }
@@ -5119,13 +5193,13 @@ struct NotificationCenterView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "bell.slash")
                             .font(.system(size: 56))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.primary.opacity(0.5))
                         Text("No notifications")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(.primary.opacity(0.85))
                         Text("You're all caught up!")
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.primary.opacity(0.6))
                     }
                 } else {
                     List {
@@ -5145,7 +5219,8 @@ struct NotificationCenterView: View {
             }
             .navigationTitle("Notifications")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if !notifications.isEmpty {
@@ -5213,7 +5288,7 @@ struct NotificationCenterView: View {
 
                 Image(systemName: iconForCategory(notif.category))
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 16, height: 16)
                     .background(colorForCategory(notif.category), in: Circle())
                     .offset(x: 2, y: 2)
@@ -5223,11 +5298,11 @@ struct NotificationCenterView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(notif.title)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
 
                 Text(notif.body)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.primary.opacity(0.8))
                     .lineLimit(3)
 
                 if notif.category == "PICKUP_REQUEST" && notif.createdAt.timeIntervalSinceNow > -600 && authManager.role == "parent" {
@@ -5250,7 +5325,7 @@ struct NotificationCenterView: View {
                                 Text("On My Way!")
                             }
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(calmAccent, in: Capsule())
@@ -5261,13 +5336,13 @@ struct NotificationCenterView: View {
 
                 Text(notif.createdAt, format: .relative(presentation: .named))
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.primary.opacity(0.55))
             }
 
             Spacer()
         }
         .padding(14)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(colorForCategory(notif.category).opacity(0.2), lineWidth: 1)
@@ -5351,13 +5426,13 @@ struct ShoppingBagView: View {
                         VStack(spacing: 12) {
                             Image(systemName: "cart")
                                 .font(.system(size: 48))
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.primary.opacity(0.3))
                             Text("Shopping bag is empty")
                                 .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.primary.opacity(0.4))
                             Text("Add items your family needs to buy")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.primary.opacity(0.3))
                         }
                         Spacer()
                     } else {
@@ -5371,7 +5446,7 @@ struct ShoppingBagView: View {
                                     HStack {
                                         Text("Bought")
                                             .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.white.opacity(0.4))
+                                            .foregroundStyle(.primary.opacity(0.4))
                                         Spacer()
                                         Button("Clear All") {
                                             clearBoughtItems()
@@ -5401,7 +5476,8 @@ struct ShoppingBagView: View {
                 guard !authManager.familyCode.isEmpty else { return }
                 await cloudKitManager.syncShoppingOnly(context: modelContext, familyCode: authManager.familyCode)
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .navigationTitle("Family Shopping Bag")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -5435,13 +5511,13 @@ struct ShoppingBagView: View {
         HStack(spacing: 10) {
             TextField("Add an item...", text: $newItemName)
                 .font(.body)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .focused($isInputFocused)
                 .padding(12)
-                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                 )
                 .submitLabel(.done)
                 .onSubmit { addItem() }
@@ -5451,7 +5527,7 @@ struct ShoppingBagView: View {
             } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 32))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .symbolRenderingMode(.hierarchical)
             }
             .disabled(newItemName.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -5465,18 +5541,18 @@ struct ShoppingBagView: View {
             } label: {
                 Image(systemName: item.isBought ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(item.isBought ? .green : .white.opacity(0.5))
+                    .foregroundStyle(item.isBought ? Color.green : Color.primary.opacity(0.5))
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .font(.body)
-                    .foregroundStyle(item.isBought ? .white.opacity(0.35) : .white)
-                    .strikethrough(item.isBought, color: .white.opacity(0.3))
+                    .foregroundStyle(Color.primary.opacity(item.isBought ? 0.35 : 1))
+                    .strikethrough(item.isBought, color: .primary.opacity(0.3))
 
                 Text("Added by \(item.addedBy)")
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.primary.opacity(0.3))
             }
             .onTapGesture {
                 editingName = item.name
@@ -5490,12 +5566,12 @@ struct ShoppingBagView: View {
             } label: {
                 Image(systemName: "trash")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.primary.opacity(0.3))
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.white.opacity(item.isBought ? 0.04 : 0.1), in: RoundedRectangle(cornerRadius: 12))
+        .background(.primary.opacity(item.isBought ? 0.04 : 0.1), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func addItem() {
@@ -5586,7 +5662,7 @@ struct FamilyChatView: View {
                                     } label: {
                                         Text("Load earlier messages")
                                             .font(.caption)
-                                            .foregroundStyle(.white.opacity(0.5))
+                                            .foregroundStyle(.primary.opacity(0.5))
                                             .padding(.vertical, 8)
                                     }
                                 }
@@ -5615,7 +5691,8 @@ struct FamilyChatView: View {
             }
             .navigationTitle("Family Chat")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -5650,7 +5727,7 @@ struct FamilyChatView: View {
                     AvatarView(avatarId: message.senderAvatar, size: 20)
                     Text(message.senderName)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.primary.opacity(0.5))
                 }
                 .padding(.leading, 4)
             }
@@ -5661,11 +5738,11 @@ struct FamilyChatView: View {
                 VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
                     Text(message.text)
                         .font(.body)
-                        .foregroundStyle(isMe ? .white : .white)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(
-                            isMe ? calmAccent.opacity(0.7) : .white.opacity(0.15),
+                            isMe ? calmAccent.opacity(0.7) : Color.primary.opacity(0.15),
                             in: RoundedRectangle(cornerRadius: 18)
                         )
 
@@ -5686,7 +5763,7 @@ struct FamilyChatView: View {
 
             Text(message.sentAt, style: .time)
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(.primary.opacity(0.3))
                 .padding(.horizontal, 8)
         }
         .padding(.vertical, 2)
@@ -5718,13 +5795,13 @@ struct FamilyChatView: View {
                         }
                         Text("\(users.count)")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(.primary.opacity(0.8))
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(
                         isCoin ? Color.yellow.opacity(0.25) :
-                        users.contains(authManager.userName) ? calmAccent.opacity(0.4) : .white.opacity(0.12),
+                        users.contains(authManager.userName) ? calmAccent.opacity(0.4) : Color.primary.opacity(0.12),
                         in: Capsule()
                     )
                 }
@@ -5791,9 +5868,9 @@ struct FamilyChatView: View {
             TextField("Message", text: $messageText, axis: .vertical)
                 .lineLimit(1...4)
                 .font(.body)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .padding(12)
-                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
+                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
                 .focused($isInputFocused)
 
             Button {
@@ -5801,7 +5878,7 @@ struct FamilyChatView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 34))
-                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.3) : calmAccent)
+                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.3) : calmAccent)
             }
             .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
         }
