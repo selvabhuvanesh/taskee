@@ -27,6 +27,79 @@ struct AppBackground: View {
     }
 }
 
+// MARK: - Privacy Policy View
+
+struct PrivacyPolicyView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        policySection("Information We Collect",
+                            "When you sign in with Apple, we collect your name, email address, and a unique Apple User ID. You may choose to hide your email using Apple's private relay.\n\nWe also store task details, family member profiles, chat messages, shopping list items, reward redemption requests, and coin totals to provide the app's functionality.\n\nLocally on your device, we store notification history (up to 100), subscription status, and app settings.")
+
+                        policySection("How We Use Your Information",
+                            "All data is used solely to provide the app's functionality. Account info identifies you within your family group. Task and family data enables assignment, tracking, and rewards. Notifications remind you about upcoming tasks.\n\nWe do not use your data for advertising, profiling, or analytics.")
+
+                        policySection("Data Storage & Security",
+                            "On-device data is stored in iOS-encrypted storage. Synced data is stored in Apple CloudKit (iCloud) within a private container accessible only to your family group. Purchases are processed through Apple's App Store.\n\nWe do not operate our own servers.")
+
+                        policySection("Third-Party Services",
+                            "We use only Apple's first-party services:\n\n• Sign in with Apple — Authentication\n• Apple CloudKit (iCloud) — Family data sync\n• Apple StoreKit 2 — In-app subscriptions\n• Apple Push Notifications — Task reminders\n\nWe do not integrate any third-party analytics, advertising, or tracking services.")
+
+                        policySection("Data Sharing",
+                            "We do not sell, trade, or share your personal information with third parties. Your family data is shared only with members of your family group through Apple CloudKit.")
+
+                        policySection("Children's Privacy",
+                            "taskoot is designed for family use, including children. Children join a family group managed by a parent. We collect only the minimum information needed (name and avatar) and do not collect children's email addresses independently.")
+
+                        policySection("Data Retention & Deletion",
+                            "You can delete your account and all associated data by removing yourself from the family group and deleting the app. Local data is removed when the app is uninstalled. CloudKit data can be managed through your iCloud account settings.")
+
+                        policySection("Your Rights",
+                            "You have the right to access, correct, or delete your personal data, and to withdraw consent at any time by discontinuing use of the app.")
+
+                        policySection("Contact Us",
+                            "If you have questions about this privacy policy, please contact us at support@taskoot.com")
+
+                        Text("Last updated: May 10, 2026")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.3))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 8)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                }
+            }
+            .navigationTitle("Privacy Policy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+    }
+
+    private func policySection(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+            Text(body)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 // MARK: - User Avatar Header
 
 struct UserAvatarHeader: View {
@@ -250,6 +323,7 @@ struct ContentView: View {
     @State private var showReminderSent = false
     @State private var reminderSentChildName = ""
     @State private var showShareSheet = false
+    @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
@@ -534,6 +608,11 @@ struct ContentView: View {
                             } label: {
                                 Label("Refer Your Friends", systemImage: "person.badge.plus")
                             }
+                            Button {
+                                showPrivacyPolicy = true
+                            } label: {
+                                Label("Privacy Policy", systemImage: "hand.raised.fill")
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 authManager.logout()
@@ -592,6 +671,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showShareSheet) {
                 ShareSheet(items: [ShareTextWithLink(text: parentShareMessage, url: appStoreURL)])
+            }
+            .sheet(isPresented: $showPrivacyPolicy) {
+                PrivacyPolicyView()
             }
             .sheet(isPresented: $showPendingApprovals) {
                 PendingApprovalsView(theme: parentTheme) { reward in

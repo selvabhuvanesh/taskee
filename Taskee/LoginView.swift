@@ -11,6 +11,7 @@ import AuthenticationServices
 struct LoginView: View {
     @Environment(AuthManager.self) private var authManager
     @State private var errorMessage: String?
+    @State private var showPrivacyPolicy = false
     #if DEBUG
     @State private var devName = ""
     #endif
@@ -84,10 +85,23 @@ struct LoginView: View {
     }
 
     private var termsText: some View {
-        Text("We use Sign in with Apple to keep your account secure.")
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.3))
-            .multilineTextAlignment(.center)
+        VStack(spacing: 8) {
+            Text("We use Sign in with Apple to keep your account secure.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.3))
+                .multilineTextAlignment(.center)
+            Button {
+                showPrivacyPolicy = true
+            } label: {
+                Text("Privacy Policy")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .underline()
+            }
+        }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            PrivacyPolicyView()
+        }
     }
 
     #if DEBUG

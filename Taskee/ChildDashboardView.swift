@@ -40,6 +40,7 @@ struct ChildDashboardView: View {
     @State private var showMyGifts = false
     @State private var showEditProfile = false
     @State private var showShareSheet = false
+    @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
     @State private var childTheme = ChildTheme.load(for: "child")
     @State private var stickyNote: (message: String, color: Color)?
@@ -302,6 +303,11 @@ struct ChildDashboardView: View {
                             } label: {
                                 Label("Refer Your Friends", systemImage: "person.badge.plus")
                             }
+                            Button {
+                                showPrivacyPolicy = true
+                            } label: {
+                                Label("Privacy Policy", systemImage: "hand.raised.fill")
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 authManager.logout()
@@ -322,6 +328,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showShareSheet) {
                 ShareSheet(items: [ShareTextWithLink(text: childShareMessage, url: appStoreURL)])
+            }
+            .sheet(isPresented: $showPrivacyPolicy) {
+                PrivacyPolicyView()
             }
             .sheet(isPresented: $showNotificationCenter) {
                 NotificationCenterView(theme: childTheme)
