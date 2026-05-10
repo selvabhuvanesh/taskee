@@ -89,4 +89,4 @@ We may update this privacy policy from time to time. Changes will be reflected b
 
 If you have questions about this privacy policy, please contact us at:
 
-**Email:** selvabhuvanesh@gmail.com
+**Email:** support@taskoot.com
