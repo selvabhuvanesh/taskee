@@ -827,7 +827,7 @@ struct ChildDashboardView: View {
                 .frame(maxWidth: .infinity)
 
                 Rectangle()
-                    .fill(.white.opacity(0.15))
+                    .fill(childTheme.tertiaryTextColor)
                     .frame(width: 1, height: 50)
 
                 VStack(spacing: 4) {
@@ -861,7 +861,7 @@ struct ChildDashboardView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
-                    .background(collectableCoins > 0 ? .orange : .white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                    .background(collectableCoins > 0 ? .orange : childTheme.cardBackgroundLight, in: RoundedRectangle(cornerRadius: 10))
                 }
                 .disabled(collectableCoins <= 0)
 
@@ -1087,7 +1087,7 @@ struct ChildDashboardView: View {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
-        return .white.opacity(0.4)
+        return childTheme.tertiaryTextColor
     }
 
     private func statusLabel(for task: Item) -> String {
@@ -1155,7 +1155,7 @@ struct ChildDashboardView: View {
                     .font(childTheme.font(.body))
                     .lineLimit(1)
                     .strikethrough(task.isApproved)
-                    .foregroundStyle(task.isApproved ? .white.opacity(0.35) : .white)
+                    .foregroundStyle(task.isApproved ? childTheme.tertiaryTextColor : childTheme.textColor)
 
                 HStack(spacing: 6) {
                     if task.isMissed {
@@ -1240,7 +1240,7 @@ struct ChildDashboardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : .white.opacity(0.25),
+                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : childTheme.tertiaryTextColor,
                     lineWidth: 1
                 )
         )
@@ -1534,18 +1534,18 @@ struct AddChildTaskView: View {
                                     .foregroundStyle(selectedTemplate?.name == template.name ? .white : template.color)
                                 Text(template.name)
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : .white.opacity(0.7))
+                                    .foregroundStyle(selectedTemplate?.name == template.name ? .white : theme.secondaryTextColor)
                                     .lineLimit(1)
                             }
                             .frame(width: 90, height: 70)
                             .background(
-                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : .white.opacity(0.1),
+                                selectedTemplate?.name == template.name ? template.color.opacity(0.6) : theme.cardBackgroundLight,
                                 in: RoundedRectangle(cornerRadius: 12)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(
-                                        selectedTemplate?.name == template.name ? template.color : .white.opacity(0.1),
+                                        selectedTemplate?.name == template.name ? template.color : theme.cardBackgroundLight,
                                         lineWidth: 1
                                     )
                             )
@@ -1600,10 +1600,10 @@ struct AddChildTaskView: View {
                                     .font(.caption.weight(.bold))
                                     .frame(width: 36, height: 36)
                                     .background(
-                                        selectedWeekdays.contains(day) ? calmAccent : .white.opacity(0.15),
+                                        selectedWeekdays.contains(day) ? calmAccent : theme.cardBackground,
                                         in: Circle()
                                     )
-                                    .foregroundStyle(selectedWeekdays.contains(day) ? .white : .white.opacity(0.5))
+                                    .foregroundStyle(selectedWeekdays.contains(day) ? .white : theme.secondaryTextColor)
                             }
                         }
                     }
@@ -1670,7 +1670,7 @@ struct AddChildTaskView: View {
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? theme.cardBackgroundLight : calmAccent, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(smartInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -1713,7 +1713,7 @@ struct AddChildTaskView: View {
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(parsed.name.isEmpty ? .white.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(parsed.name.isEmpty ? theme.cardBackgroundLight : calmAccent, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(parsed.name.isEmpty)
             }
@@ -1838,7 +1838,7 @@ struct AddChildTaskView: View {
         Button(action: action) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? calmAccent : .white.opacity(0.3))
+                    .foregroundStyle(isSelected ? calmAccent : theme.tertiaryTextColor)
                 Text(name)
                     .font(.subheadline)
                     .foregroundStyle(.primary)
@@ -1846,13 +1846,13 @@ struct AddChildTaskView: View {
             }
             .padding(12)
             .background(
-                isSelected ? calmAccent.opacity(0.15) : .white.opacity(0.12),
+                isSelected ? calmAccent.opacity(0.15) : theme.cardBackground,
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? calmAccent.opacity(0.4) : .white.opacity(0.15),
+                        isSelected ? calmAccent.opacity(0.4) : theme.cardBackground,
                         lineWidth: 1
                     )
             )
@@ -1926,14 +1926,14 @@ struct RedeemRewardsView: View {
                                         .frame(maxWidth: .infinity)
                                         .padding(.vertical, 12)
                                         .background(
-                                            selectedType == type.0 ? .orange.opacity(0.2) : .white.opacity(0.1),
+                                            selectedType == type.0 ? .orange.opacity(0.2) : theme.cardBackgroundLight,
                                             in: RoundedRectangle(cornerRadius: 10)
                                         )
-                                        .foregroundStyle(selectedType == type.0 ? .orange : .white.opacity(0.6))
+                                        .foregroundStyle(selectedType == type.0 ? .orange : theme.secondaryTextColor)
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
                                                 .strokeBorder(
-                                                    selectedType == type.0 ? .orange.opacity(0.5) : .white.opacity(0.1),
+                                                    selectedType == type.0 ? .orange.opacity(0.5) : theme.cardBackgroundLight,
                                                     lineWidth: 1
                                                 )
                                         )
@@ -2283,9 +2283,9 @@ struct RewardsHistoryView: View {
     private var coinSummaryCard: some View {
         HStack(spacing: 0) {
             summaryStat(value: summaryEarned, label: "Earned", color: .green)
-            Divider().frame(height: 36).overlay(.white.opacity(0.2))
+            Divider().frame(height: 36).overlay(theme.tertiaryTextColor)
             summaryStat(value: summaryInReview, label: "In Review", color: .orange)
-            Divider().frame(height: 36).overlay(.white.opacity(0.2))
+            Divider().frame(height: 36).overlay(theme.tertiaryTextColor)
             summaryStat(value: summaryRedeemed, label: "Redeemed", color: calmAccent)
         }
         .padding(.vertical, 14)
@@ -2323,11 +2323,11 @@ struct RewardsHistoryView: View {
                 } label: {
                     Text(option.rawValue)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(selectedFilter == option ? .white : .white.opacity(0.5))
+                        .foregroundStyle(selectedFilter == option ? theme.textColor : theme.secondaryTextColor)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            selectedFilter == option ? .white.opacity(0.2) : .clear,
+                            selectedFilter == option ? theme.cardBackground : .clear,
                             in: Capsule()
                         )
                 }

@@ -1632,7 +1632,7 @@ struct DateTasksView: View {
                         .padding(.horizontal, 24)
                         .padding(.vertical, 10)
                         .background(.primary.opacity(0.2), in: Capsule())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.textColor)
                 }
                 .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
                 .padding(.bottom, 16)

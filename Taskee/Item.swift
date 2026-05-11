@@ -1572,6 +1572,26 @@ struct ChildTheme {
         isLight ? .light : .dark
     }
 
+    var textColor: Color {
+        isLight ? .black : .white
+    }
+
+    var secondaryTextColor: Color {
+        isLight ? .black.opacity(0.6) : .white.opacity(0.6)
+    }
+
+    var tertiaryTextColor: Color {
+        isLight ? .black.opacity(0.35) : .white.opacity(0.35)
+    }
+
+    var cardBackground: Color {
+        isLight ? .black.opacity(0.08) : .white.opacity(0.12)
+    }
+
+    var cardBackgroundLight: Color {
+        isLight ? .black.opacity(0.05) : .white.opacity(0.08)
+    }
+
     var fontName: String? {
         fontStylePresets.first { $0.id == fontId }?.fontName
     }
