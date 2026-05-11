@@ -32,8 +32,6 @@ struct ChildDashboardView: View {
     @State private var showPickupLimit = false
     @State private var showPickupAck = false
     @State private var pickupAckParentName = ""
-    @State private var pickupPosition: CGPoint = .zero
-    @State private var pickupInitialized = false
     @State private var showNotificationCenter = false
     @State private var showRedeemSheet = false
     @State private var showRewardsHistory = false
@@ -216,13 +214,19 @@ struct ChildDashboardView: View {
                         taskList
                     }
 
-                    HStack(spacing: 14) {
-                        familyChatButton
-                        shoppingBagButton
+                    HStack {
+                        HStack(spacing: 10) {
+                            pickupButton
+                            familyChatButton
+                            shoppingBagButton
+                        }
+                        .padding(.leading, 20)
+
+                        Spacer()
+
                         addTaskButton
+                            .padding(.trailing, 20)
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 20)
                     .padding(.bottom, 16)
                 }
 
@@ -235,7 +239,7 @@ struct ChildDashboardView: View {
 
                 FlyingCoinsOverlay(coins: $flyingCoins)
 
-                pickupFloatingButton
+                Color.clear.frame(height: 0)
                     .alert("On the way!", isPresented: $showPickupAck) {
                         Button("OK", role: .cancel) { }
                     } message: {
@@ -676,73 +680,35 @@ struct ChildDashboardView: View {
         }
     }
 
-    private var pickupFloatingButton: some View {
-        GeometryReader { geo in
-            Button {
-                guard subscriptionManager.canSendPickup() else {
-                    showPickupLimit = true
-                    return
-                }
-                subscriptionManager.recordPickup()
-                Task {
-                    if let member = allMembers.first(where: { $0.name == authManager.userName }) {
-                        member.lastPickupAt = Date()
-                        await cloudKitManager.pushMember(member, familyCode: authManager.familyCode)
-                    }
-                }
-                showPickupSent = true
-            } label: {
-                ZStack {
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-                        .offset(x: -2, y: -4)
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.yellow)
-                        .offset(x: 14, y: 10)
-                }
-                .frame(width: 64, height: 64)
-                .background(calmAccent, in: Circle())
-                .shadow(color: calmAccent.opacity(0.5), radius: 10, y: 4)
+    private var pickupButton: some View {
+        Button {
+            guard subscriptionManager.canSendPickup() else {
+                showPickupLimit = true
+                return
             }
-            .position(pickupPosition)
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        pickupPosition = clampPosition(
-                            CGPoint(x: value.location.x, y: value.location.y),
-                            in: geo.size
-                        )
-                    }
-                    .onEnded { _ in
-                        UserDefaults.standard.set(Float(pickupPosition.x), forKey: "pickupButtonX")
-                        UserDefaults.standard.set(Float(pickupPosition.y), forKey: "pickupButtonY")
-                    }
-            )
-            .onAppear {
-                guard !pickupInitialized else { return }
-                pickupInitialized = true
-                let savedX = UserDefaults.standard.float(forKey: "pickupButtonX")
-                let savedY = UserDefaults.standard.float(forKey: "pickupButtonY")
-                if savedX != 0 || savedY != 0 {
-                    pickupPosition = CGPoint(x: CGFloat(savedX), y: CGFloat(savedY))
-                } else {
-                    pickupPosition = CGPoint(
-                        x: geo.size.width - 52,
-                        y: geo.size.height - 90
-                    )
+            subscriptionManager.recordPickup()
+            Task {
+                if let member = allMembers.first(where: { $0.name == authManager.userName }) {
+                    member.lastPickupAt = Date()
+                    await cloudKitManager.pushMember(member, familyCode: authManager.familyCode)
                 }
             }
+            showPickupSent = true
+        } label: {
+            ZStack {
+                Image(systemName: "car.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .offset(x: -1, y: -2)
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.yellow)
+                    .offset(x: 10, y: 8)
+            }
+            .frame(width: 44, height: 44)
+            .background(calmAccent, in: Circle())
         }
-        .allowsHitTesting(true)
-    }
-
-    private func clampPosition(_ point: CGPoint, in size: CGSize) -> CGPoint {
-        CGPoint(
-            x: min(max(point.x, 40), size.width - 40),
-            y: min(max(point.y, 40), size.height - 40)
-        )
+        .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
     }
 
     private var addTaskButton: some View {
@@ -750,9 +716,9 @@ struct ChildDashboardView: View {
             showAddTask = true
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: 56, height: 56)
                 .background(calmAccent, in: Circle())
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
@@ -966,11 +932,12 @@ struct ChildDashboardView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.primary.opacity(0.6))
+                    .foregroundStyle(childTheme.secondaryTextColor)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.primary.opacity(0.1), in: Capsule())
+                    .background(childTheme.cardBackgroundLight, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
             Button {
@@ -982,11 +949,12 @@ struct ChildDashboardView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.primary.opacity(0.6))
+                .foregroundStyle(childTheme.secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.primary.opacity(0.1), in: Capsule())
+                .background(childTheme.cardBackgroundLight, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)

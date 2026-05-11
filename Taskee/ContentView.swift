@@ -180,16 +180,17 @@ struct WeekCalendarStrip: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary.opacity(0.6))
+                        .foregroundStyle(theme.secondaryTextColor)
                         .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
 
                 VStack(spacing: 2) {
                     Text(weekRangeLabel)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary.opacity(0.7))
+                        .foregroundStyle(theme.secondaryTextColor)
                     if weekOffset != 0 {
                         Button {
                             withAnimation(.snappy) {
@@ -201,6 +202,7 @@ struct WeekCalendarStrip: View {
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundStyle(calmAccent)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -211,9 +213,10 @@ struct WeekCalendarStrip: View {
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary.opacity(0.6))
+                        .foregroundStyle(theme.secondaryTextColor)
                         .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 20)
 
@@ -228,24 +231,24 @@ struct WeekCalendarStrip: View {
                         VStack(spacing: 4) {
                             Text(dayLabel(for: date))
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.primary.opacity(isSelected ? 1 : 0.5))
+                                .foregroundStyle(isSelected ? theme.textColor : theme.secondaryTextColor)
 
                             Text(date.formatted(.dateTime.day()))
                                 .font(.system(size: 16, weight: isSelected ? .bold : .semibold))
-                                .foregroundStyle(Color.primary.opacity(isSelected ? 1 : 0.7))
+                                .foregroundStyle(isSelected ? theme.textColor : theme.secondaryTextColor)
 
                             if count > 0 {
                                 Text("\(count)")
                                     .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(isSelected ? Color.primary : calmAccent)
+                                    .foregroundStyle(isSelected ? theme.textColor : calmAccent)
                                     .frame(minWidth: 16, minHeight: 14)
                                     .background(
-                                        isSelected ? calmAccent : Color.primary.opacity(0.15),
+                                        isSelected ? calmAccent : theme.cardBackgroundLight,
                                         in: Capsule()
                                     )
                             } else {
                                 Circle()
-                                    .fill(.primary.opacity(0.15))
+                                    .fill(theme.tertiaryTextColor)
                                     .frame(width: 6, height: 6)
                                     .padding(.vertical, 4)
                             }
@@ -253,7 +256,7 @@ struct WeekCalendarStrip: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(
-                            isSelected ? calmAccent.opacity(0.3) : Color.primary.opacity(0.06),
+                            isSelected ? calmAccent.opacity(0.3) : theme.cardBackgroundLight,
                             in: RoundedRectangle(cornerRadius: 12)
                         )
                         .overlay(
@@ -458,8 +461,8 @@ struct ContentView: View {
                             }
                         }
                         .onChange(of: showOpenOnly) {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                proxy.scrollTo("Today", anchor: .top)
                             }
                         }
                     }
@@ -473,13 +476,18 @@ struct ContentView: View {
                         refreshUnreadCount()
                     }
 
-                    HStack(spacing: 14) {
-                        familyChatButton
-                        shoppingBagButton
+                    HStack {
+                        HStack(spacing: 10) {
+                            familyChatButton
+                            shoppingBagButton
+                        }
+                        .padding(.leading, 20)
+
+                        Spacer()
+
                         addTaskButton
+                            .padding(.trailing, 20)
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 20)
                     .padding(.bottom, 8)
                 }
 
@@ -796,8 +804,8 @@ struct ContentView: View {
                                     }
 
                                 Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.primary.opacity(0.7))
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(parentTheme.secondaryTextColor)
                                     .lineLimit(1)
                             }
                         }
@@ -841,8 +849,8 @@ struct ContentView: View {
                                 AvatarView(avatarId: child.avatar, size: 44)
 
                                 Text(child.name.count > 6 ? "\(child.name.prefix(6)).." : child.name)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.primary.opacity(0.7))
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(parentTheme.secondaryTextColor)
                                     .lineLimit(1)
                             }
                         }
@@ -965,11 +973,12 @@ struct ContentView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.primary.opacity(0.6))
+                    .foregroundStyle(parentTheme.secondaryTextColor)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.primary.opacity(0.1), in: Capsule())
+                    .background(parentTheme.cardBackgroundLight, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
             Button {
@@ -981,11 +990,12 @@ struct ContentView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.primary.opacity(0.6))
+                .foregroundStyle(parentTheme.secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.primary.opacity(0.1), in: Capsule())
+                .background(parentTheme.cardBackgroundLight, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -1097,7 +1107,7 @@ struct ContentView: View {
                         .draggable(TaskTransfer(id: task.id))
                     }
                 }
-                .id(group.key)
+                .id(index == todayGroupIndex ? "Today" : group.key)
                 .dropDestination(for: TaskTransfer.self) { items, _ in
                     guard let transfer = items.first,
                           let refDate = group.tasks.first?.targetDate else { return false }
@@ -1127,7 +1137,7 @@ struct ContentView: View {
                 )) {
                     GroupCard(dateLabel: group.key, count: group.tasks.count)
                 }
-                .id(group.key)
+                .id(index == todayGroupIndex ? "Today" : group.key)
             }
         }
         .padding(.horizontal, 16)
@@ -1172,9 +1182,9 @@ struct ContentView: View {
             showingAddTask = true
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: 56, height: 56)
                 .background(calmAccent, in: Circle())
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
@@ -1434,11 +1444,12 @@ struct DateTasksView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.primary.opacity(0.6))
+                    .foregroundStyle(theme.secondaryTextColor)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.primary.opacity(0.1), in: Capsule())
+                    .background(theme.cardBackgroundLight, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
             Button {
@@ -1450,11 +1461,12 @@ struct DateTasksView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.primary.opacity(0.6))
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.primary.opacity(0.1), in: Capsule())
+                .background(theme.cardBackgroundLight, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -2012,11 +2024,12 @@ struct ChildTasksView: View {
                         Text(isExpanded ? "Collapse" : "Expand")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(.primary.opacity(0.6))
+                    .foregroundStyle(theme.secondaryTextColor)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.primary.opacity(0.1), in: Capsule())
+                    .background(theme.cardBackgroundLight, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
             Button {
@@ -2028,11 +2041,12 @@ struct ChildTasksView: View {
                     Text(showCalendarView ? "List" : "Calendar")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.primary.opacity(0.6))
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.primary.opacity(0.1), in: Capsule())
+                .background(theme.cardBackgroundLight, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
