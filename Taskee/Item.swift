@@ -2018,3 +2018,176 @@ struct RecurringExtensionSheet: View {
         )
     }
 }
+
+// MARK: - Monthly Quest
+
+enum QuestRank: String, CaseIterable {
+    case rookie = "Rookie"
+    case knight = "Knight"
+    case ninja = "Ninja"
+
+    var icon: String {
+        switch self {
+        case .rookie: return "shield.fill"
+        case .knight: return "bolt.shield.fill"
+        case .ninja: return "flame.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .rookie: return .gray
+        case .knight: return .blue
+        case .ninja: return .orange
+        }
+    }
+
+    var minDays: Int {
+        switch self {
+        case .rookie: return 0
+        case .knight: return 10
+        case .ninja: return 20
+        }
+    }
+}
+
+struct MonthlyQuest {
+    let activeDays: Int
+    let totalDaysInMonth: Int
+
+    var rank: QuestRank {
+        if activeDays >= 20 { return .ninja }
+        if activeDays >= 10 { return .knight }
+        return .rookie
+    }
+
+    var nextRank: QuestRank? {
+        switch rank {
+        case .rookie: return .knight
+        case .knight: return .ninja
+        case .ninja: return nil
+        }
+    }
+
+    var progress: Double {
+        guard totalDaysInMonth > 0 else { return 0 }
+        return min(Double(activeDays) / Double(totalDaysInMonth), 1.0)
+    }
+
+    var daysToNextRank: Int? {
+        guard let next = nextRank else { return nil }
+        return max(0, next.minDays - activeDays)
+    }
+
+    static func compute(tasks: [Item], userName: String) -> MonthlyQuest {
+        let calendar = Calendar.current
+        let now = Date()
+        let range = calendar.range(of: .day, in: .month, for: now)!
+        let totalDays = range.count
+
+        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
+
+        let completedThisMonth = tasks.filter {
+            $0.assignedTo == userName
+            && $0.isApproved
+            && !$0.isArchived
+            && $0.targetDate >= startOfMonth
+            && $0.targetDate <= now
+        }
+
+        var uniqueDays = Set<Int>()
+        for task in completedThisMonth {
+            let day = calendar.component(.day, from: task.targetDate)
+            uniqueDays.insert(day)
+        }
+
+        return MonthlyQuest(activeDays: uniqueDays.count, totalDaysInMonth: totalDays)
+    }
+}
+
+struct QuestProgressBar: View {
+    let quest: MonthlyQuest
+    var userName: String = ""
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.orange)
+                if !userName.isEmpty {
+                    Text(userName)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(theme.textColor)
+                    Text("·")
+                        .foregroundStyle(theme.tertiaryTextColor)
+                }
+                Text("\(quest.activeDays) day\(quest.activeDays == 1 ? "" : "s")")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(theme.secondaryTextColor)
+                Spacer()
+                HStack(spacing: 4) {
+                    Image(systemName: quest.rank.icon)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(quest.rank.color)
+                    Text(quest.rank.rawValue)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(quest.rank.color)
+                }
+            }
+
+            ZStack(alignment: .leading) {
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(theme.cardBackground)
+                        .frame(height: 10)
+
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(
+                            LinearGradient(
+                                colors: [quest.rank.color, (quest.nextRank ?? quest.rank).color],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(6, geo.size.width * quest.progress), height: 10)
+
+                    ForEach(QuestRank.allCases, id: \.self) { rank in
+                        let position = Double(rank.minDays) / Double(max(quest.totalDaysInMonth, 1))
+                        Circle()
+                            .fill(quest.activeDays >= rank.minDays ? rank.color : theme.tertiaryTextColor)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Image(systemName: rank.icon)
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.white)
+                            )
+                            .position(x: geo.size.width * position, y: 5)
+                    }
+                }
+                .frame(height: 14)
+            }
+
+            HStack {
+                Text("Rookie")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(quest.activeDays >= 0 ? QuestRank.rookie.color : theme.tertiaryTextColor)
+                Spacer()
+                Text("Knight")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(quest.activeDays >= 10 ? QuestRank.knight.color : theme.tertiaryTextColor)
+                Spacer()
+                Text("Ninja")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(quest.activeDays >= 20 ? QuestRank.ninja.color : theme.tertiaryTextColor)
+            }
+        }
+        .padding(12)
+        .background(theme.cardBackgroundLight, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(theme.tertiaryTextColor, lineWidth: 0.5)
+        )
+    }
+}

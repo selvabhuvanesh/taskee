@@ -180,6 +180,13 @@ struct ChildDashboardView: View {
                         )
                         .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
 
+                    QuestProgressBar(
+                        quest: MonthlyQuest.compute(tasks: allTasks, userName: authManager.userName),
+                        theme: childTheme
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+
                     if showCalendarView {
                         dashboardViewModeToggle
                         WeekCalendarStrip(
@@ -247,14 +254,13 @@ struct ChildDashboardView: View {
                         Text("\(pickupAckParentName) is coming to pick you up!")
                     }
 
+            }
+            .overlay(alignment: .bottom) {
                 if let note = stickyNote {
-                    VStack {
-                        Spacer()
-                        StickyNoteView(message: note.message, color: note.color) {
-                            withAnimation { stickyNote = nil }
-                        }
-                        .padding(.bottom, 80)
+                    StickyNoteView(message: note.message, color: note.color) {
+                        withAnimation { stickyNote = nil }
                     }
+                    .padding(.bottom, 80)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1135,54 +1141,61 @@ struct ChildDashboardView: View {
             .buttonStyle(.plain)
             .disabled(task.isApproved)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.name)
-                    .font(childTheme.font(.body))
-                    .lineLimit(1)
-                    .strikethrough(task.isApproved)
-                    .foregroundStyle(task.isApproved ? childTheme.tertiaryTextColor : childTheme.textColor)
+            Button {
+                taskToEdit = task
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.name)
+                            .font(childTheme.font(.body))
+                            .lineLimit(1)
+                            .strikethrough(task.isApproved)
+                            .foregroundStyle(task.isApproved ? childTheme.tertiaryTextColor : childTheme.textColor)
 
-                HStack(spacing: 6) {
-                    if task.isMissed {
-                        Text("Missed")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.red)
-                    } else if task.isInReview {
-                        Text("In Review")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    } else if task.isApproved {
-                        Text("Approved")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.green)
-                    }
+                        HStack(spacing: 6) {
+                            if task.isMissed {
+                                Text("Missed")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            } else if task.isInReview {
+                                Text("In Review")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            } else if task.isApproved {
+                                Text("Approved")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.green)
+                            }
 
-                    Text(task.targetDate, format: .dateTime.hour().minute())
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.primary)
+                            Text(task.targetDate, format: .dateTime.hour().minute())
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
 
-                    if task.reward > 0 {
-                        Text("•")
-                            .foregroundStyle(.primary.opacity(0.3))
-                        CoinDisplay(count: Int(task.reward), earned: task.isApproved)
-                    }
+                            if task.reward > 0 {
+                                Text("•")
+                                    .foregroundStyle(.primary.opacity(0.3))
+                                CoinDisplay(count: Int(task.reward), earned: task.isApproved)
+                            }
 
-                    if task.hasGift {
-                        Image(systemName: task.giftRevealed ? "gift.circle.fill" : "gift.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(task.isApproved && !task.giftRevealed ? Color(red: 1.0, green: 0.2, blue: 0.5) : Color(red: 1.0, green: 0.2, blue: 0.5).opacity(0.7))
-                            .overlay(
-                                Image(systemName: task.giftRevealed ? "gift.circle" : "gift")
+                            if task.hasGift {
+                                Image(systemName: task.giftRevealed ? "gift.circle.fill" : "gift.fill")
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.primary.opacity(0.6))
-                            )
-                            .symbolEffect(.pulse, options: .repeating, isActive: task.isApproved && !task.giftRevealed)
+                                    .foregroundStyle(task.isApproved && !task.giftRevealed ? Color(red: 1.0, green: 0.2, blue: 0.5) : Color(red: 1.0, green: 0.2, blue: 0.5).opacity(0.7))
+                                    .overlay(
+                                        Image(systemName: task.giftRevealed ? "gift.circle" : "gift")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundStyle(.primary.opacity(0.6))
+                                    )
+                                    .symbolEffect(.pulse, options: .repeating, isActive: task.isApproved && !task.giftRevealed)
+                            }
+                        }
+                        .lineLimit(1)
                     }
+                    Spacer()
                 }
-                .lineLimit(1)
+                .contentShape(Rectangle())
             }
-
-            Spacer()
+            .buttonStyle(.plain)
 
             if task.isOpen && task.isPastDue {
                 Button {
@@ -1239,8 +1252,6 @@ struct ChildDashboardView: View {
                 .buttonStyle(.plain)
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture { taskToEdit = task }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .opacity(task.isApproved ? 0.7 : 1)

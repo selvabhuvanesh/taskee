@@ -421,7 +421,12 @@ struct ContentView: View {
                             .padding(.top, 8)
                     }
 
-
+                    QuestProgressBar(
+                        quest: MonthlyQuest.compute(tasks: tasks, userName: authManager.userName),
+                        theme: parentTheme
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
 
                     ScrollViewReader { proxy in
                         ScrollView {
@@ -498,17 +503,15 @@ struct ContentView: View {
                     rewardAmount: celebrationReward
                 )
 
+            }
+            .overlay(alignment: .bottom) {
                 if let note = stickyNote {
-                    VStack {
-                        Spacer()
-                        StickyNoteView(message: note.message, color: note.color) {
-                            withAnimation { stickyNote = nil }
-                        }
-                        .padding(.bottom, 80)
+                    StickyNoteView(message: note.message, color: note.color) {
+                        withAnimation { stickyNote = nil }
                     }
+                    .padding(.bottom, 80)
                     .transition(.scale.combined(with: .opacity))
                 }
-
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
@@ -710,8 +713,24 @@ struct ContentView: View {
                 children: children,
                 otherParent: otherParent,
                 allMembers: allMembers,
-                theme: parentTheme
+                theme: parentTheme,
+                editAllRecurring: editAllRecurring
             ))
+            .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
+                Button("Edit This Task Only") {
+                    editAllRecurring = false
+                    taskToEdit = pendingEditTask
+                    pendingEditTask = nil
+                }
+                Button("Edit All Recurring") {
+                    editAllRecurring = true
+                    taskToEdit = pendingEditTask
+                    pendingEditTask = nil
+                }
+                Button("Cancel", role: .cancel) { pendingEditTask = nil }
+            } message: {
+                Text("Would you like to edit just this task or all open instances?")
+            }
             .task {
                 archiveOldTasks()
                 checkRecurringExtension()
@@ -802,6 +821,15 @@ struct ContentView: View {
                                             .foregroundStyle(.cyan)
                                             .offset(x: 2, y: 2)
                                     }
+                                    .overlay(alignment: .topLeading) {
+                                        let rank = MonthlyQuest.compute(tasks: tasks, userName: parent.name).rank
+                                        Image(systemName: rank.icon)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(rank.color)
+                                            .frame(width: 18, height: 18)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                            .offset(x: -4, y: -4)
+                                    }
 
                                 Text(parent.name.count > 6 ? "\(parent.name.prefix(6)).." : parent.name)
                                     .font(.caption2.weight(.bold))
@@ -847,6 +875,15 @@ struct ContentView: View {
                         )) {
                             VStack(spacing: 4) {
                                 AvatarView(avatarId: child.avatar, size: 44)
+                                    .overlay(alignment: .topLeading) {
+                                        let rank = MonthlyQuest.compute(tasks: tasks, userName: child.name).rank
+                                        Image(systemName: rank.icon)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(rank.color)
+                                            .frame(width: 18, height: 18)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                            .offset(x: -4, y: -4)
+                                    }
 
                                 Text(child.name.count > 6 ? "\(child.name.prefix(6)).." : child.name)
                                     .font(.caption2.weight(.bold))
@@ -1606,6 +1643,13 @@ struct DateTasksView: View {
             VStack(spacing: 0) {
                 if !memberName.isEmpty {
                     memberHeader
+
+                    QuestProgressBar(
+                        quest: MonthlyQuest.compute(tasks: allTasks, userName: memberName),
+                        theme: theme
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
                 }
 
                 dateViewModeToggle
@@ -2177,6 +2221,14 @@ struct ChildTasksView: View {
 
             VStack(spacing: 0) {
                 childHeader
+
+                QuestProgressBar(
+                    quest: MonthlyQuest.compute(tasks: allTasks, userName: child.name),
+                    theme: theme
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+
                 childViewModeToggle
 
                 if showCalendarView {
@@ -2611,6 +2663,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     var otherParent: FamilyMember?
     let allMembers: [FamilyMember]
     var theme: ChildTheme
+    var editAllRecurring: Bool = false
 
     func body(content: Content) -> some View {
         content
@@ -2645,7 +2698,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
             }
             .sheet(item: $taskToEdit) { task in
                 EditTaskView(
-                    task: task, children: children, otherParent: otherParent, theme: theme,
+                    task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
                     onDelete: { taskToDelete = task; taskToEdit = nil },
                     onMarkMissed: {
                         task.status = "missed"
@@ -2770,62 +2823,69 @@ struct TaskRow: View {
             .buttonStyle(.plain)
             .disabled(task.isApproved)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.name)
-                    .font(theme.font(.body))
-                    .lineLimit(1)
-                    .strikethrough(task.isApproved)
-                    .foregroundStyle(Color.primary.opacity(task.isApproved ? 0.35 : 1))
-
-                HStack(spacing: 6) {
-                    if task.isMissed {
-                        Text("Missed")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.red)
-                    } else if task.isInReview {
-                        Text("In Review")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    } else if task.isApproved {
-                        Text("Approved")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.green)
-                    }
-
-                    Text(task.targetDate, format: .dateTime.hour().minute())
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.primary)
-
-                    if task.reward > 0 {
-                        Text("•")
-                            .foregroundStyle(.primary.opacity(0.3))
-                        CoinDisplay(count: Int(task.reward), earned: task.isApproved)
-                    }
-
-                    if task.hasGift {
-                        Image(systemName: "gift.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color(red: 1.0, green: 0.2, blue: 0.5))
-                            .overlay(
-                                Image(systemName: "gift")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.primary.opacity(0.6))
-                            )
-                    }
-
-                    if showAssignee && !task.assignedTo.isEmpty {
-                        Text("•")
-                            .foregroundStyle(.primary.opacity(0.3))
-                        Label(task.assignedTo, systemImage: "person.fill")
-                            .font(.caption)
-                            .foregroundStyle(calmAccent.opacity(0.8))
+            Button {
+                onEdit?()
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.name)
+                            .font(theme.font(.body))
                             .lineLimit(1)
-                    }
-                }
-                .lineLimit(1)
-            }
+                            .strikethrough(task.isApproved)
+                            .foregroundStyle(Color.primary.opacity(task.isApproved ? 0.35 : 1))
 
-            Spacer()
+                        HStack(spacing: 6) {
+                            if task.isMissed {
+                                Text("Missed")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            } else if task.isInReview {
+                                Text("In Review")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            } else if task.isApproved {
+                                Text("Approved")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.green)
+                            }
+
+                            Text(task.targetDate, format: .dateTime.hour().minute())
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+
+                            if task.reward > 0 {
+                                Text("•")
+                                    .foregroundStyle(.primary.opacity(0.3))
+                                CoinDisplay(count: Int(task.reward), earned: task.isApproved)
+                            }
+
+                            if task.hasGift {
+                                Image(systemName: "gift.fill")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(Color(red: 1.0, green: 0.2, blue: 0.5))
+                                    .overlay(
+                                        Image(systemName: "gift")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundStyle(.primary.opacity(0.6))
+                                    )
+                            }
+
+                            if showAssignee && !task.assignedTo.isEmpty {
+                                Text("•")
+                                    .foregroundStyle(.primary.opacity(0.3))
+                                Label(task.assignedTo, systemImage: "person.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(calmAccent.opacity(0.8))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if task.isOpen && task.isPastDue, let onMarkMissed {
                 Button {
@@ -2878,8 +2938,6 @@ struct TaskRow: View {
                 }
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture { onEdit?() }
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
         .opacity(task.isApproved ? 0.7 : 1)
