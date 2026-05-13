@@ -1039,7 +1039,12 @@ struct ContentView: View {
                             taskToEdit = task
                         }
                     },
-                    onDelete: { taskToDelete = task }
+                    onDelete: { taskToDelete = task },
+                    onMarkMissed: {
+                        task.status = "missed"
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                    }
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
@@ -1092,7 +1097,12 @@ struct ContentView: View {
                                     taskToEdit = task
                                 }
                             },
-                            onDelete: { taskToDelete = task }
+                            onDelete: { taskToDelete = task },
+                            onMarkMissed: {
+                                task.status = "missed"
+                                let familyCode = authManager.familyCode
+                                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                            }
                         )
                         .padding(.horizontal, 16)
                         .padding(.vertical, 2)
@@ -1135,8 +1145,9 @@ struct ContentView: View {
                     otherParent: otherParent,
                     theme: parentTheme
                 )) {
-                    GroupCard(dateLabel: group.key, count: group.tasks.count)
+                    GroupCard(dateLabel: group.key, count: group.tasks.count, theme: parentTheme)
                 }
+                .buttonStyle(.plain)
                 .id(index == todayGroupIndex ? "Today" : group.key)
             }
         }
@@ -1264,31 +1275,32 @@ struct ContentView: View {
 struct GroupCard: View {
     let dateLabel: String
     let count: Int
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(dateLabel)
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(theme.textColor)
                     .lineLimit(1)
 
                 Text("\(count) task\(count == 1 ? "" : "s")")
                     .font(.subheadline)
-                    .foregroundStyle(.primary.opacity(0.55))
+                    .foregroundStyle(theme.secondaryTextColor)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary.opacity(0.35))
+                .foregroundStyle(theme.tertiaryTextColor)
         }
         .padding(16)
-        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                .strokeBorder(theme.cardBackgroundLight, lineWidth: 1)
         )
     }
 }
@@ -1418,7 +1430,12 @@ struct DateTasksView: View {
                     taskToEdit = task
                 }
             },
-            onDelete: { taskToDelete = task }
+            onDelete: { taskToDelete = task },
+            onMarkMissed: {
+                task.status = "missed"
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+            }
         )
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
@@ -1495,7 +1512,7 @@ struct DateTasksView: View {
                                             .draggable(TaskTransfer(id: task.id))
                                     }
                                 } else {
-                                    GroupCard(dateLabel: group.key, count: group.tasks.count)
+                                    GroupCard(dateLabel: group.key, count: group.tasks.count, theme: theme)
                                 }
                             }
                             .id(group.key)
@@ -1677,7 +1694,16 @@ struct DateTasksView: View {
             deleteAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring)
+            EditTaskView(
+                task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
+                onDelete: { taskToDelete = task; taskToEdit = nil },
+                onMarkMissed: {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                    taskToEdit = nil
+                }
+            )
         }
         .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
             Button("Edit This Task Only") {
@@ -2075,7 +2101,12 @@ struct ChildTasksView: View {
                     taskToEdit = task
                 }
             },
-            onDelete: { taskToDelete = task }
+            onDelete: { taskToDelete = task },
+            onMarkMissed: {
+                task.status = "missed"
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+            }
         )
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
@@ -2111,7 +2142,7 @@ struct ChildTasksView: View {
                                         .draggable(TaskTransfer(id: task.id))
                                 }
                             } else {
-                                GroupCard(dateLabel: group.key, count: group.tasks.count)
+                                GroupCard(dateLabel: group.key, count: group.tasks.count, theme: theme)
                             }
                         }
                         .id(group.key)
@@ -2221,7 +2252,16 @@ struct ChildTasksView: View {
             childApproveAlertMessageView
         }
         .sheet(item: $taskToEdit) { task in
-            EditTaskView(task: task, children: allChildren, otherParent: otherParent, theme: theme, editAll: editAllRecurring)
+            EditTaskView(
+                task: task, children: allChildren, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
+                onDelete: { taskToDelete = task; taskToEdit = nil },
+                onMarkMissed: {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                    taskToEdit = nil
+                }
+            )
         }
         .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
             Button("Edit This Task Only") {
@@ -2604,7 +2644,16 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                 approveMessage
             }
             .sheet(item: $taskToEdit) { task in
-                EditTaskView(task: task, children: children, otherParent: otherParent, theme: theme)
+                EditTaskView(
+                    task: task, children: children, otherParent: otherParent, theme: theme,
+                    onDelete: { taskToDelete = task; taskToEdit = nil },
+                    onMarkMissed: {
+                        task.status = "missed"
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                        taskToEdit = nil
+                    }
+                )
             }
     }
 
@@ -2650,7 +2699,7 @@ struct TaskRow: View {
     var onApprove: (() -> Void)?
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
-    @State private var showDetail = false
+    var onMarkMissed: (() -> Void)?
     @State private var showMissedOptions = false
 
     private var statusColor: Color {
@@ -2775,10 +2824,27 @@ struct TaskRow: View {
                 }
                 .lineLimit(1)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { showDetail = true }
 
             Spacer()
+
+            if task.isOpen && task.isPastDue, let onMarkMissed {
+                Button {
+                    onMarkMissed()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                        Text("Missed")
+                            .font(.system(size: 10, weight: .semibold))
+                            .fixedSize()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.red, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
 
             if onEdit != nil || onDelete != nil {
                 HStack(spacing: 14) {
@@ -2812,6 +2878,8 @@ struct TaskRow: View {
                 }
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { onEdit?() }
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
         .opacity(task.isApproved ? 0.7 : 1)
@@ -2829,17 +2897,6 @@ struct TaskRow: View {
                 Label("Edit", systemImage: "pencil")
             }
             .tint(calmAccent)
-        }
-        .sheet(isPresented: $showDetail) {
-            TaskDetailView(
-                task: task,
-                theme: theme,
-                canEdit: onEdit != nil,
-                canDelete: onDelete != nil,
-                onEdit: { showDetail = false; onEdit?() },
-                onDelete: { showDetail = false; onDelete?() }
-            )
-            .presentationDetents([.medium, .large])
         }
         .confirmationDialog("This task was missed", isPresented: $showMissedOptions, titleVisibility: .visible) {
             Button("Reopen & Replan") {
@@ -3786,6 +3843,9 @@ struct EditTaskView: View {
     let children: [FamilyMember]
     var otherParent: FamilyMember? = nil
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var onDelete: (() -> Void)?
+    var onMarkMissed: (() -> Void)?
+    var canEdit: Bool = true
 
     @State private var taskName: String
     @State private var targetDate: Date
@@ -3793,17 +3853,21 @@ struct EditTaskView: View {
     @State private var rewardText: String
     @State private var includeGift: Bool
     @State private var giftText: String
+    @State private var showDeleteConfirm = false
 
     private let originalName: String
     private let originalAssignee: String
     let editAll: Bool
 
-    init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default"), editAll: Bool = false) {
+    init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default"), editAll: Bool = false, onDelete: (() -> Void)? = nil, onMarkMissed: (() -> Void)? = nil, canEdit: Bool = true) {
         self.task = task
         self.children = children
         self.otherParent = otherParent
         self.theme = theme
         self.editAll = editAll
+        self.onDelete = onDelete
+        self.onMarkMissed = onMarkMissed
+        self.canEdit = canEdit
         self.originalName = task.name
         self.originalAssignee = task.assignedTo
         _taskName = State(initialValue: task.name)
@@ -3846,6 +3910,7 @@ struct EditTaskView: View {
                                     RoundedRectangle(cornerRadius: 14)
                                         .strokeBorder(taskName.isEmpty ? Color.primary.opacity(0.35) : Color.green.opacity(0.6), lineWidth: 1.5)
                                 )
+                                .disabled(!canEdit)
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -3863,6 +3928,7 @@ struct EditTaskView: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.primary.opacity(0.2), lineWidth: 1)
                             )
+                            .disabled(!canEdit)
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -3878,6 +3944,7 @@ struct EditTaskView: View {
                                     .font(.body)
                                     .foregroundStyle(.primary)
                                     .keyboardType(.decimalPad)
+                                    .disabled(!canEdit)
                             }
                             .padding(14)
                             .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
@@ -3904,6 +3971,7 @@ struct EditTaskView: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
+                            .disabled(!canEdit)
 
                             if includeGift {
                                 Text("Gift Description")
@@ -3919,6 +3987,7 @@ struct EditTaskView: View {
                                         RoundedRectangle(cornerRadius: 12)
                                             .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
                                     )
+                                    .disabled(!canEdit)
                             }
                         }
 
@@ -3945,6 +4014,57 @@ struct EditTaskView: View {
                                 }
                             }
                         }
+                        .disabled(!canEdit)
+
+                        if task.isOpen && task.isPastDue, let onMarkMissed {
+                            Button {
+                                onMarkMissed()
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 16))
+                                    Text("Mark as Missed")
+                                        .font(.body.weight(.semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.red, in: RoundedRectangle(cornerRadius: 14))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if let onDelete {
+                            Button {
+                                showDeleteConfirm = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "trash.fill")
+                                        .font(.system(size: 14))
+                                    Text("Delete Task")
+                                        .font(.body.weight(.semibold))
+                                }
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.red.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(.red.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .alert("Delete Task?", isPresented: $showDeleteConfirm) {
+                                Button("Delete", role: .destructive) {
+                                    onDelete()
+                                    dismiss()
+                                }
+                                Button("Cancel", role: .cancel) { }
+                            } message: {
+                                Text("This action cannot be undone.")
+                            }
+                        }
 
                         Spacer()
                     }
@@ -3953,22 +4073,24 @@ struct EditTaskView: View {
             }
             .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, theme.colorScheme)
-            .navigationTitle("Edit Task")
+            .navigationTitle(canEdit ? "Edit Task" : "Task Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(canEdit ? "Cancel" : "Done") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if editAll {
-                            saveAllRecurring()
-                        } else {
-                            saveSingleTask()
+                if canEdit {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            if editAll {
+                                saveAllRecurring()
+                            } else {
+                                saveSingleTask()
+                            }
                         }
+                        .fontWeight(.semibold)
+                        .disabled(!isValid)
                     }
-                    .fontWeight(.semibold)
-                    .disabled(!isValid)
                 }
             }
         }

@@ -53,6 +53,10 @@ final class Item {
     var isApproved: Bool { status == "approved" }
     var isMissed: Bool { status == "missed" }
 
+    var isPastDue: Bool {
+        targetDate < Date() && !Calendar.current.isDateInToday(targetDate)
+    }
+
     var isDueInFuture: Bool {
         !Calendar.current.isDateInToday(targetDate) && targetDate > Date()
     }

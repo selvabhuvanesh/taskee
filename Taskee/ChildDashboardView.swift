@@ -44,6 +44,7 @@ struct ChildDashboardView: View {
     @State private var stickyNote: (message: String, color: Color)?
     @State private var unreadNotifCount = 0
     @State private var taskToDelete: Item?
+    @State private var taskToEdit: Item?
     @State private var missedTaskToHandle: Item?
     @State private var showMissedOptions = false
     @State private var giftTaskToReveal: Item?
@@ -478,6 +479,22 @@ struct ChildDashboardView: View {
                         Text("Are you sure you want to delete \"\(task.name)\"?")
                     }
                 }
+            }
+            .sheet(item: $taskToEdit) { task in
+                EditTaskView(
+                    task: task,
+                    children: allMembers.filter { $0.isChild && $0.name != authManager.userName },
+                    otherParent: allMembers.first { $0.isParent },
+                    theme: childTheme,
+                    onDelete: task.createdByChild && task.isOpen ? { taskToDelete = task; taskToEdit = nil } : nil,
+                    onMarkMissed: {
+                        task.status = "missed"
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                        taskToEdit = nil
+                    },
+                    canEdit: task.createdByChild
+                )
             }
             .task {
                 archiveOldTasks()
@@ -983,7 +1000,7 @@ struct ChildDashboardView: View {
                                             .draggable(TaskTransfer(id: task.id))
                                     }
                                 } else {
-                                    GroupCard(dateLabel: group.key, count: group.tasks.count)
+                                    GroupCard(dateLabel: group.key, count: group.tasks.count, theme: childTheme)
                                 }
                             }
                             .id(group.key)
@@ -1167,6 +1184,27 @@ struct ChildDashboardView: View {
 
             Spacer()
 
+            if task.isOpen && task.isPastDue {
+                Button {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                        Text("Missed")
+                            .font(.system(size: 10, weight: .semibold))
+                            .fixedSize()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.red, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
             if task.hasGift && task.isApproved && !task.giftRevealed {
                 Button {
                     giftTaskToReveal = task
@@ -1201,6 +1239,8 @@ struct ChildDashboardView: View {
                 .buttonStyle(.plain)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { taskToEdit = task }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .opacity(task.isApproved ? 0.7 : 1)
