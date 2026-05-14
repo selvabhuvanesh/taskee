@@ -335,13 +335,12 @@ struct ContentView: View {
     @State private var showFamilyChat = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
-    @State private var taskToEdit: Item?
+    @State private var editRequest: TaskEditRequest?
     @State private var taskToDelete: Item?
     @State private var taskToApprove: Item?
     @State private var showTooEarlyAlert = false
     @State private var tooEarlyTask: Item?
     @State private var showEditChoice = false
-    @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
@@ -706,25 +705,26 @@ struct ContentView: View {
             .modifier(ParentExpandedTaskAlerts(
                 taskToDelete: $taskToDelete,
                 taskToApprove: $taskToApprove,
-                taskToEdit: $taskToEdit,
+                editRequest: $editRequest,
                 showTooEarlyAlert: $showTooEarlyAlert,
                 tooEarlyTask: $tooEarlyTask,
                 tasks: tasks,
                 children: children,
                 otherParent: otherParent,
                 allMembers: allMembers,
-                theme: parentTheme,
-                editAllRecurring: editAllRecurring
+                theme: parentTheme
             ))
             .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
                 Button("Edit This Task Only") {
-                    editAllRecurring = false
-                    taskToEdit = pendingEditTask
+                    if let task = pendingEditTask {
+                        editRequest = TaskEditRequest(task: task, editAll: false)
+                    }
                     pendingEditTask = nil
                 }
                 Button("Edit All Recurring") {
-                    editAllRecurring = true
-                    taskToEdit = pendingEditTask
+                    if let task = pendingEditTask {
+                        editRequest = TaskEditRequest(task: task, editAll: true)
+                    }
                     pendingEditTask = nil
                 }
                 Button("Cancel", role: .cancel) { pendingEditTask = nil }
@@ -1073,7 +1073,7 @@ struct ContentView: View {
                             pendingEditTask = task
                             showEditChoice = true
                         } else {
-                            taskToEdit = task
+                            editRequest = TaskEditRequest(task: task, editAll: false)
                         }
                     },
                     onDelete: { taskToDelete = task },
@@ -1131,7 +1131,7 @@ struct ContentView: View {
                                     pendingEditTask = task
                                     showEditChoice = true
                                 } else {
-                                    taskToEdit = task
+                                    editRequest = TaskEditRequest(task: task, editAll: false)
                                 }
                             },
                             onDelete: { taskToDelete = task },
@@ -1383,7 +1383,7 @@ struct DateTasksView: View {
     var memberName: String = ""
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var taskToDelete: Item?
-    @State private var taskToEdit: Item?
+    @State private var editRequest: TaskEditRequest?
     @State private var taskToApprove: Item?
     @State private var showingAddTask = false
     @State private var showTooEarlyAlert = false
@@ -1391,7 +1391,6 @@ struct DateTasksView: View {
     @State private var showCelebration = false
     @State private var celebrationReward: Double = 0
     @State private var showEditChoice = false
-    @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
     @State private var showOpenOnly = true
     @State private var isExpanded = true
@@ -1464,7 +1463,7 @@ struct DateTasksView: View {
                     pendingEditTask = task
                     showEditChoice = true
                 } else {
-                    taskToEdit = task
+                    editRequest = TaskEditRequest(task: task, editAll: false)
                 }
             },
             onDelete: { taskToDelete = task },
@@ -1737,27 +1736,29 @@ struct DateTasksView: View {
         } message: {
             deleteAlertMessageView
         }
-        .sheet(item: $taskToEdit) { task in
+        .sheet(item: $editRequest) { request in
             EditTaskView(
-                task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
-                onDelete: { taskToDelete = task; taskToEdit = nil },
+                task: request.task, children: children, otherParent: otherParent, theme: theme, editAll: request.editAll,
+                onDelete: { taskToDelete = request.task; editRequest = nil },
                 onMarkMissed: {
-                    task.status = "missed"
+                    request.task.status = "missed"
                     let familyCode = authManager.familyCode
-                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                    taskToEdit = nil
+                    Task { await cloudKitManager.pushTask(request.task, familyCode: familyCode) }
+                    editRequest = nil
                 }
             )
         }
         .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
             Button("Edit This Task Only") {
-                editAllRecurring = false
-                taskToEdit = pendingEditTask
+                if let task = pendingEditTask {
+                    editRequest = TaskEditRequest(task: task, editAll: false)
+                }
                 pendingEditTask = nil
             }
             Button("Edit All Recurring") {
-                editAllRecurring = true
-                taskToEdit = pendingEditTask
+                if let task = pendingEditTask {
+                    editRequest = TaskEditRequest(task: task, editAll: true)
+                }
                 pendingEditTask = nil
             }
             Button("Cancel", role: .cancel) { pendingEditTask = nil }
@@ -2017,7 +2018,7 @@ struct ChildTasksView: View {
     @State private var isExpanded = true
     @State private var showCalendarView = false
     @State private var selectedCalendarDate = Date()
-    @State private var taskToEdit: Item?
+    @State private var editRequest: TaskEditRequest?
     @State private var taskToDelete: Item?
     @State private var taskToApprove: Item?
     @State private var showCelebration = false
@@ -2027,7 +2028,6 @@ struct ChildTasksView: View {
     @State private var tooEarlyTask: Item?
     @State private var showReminderSent = false
     @State private var showEditChoice = false
-    @State private var editAllRecurring = false
     @State private var pendingEditTask: Item?
 
     private var childCalendarDayTasks: [Item] {
@@ -2142,7 +2142,7 @@ struct ChildTasksView: View {
                     pendingEditTask = task
                     showEditChoice = true
                 } else {
-                    taskToEdit = task
+                    editRequest = TaskEditRequest(task: task, editAll: false)
                 }
             },
             onDelete: { taskToDelete = task },
@@ -2303,27 +2303,29 @@ struct ChildTasksView: View {
         } message: {
             childApproveAlertMessageView
         }
-        .sheet(item: $taskToEdit) { task in
+        .sheet(item: $editRequest) { request in
             EditTaskView(
-                task: task, children: allChildren, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
-                onDelete: { taskToDelete = task; taskToEdit = nil },
+                task: request.task, children: allChildren, otherParent: otherParent, theme: theme, editAll: request.editAll,
+                onDelete: { taskToDelete = request.task; editRequest = nil },
                 onMarkMissed: {
-                    task.status = "missed"
+                    request.task.status = "missed"
                     let familyCode = authManager.familyCode
-                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                    taskToEdit = nil
+                    Task { await cloudKitManager.pushTask(request.task, familyCode: familyCode) }
+                    editRequest = nil
                 }
             )
         }
         .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
             Button("Edit This Task Only") {
-                editAllRecurring = false
-                taskToEdit = pendingEditTask
+                if let task = pendingEditTask {
+                    editRequest = TaskEditRequest(task: task, editAll: false)
+                }
                 pendingEditTask = nil
             }
             Button("Edit All Recurring") {
-                editAllRecurring = true
-                taskToEdit = pendingEditTask
+                if let task = pendingEditTask {
+                    editRequest = TaskEditRequest(task: task, editAll: true)
+                }
                 pendingEditTask = nil
             }
             Button("Cancel", role: .cancel) { pendingEditTask = nil }
@@ -2655,7 +2657,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
 
     @Binding var taskToDelete: Item?
     @Binding var taskToApprove: Item?
-    @Binding var taskToEdit: Item?
+    @Binding var editRequest: TaskEditRequest?
     @Binding var showTooEarlyAlert: Bool
     @Binding var tooEarlyTask: Item?
     let tasks: [Item]
@@ -2663,7 +2665,6 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     var otherParent: FamilyMember?
     let allMembers: [FamilyMember]
     var theme: ChildTheme
-    var editAllRecurring: Bool = false
 
     func body(content: Content) -> some View {
         content
@@ -2696,15 +2697,15 @@ struct ParentExpandedTaskAlerts: ViewModifier {
             } message: {
                 approveMessage
             }
-            .sheet(item: $taskToEdit) { task in
+            .sheet(item: $editRequest) { request in
                 EditTaskView(
-                    task: task, children: children, otherParent: otherParent, theme: theme, editAll: editAllRecurring,
-                    onDelete: { taskToDelete = task; taskToEdit = nil },
+                    task: request.task, children: children, otherParent: otherParent, theme: theme, editAll: request.editAll,
+                    onDelete: { taskToDelete = request.task; editRequest = nil },
                     onMarkMissed: {
-                        task.status = "missed"
+                        request.task.status = "missed"
                         let familyCode = authManager.familyCode
-                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                        taskToEdit = nil
+                        Task { await cloudKitManager.pushTask(request.task, familyCode: familyCode) }
+                        editRequest = nil
                     }
                 )
             }
@@ -3891,8 +3892,15 @@ struct AddTaskView: View {
 
 // MARK: - Edit Task View (Parent)
 
+struct TaskEditRequest: Identifiable {
+    let task: Item
+    let editAll: Bool
+    var id: UUID { task.id }
+}
+
 struct EditTaskView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
@@ -3915,14 +3923,14 @@ struct EditTaskView: View {
 
     private let originalName: String
     private let originalAssignee: String
-    let editAll: Bool
+    @State private var editAll: Bool
 
     init(task: Item, children: [FamilyMember], otherParent: FamilyMember? = nil, theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default"), editAll: Bool = false, onDelete: (() -> Void)? = nil, onMarkMissed: (() -> Void)? = nil, canEdit: Bool = true) {
         self.task = task
         self.children = children
         self.otherParent = otherParent
         self.theme = theme
-        self.editAll = editAll
+        _editAll = State(initialValue: editAll)
         self.onDelete = onDelete
         self.onMarkMissed = onMarkMissed
         self.canEdit = canEdit
@@ -3953,6 +3961,68 @@ struct EditTaskView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         Spacer().frame(height: 20)
+
+                        if task.isRecurring && canEdit {
+                            VStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "repeat")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(calmAccent)
+                                    Text("Recurring Task")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    let count = allTasks.filter {
+                                        $0.name == originalName && $0.assignedTo == originalAssignee
+                                        && $0.isRecurring && !$0.isArchived
+                                    }.count
+                                    Text("\(count) instance\(count == 1 ? "" : "s")")
+                                        .font(.caption2)
+                                        .foregroundStyle(.primary.opacity(0.5))
+                                }
+
+                                Picker("Edit scope", selection: $editAll) {
+                                    Text("This Task Only").tag(false)
+                                    Text("All in Series").tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                            .padding(12)
+                            .background(calmAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(calmAccent.opacity(0.3), lineWidth: 1)
+                            )
+                        } else if task.isRecurring {
+                            HStack(spacing: 8) {
+                                Image(systemName: "repeat")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(calmAccent)
+                                Text("Recurring Task")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(calmAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(calmAccent.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+
+                        if !canEdit {
+                            HStack(spacing: 8) {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.primary.opacity(0.5))
+                                Text("This task was created by a parent. You can view details but not edit.")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+                            }
+                            .padding(12)
+                            .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Task Name")
@@ -4179,27 +4249,38 @@ struct EditTaskView: View {
         let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
         let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
         let familyCode = authManager.familyCode
+        let calendar = Calendar.current
+        let newTimeComponents = calendar.dateComponents([.hour, .minute], from: targetDate)
         let siblings = allTasks.filter {
             $0.name == originalName && $0.assignedTo == originalAssignee
-            && $0.isRecurring && !$0.isArchived && $0.isOpen
+            && $0.isRecurring && !$0.isArchived
         }
         for sibling in siblings {
             sibling.name = trimmedName
             sibling.assignedTo = selectedChild
             sibling.reward = rewardValue
             sibling.giftText = trimmedGift
+            var siblingDateComponents = calendar.dateComponents([.year, .month, .day], from: sibling.targetDate)
+            siblingDateComponents.hour = newTimeComponents.hour
+            siblingDateComponents.minute = newTimeComponents.minute
+            if let updatedDate = calendar.date(from: siblingDateComponents) {
+                sibling.targetDate = updatedDate
+            }
             notificationManager.cancelTaskReminder(taskId: sibling.id)
-            notificationManager.scheduleTaskReminder(
-                taskId: sibling.id,
-                taskName: trimmedName,
-                assignedTo: selectedChild,
-                dueDate: sibling.targetDate
-            )
+            if sibling.isOpen {
+                notificationManager.scheduleTaskReminder(
+                    taskId: sibling.id,
+                    taskName: trimmedName,
+                    assignedTo: selectedChild,
+                    dueDate: sibling.targetDate
+                )
+            }
         }
-        task.targetDate = targetDate
+        try? modelContext.save()
+        let snapshots = siblings.map { CloudKitManager.TaskSnapshot($0) }
         Task {
-            for sibling in siblings {
-                await cloudKitManager.pushTask(sibling, familyCode: familyCode)
+            for snap in snapshots {
+                await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
             }
         }
         dismiss()
