@@ -335,6 +335,7 @@ struct ContentView: View {
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
     @State private var showAnnualReminders = false
+    @State private var showDayPreview = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @State private var editRequest: TaskEditRequest?
@@ -530,6 +531,10 @@ struct ContentView: View {
                     rewardAmount: celebrationReward
                 )
 
+                if showDayPreview {
+                    dayPreviewOverlay
+                }
+
             }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
@@ -558,7 +563,7 @@ struct ContentView: View {
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
-            .navigationTitle("\(authManager.userName)'s Tasks")
+            .navigationTitle("My Tasks")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     HStack(spacing: 12) {
@@ -850,8 +855,125 @@ struct ContentView: View {
         }
     }
 
+    private var dayPreviewOverlay: some View {
+        let calendar = Calendar.current
+        let todayTasks = activeTasks.filter { calendar.isDateInToday($0.targetDate) }
+        let allNames: [String] = {
+            var names = [authManager.userName]
+            if let parent = otherParent { names.append(parent.name) }
+            names.append(contentsOf: children.map { $0.name })
+            return names
+        }()
+        let grouped: [(name: String, tasks: [Item])] = allNames.map { name in
+            (name: name, tasks: todayTasks.filter { $0.assignedTo == name }.sorted { $0.targetDate < $1.targetDate })
+        }
+        let totalCount = todayTasks.count
+
+        return ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.spring(duration: 0.3)) { showDayPreview = false }
+                }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.teal)
+                    Text("Today's Preview")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("\(totalCount) task\(totalCount == 1 ? "" : "s")")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) { showDayPreview = false }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
+
+                Divider().overlay(.white.opacity(0.15))
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(grouped, id: \.name) { group in
+                            dayPreviewMemberSection(name: group.name, tasks: group.tasks)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                }
+                .frame(maxHeight: 380)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+            )
+            .padding(.horizontal, 24)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+    }
+
+    private func dayPreviewMemberSection(name: String, tasks: [Item]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+
+            if tasks.isEmpty {
+                Text("No tasks today")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.leading, 4)
+            } else {
+                ForEach(tasks, id: \.id) { task in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(task.isApproved ? .green : task.isInReview ? .orange : task.isMissed ? .red : .white.opacity(0.3))
+                            .frame(width: 6, height: 6)
+
+                        Text(task.name)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(task.isApproved ? 0.5 : 0.85))
+                            .strikethrough(task.isApproved)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        if task.needsTransport {
+                            Image(systemName: task.transportIcon)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.yellow)
+                        }
+
+                        Text(task.targetDate, format: .dateTime.hour().minute())
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                    .padding(.leading, 4)
+                }
+            }
+        }
+    }
+
     private var familyStrip: some View {
         HStack {
+            dayPreviewButton
+                .padding(.leading, 16)
+
             Spacer()
             HStack(spacing: 14) {
                 if let parent = otherParent {
@@ -1287,6 +1409,34 @@ struct ContentView: View {
                 .background(calmAccent, in: Circle())
         }
         .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var dayPreviewButton: some View {
+        let dayNumber = Calendar.current.component(.day, from: Date())
+        return Button {
+            withAnimation(.spring(duration: 0.3)) { showDayPreview = true }
+        } label: {
+            ZStack {
+                VStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.red)
+                        .frame(width: 28, height: 9)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(.white)
+                        .frame(width: 28, height: 19)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                .frame(width: 52, height: 52)
+                .background(.teal, in: Circle())
+
+                Text("\(dayNumber)")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(.black.opacity(0.8))
+                    .offset(y: 4)
+            }
+        }
+        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
     }
 
     private var familyChatButton: some View {
@@ -2925,7 +3075,7 @@ struct TaskRow: View {
                             if task.needsTransport {
                                 Image(systemName: task.transportIcon)
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.cyan)
+                                    .foregroundStyle(.yellow)
                             }
 
                             if showAssignee && !task.assignedTo.isEmpty {
@@ -3742,11 +3892,11 @@ struct AddTaskView: View {
             HStack(spacing: 10) {
                 Image(systemName: iconName)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isActive ? .cyan : .primary.opacity(0.4))
+                    .foregroundStyle(isActive ? .yellow : .primary.opacity(0.4))
                     .frame(width: 40, height: 40)
-                    .background(isActive ? .cyan.opacity(0.2) : .primary.opacity(0.1), in: Circle())
+                    .background(isActive ? .yellow.opacity(0.2) : .primary.opacity(0.1), in: Circle())
                     .overlay(
-                        Circle().strokeBorder(isActive ? .cyan.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
+                        Circle().strokeBorder(isActive ? .yellow.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
                     )
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -3774,7 +3924,7 @@ struct AddTaskView: View {
             .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isActive ? .cyan.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
+                    .strokeBorder(isActive ? .yellow.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -4476,11 +4626,11 @@ struct EditTaskView: View {
             HStack(spacing: 10) {
                 Image(systemName: iconName)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isActive ? .cyan : .primary.opacity(0.4))
+                    .foregroundStyle(isActive ? .yellow : .primary.opacity(0.4))
                     .frame(width: 40, height: 40)
-                    .background(isActive ? .cyan.opacity(0.2) : .primary.opacity(0.1), in: Circle())
+                    .background(isActive ? .yellow.opacity(0.2) : .primary.opacity(0.1), in: Circle())
                     .overlay(
-                        Circle().strokeBorder(isActive ? .cyan.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
+                        Circle().strokeBorder(isActive ? .yellow.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
                     )
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -4508,7 +4658,7 @@ struct EditTaskView: View {
             .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isActive ? .cyan.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
+                    .strokeBorder(isActive ? .yellow.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
