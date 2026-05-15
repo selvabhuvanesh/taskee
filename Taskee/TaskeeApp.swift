@@ -43,6 +43,7 @@ struct TaskeeApp: App {
             SurpriseGift.self,
             ShoppingItem.self,
             ChatMessage.self,
+            AnnualReminder.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

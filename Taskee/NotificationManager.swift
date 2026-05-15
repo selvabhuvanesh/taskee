@@ -100,6 +100,40 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
+    func scheduleAnnualReminder(reminderId: UUID, name: String, dueDate: Date, remindDaysBefore: [Int]) {
+        let center = UNUserNotificationCenter.current()
+        let allIDs = remindDaysBefore.map { "annual-\(reminderId.uuidString)-\($0)d" }
+        center.removePendingNotificationRequests(withIdentifiers: allIDs)
+
+        for days in remindDaysBefore {
+            guard let reminderDate = Calendar.current.date(byAdding: .day, value: -days, to: dueDate),
+                  reminderDate > Date() else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Upcoming Reminder"
+            content.body = "\"\(name)\" is due in \(days) day\(days == 1 ? "" : "s")"
+            content.sound = .default
+            content.interruptionLevel = .timeSensitive
+
+            var components = Calendar.current.dateComponents([.year, .month, .day], from: reminderDate)
+            components.hour = 9
+            components.minute = 0
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: "annual-\(reminderId.uuidString)-\(days)d",
+                content: content,
+                trigger: trigger
+            )
+            center.add(request)
+        }
+    }
+
+    func cancelAnnualReminder(reminderId: UUID) {
+        let possibleDays = [1, 7, 14, 30]
+        let ids = possibleDays.map { "annual-\(reminderId.uuidString)-\($0)d" }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
     func sendTaskReviewNotification(taskName: String, childName: String) {
         let title = "Task Submitted for Review"
         let body = "\(childName) completed \"\(taskName)\""
@@ -170,6 +204,29 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let request = UNNotificationRequest(identifier: "beep-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
         saveNotification(title: title, body: body, category: category, senderName: senderName)
+    }
+
+    func sendTransportNotification(taskName: String, assignedTo: String, transportType: String, dueDate: Date) {
+        let typeLabel: String
+        switch transportType {
+        case "pickup": typeLabel = "Pickup"
+        case "dropoff": typeLabel = "Drop-off"
+        case "both": typeLabel = "Pickup & Drop-off"
+        default: return
+        }
+        let title = "\(typeLabel) Needed"
+        let timeStr = dueDate.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        let body = "\(assignedTo) needs \(typeLabel.lowercased()) for \"\(taskName)\" at \(timeStr)"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
+        content.categoryIdentifier = "TRANSPORT_NEEDED"
+        content.interruptionLevel = .timeSensitive
+
+        let request = UNNotificationRequest(identifier: "transport-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "TRANSPORT_NEEDED", senderName: assignedTo)
     }
 
     func sendPickupNotification(childName: String) {

@@ -28,8 +28,9 @@ final class Item {
     var createdBy: String
     var createdByID: String
     var lastRemindedAt: Date?
+    var transportType: String = "none"
 
-    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "") {
+    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "", transportType: String = "none") {
         self.id = id
         self.name = name
         self.targetDate = targetDate
@@ -44,9 +45,41 @@ final class Item {
         self.createdBy = createdBy
         self.createdByID = createdByID
         self.lastRemindedAt = nil
+        self.transportType = transportType
     }
 
     var hasGift: Bool { !giftText.isEmpty }
+    var needsTransport: Bool { transportType != "none" }
+    var needsPickup: Bool { transportType == "pickup" || transportType == "both" }
+    var needsDropoff: Bool { transportType == "dropoff" || transportType == "both" }
+
+    var transportIcon: String {
+        switch transportType {
+        case "pickup": return "car.fill"
+        case "dropoff": return "car.side.fill"
+        case "both": return "car.2.fill"
+        default: return "car"
+        }
+    }
+
+    var transportLabel: String {
+        switch transportType {
+        case "pickup": return "Pickup"
+        case "dropoff": return "Drop-off"
+        case "both": return "Pickup & Drop-off"
+        default: return ""
+        }
+    }
+
+    static func nextTransportType(after current: String) -> String {
+        switch current {
+        case "none": return "pickup"
+        case "pickup": return "dropoff"
+        case "dropoff": return "both"
+        case "both": return "none"
+        default: return "none"
+        }
+    }
 
     var isOpen: Bool { status == "open" }
     var isInReview: Bool { status == "inReview" }
@@ -261,6 +294,210 @@ final class ChatMessage {
         setReactions(dict)
     }
 }
+
+// MARK: - Annual Reminders
+
+enum ReminderCategory: String, CaseIterable, Codable {
+    case vehicle = "Vehicle"
+    case insurance = "Insurance"
+    case medical = "Medical"
+    case education = "Education"
+    case financial = "Financial"
+    case home = "Home"
+    case subscriptions = "Subscriptions"
+    case legalID = "Legal/ID"
+    case seasonal = "Seasonal"
+
+    var icon: String {
+        switch self {
+        case .vehicle: return "car.fill"
+        case .insurance: return "shield.fill"
+        case .medical: return "cross.case.fill"
+        case .education: return "graduationcap.fill"
+        case .financial: return "banknote.fill"
+        case .home: return "house.fill"
+        case .subscriptions: return "arrow.triangle.2.circlepath"
+        case .legalID: return "doc.text.fill"
+        case .seasonal: return "leaf.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .vehicle: return .blue
+        case .insurance: return .green
+        case .medical: return .red
+        case .education: return .orange
+        case .financial: return .mint
+        case .home: return .purple
+        case .subscriptions: return .cyan
+        case .legalID: return .indigo
+        case .seasonal: return .yellow
+        }
+    }
+}
+
+enum ReminderRepeat: String, CaseIterable, Codable {
+    case none = "None"
+    case quarterly = "Quarterly"
+    case halfYearly = "Half-Yearly"
+    case yearly = "Yearly"
+
+    var label: String { rawValue }
+
+    var monthsToAdd: Int {
+        switch self {
+        case .none: return 0
+        case .quarterly: return 3
+        case .halfYearly: return 6
+        case .yearly: return 12
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none: return "calendar"
+        case .quarterly: return "calendar.badge.clock"
+        case .halfYearly: return "calendar.badge.clock"
+        case .yearly: return "repeat"
+        }
+    }
+}
+
+@Model
+final class AnnualReminder {
+    var id: UUID
+    var name: String
+    var category: String
+    var dueDate: Date
+    var repeatYearly: Bool
+    var repeatFrequency: String = "Yearly"
+    var remindDaysBefore: String
+    var notes: String
+    var isDone: Bool
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, category: String, dueDate: Date, repeatYearly: Bool = true, repeatFrequency: String = "Yearly", remindDaysBefore: String = "[30,14,7]", notes: String = "", isDone: Bool = false) {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.dueDate = dueDate
+        self.repeatYearly = repeatYearly
+        self.repeatFrequency = repeatFrequency
+        self.remindDaysBefore = remindDaysBefore
+        self.notes = notes
+        self.isDone = isDone
+        self.createdAt = Date()
+    }
+
+    var categoryEnum: ReminderCategory {
+        ReminderCategory(rawValue: category) ?? .home
+    }
+
+    var frequencyEnum: ReminderRepeat {
+        ReminderRepeat(rawValue: repeatFrequency) ?? (repeatYearly ? .yearly : .none)
+    }
+
+    var repeats: Bool {
+        frequencyEnum != .none
+    }
+
+    var remindDays: [Int] {
+        guard let data = remindDaysBefore.data(using: .utf8),
+              let days = try? JSONDecoder().decode([Int].self, from: data) else { return [30, 14, 7] }
+        return days
+    }
+
+    func setRemindDays(_ days: [Int]) {
+        if let data = try? JSONEncoder().encode(days), let str = String(data: data, encoding: .utf8) {
+            remindDaysBefore = str
+        }
+    }
+
+    func advanceToNextDue() {
+        let months = frequencyEnum.monthsToAdd
+        guard months > 0 else { return }
+        if let next = Calendar.current.date(byAdding: .month, value: months, to: dueDate) {
+            dueDate = next
+        }
+    }
+
+    var daysUntilDue: Int {
+        Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: dueDate)).day ?? 0
+    }
+
+    var isDueSoon: Bool {
+        daysUntilDue >= 0 && daysUntilDue <= 30 && !isDone
+    }
+
+    var isOverdue: Bool {
+        daysUntilDue < 0 && !isDone
+    }
+}
+
+struct ReminderTemplate: Identifiable {
+    let id = UUID()
+    let name: String
+    let category: ReminderCategory
+}
+
+let reminderTemplates: [ReminderCategory: [ReminderTemplate]] = [
+    .vehicle: [
+        ReminderTemplate(name: "Vehicle Registration", category: .vehicle),
+        ReminderTemplate(name: "Car Insurance", category: .vehicle),
+        ReminderTemplate(name: "Emissions Test", category: .vehicle),
+        ReminderTemplate(name: "Tyre Rotation", category: .vehicle),
+        ReminderTemplate(name: "Oil Change / Service", category: .vehicle),
+    ],
+    .insurance: [
+        ReminderTemplate(name: "Health Insurance", category: .insurance),
+        ReminderTemplate(name: "Home Insurance", category: .insurance),
+        ReminderTemplate(name: "Life Insurance", category: .insurance),
+        ReminderTemplate(name: "Dental Insurance", category: .insurance),
+    ],
+    .medical: [
+        ReminderTemplate(name: "Annual Physical", category: .medical),
+        ReminderTemplate(name: "Dental Checkup", category: .medical),
+        ReminderTemplate(name: "Eye Exam", category: .medical),
+        ReminderTemplate(name: "Vaccination", category: .medical),
+        ReminderTemplate(name: "Pet Vet Visit", category: .medical),
+    ],
+    .education: [
+        ReminderTemplate(name: "School Fee Payment", category: .education),
+        ReminderTemplate(name: "Tuition Deadline", category: .education),
+        ReminderTemplate(name: "School Enrollment", category: .education),
+    ],
+    .financial: [
+        ReminderTemplate(name: "Tax Filing", category: .financial),
+        ReminderTemplate(name: "Property Tax", category: .financial),
+        ReminderTemplate(name: "Credit Card Annual Fee", category: .financial),
+        ReminderTemplate(name: "Estimated Tax Payment", category: .financial),
+    ],
+    .home: [
+        ReminderTemplate(name: "HVAC Service", category: .home),
+        ReminderTemplate(name: "Pest Control", category: .home),
+        ReminderTemplate(name: "Gutter Cleaning", category: .home),
+        ReminderTemplate(name: "Fire Extinguisher Check", category: .home),
+        ReminderTemplate(name: "Smoke Detector Battery", category: .home),
+    ],
+    .subscriptions: [
+        ReminderTemplate(name: "Domain Renewal", category: .subscriptions),
+        ReminderTemplate(name: "Software License", category: .subscriptions),
+        ReminderTemplate(name: "Gym Membership", category: .subscriptions),
+        ReminderTemplate(name: "Club Membership", category: .subscriptions),
+    ],
+    .legalID: [
+        ReminderTemplate(name: "Passport Renewal", category: .legalID),
+        ReminderTemplate(name: "Driver's License", category: .legalID),
+        ReminderTemplate(name: "Visa Renewal", category: .legalID),
+        ReminderTemplate(name: "Professional License", category: .legalID),
+    ],
+    .seasonal: [
+        ReminderTemplate(name: "AC Service (Summer)", category: .seasonal),
+        ReminderTemplate(name: "Heater Service (Winter)", category: .seasonal),
+        ReminderTemplate(name: "Garden / Lawn Prep", category: .seasonal),
+    ],
+]
 
 let redemptionTypes = [
     ("cash", "Cash", "banknote.fill"),

@@ -294,6 +294,7 @@ struct ContentView: View {
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var tasks: [Item]
     @Query private var allMembers: [FamilyMember]
+    @Query(sort: \AnnualReminder.dueDate) private var annualReminders: [AnnualReminder]
 
     private var children: [FamilyMember] {
         var seen = Set<String>()
@@ -333,6 +334,7 @@ struct ContentView: View {
     @State private var showRecurringExtension = false
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
+    @State private var showAnnualReminders = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @State private var editRequest: TaskEditRequest?
@@ -351,6 +353,10 @@ struct ContentView: View {
 
     private var activeTasks: [Item] {
         tasks.filter { !$0.isArchived }
+    }
+
+    private var upcomingReminders: [AnnualReminder] {
+        annualReminders.filter { $0.isDueSoon || $0.isOverdue }
     }
 
     private var myTasks: [Item] {
@@ -427,6 +433,39 @@ struct ContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
 
+                    if !upcomingReminders.isEmpty {
+                        Button { showAnnualReminders = true } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "calendar.badge.clock")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.orange)
+                                let overdueCount = annualReminders.filter { $0.isOverdue }.count
+                                if overdueCount > 0 {
+                                    Text("\(overdueCount) overdue, \(upcomingReminders.count - overdueCount) upcoming reminder\(upcomingReminders.count - overdueCount == 1 ? "" : "s")")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary.opacity(0.7))
+                                } else {
+                                    Text("\(upcomingReminders.count) reminder\(upcomingReminders.count == 1 ? "" : "s") due within 30 days")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary.opacity(0.7))
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.primary.opacity(0.4))
+                            }
+                            .padding(10)
+                            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                    }
+
                     ScrollViewReader { proxy in
                         ScrollView {
                             if showCalendarView {
@@ -479,6 +518,27 @@ struct ContentView: View {
                         }
                         refreshUnreadCount()
                     }
+                    .safeAreaInset(edge: .bottom) {
+                        Color.clear.frame(height: 60)
+                    }
+                }
+
+                CelebrationOverlay(
+                    isActive: $showCelebration,
+                    title: "Task Approved!",
+                    subtitle: "Reward credited",
+                    rewardAmount: celebrationReward
+                )
+
+            }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if let note = stickyNote {
+                        StickyNoteView(message: note.message, color: note.color) {
+                            withAnimation { stickyNote = nil }
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
 
                     HStack {
                         HStack(spacing: 10) {
@@ -493,23 +553,6 @@ struct ContentView: View {
                             .padding(.trailing, 20)
                     }
                     .padding(.bottom, 8)
-                }
-
-                CelebrationOverlay(
-                    isActive: $showCelebration,
-                    title: "Task Approved!",
-                    subtitle: "Reward credited",
-                    rewardAmount: celebrationReward
-                )
-
-            }
-            .overlay(alignment: .bottom) {
-                if let note = stickyNote {
-                    StickyNoteView(message: note.message, color: note.color) {
-                        withAnimation { stickyNote = nil }
-                    }
-                    .padding(.bottom, 80)
-                    .transition(.scale.combined(with: .opacity))
                 }
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
@@ -614,6 +657,11 @@ struct ContentView: View {
                                 Label("Rewards History", systemImage: "gift.fill")
                             }
                             Button {
+                                showAnnualReminders = true
+                            } label: {
+                                Label("Annual Reminders", systemImage: "calendar.badge.clock")
+                            }
+                            Button {
                                 showShareSheet = true
                             } label: {
                                 Label("Refer Your Friends", systemImage: "person.badge.plus")
@@ -649,6 +697,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showAnnualReminders) {
+                AnnualRemindersView(theme: parentTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -2871,6 +2922,12 @@ struct TaskRow: View {
                                     )
                             }
 
+                            if task.needsTransport {
+                                Image(systemName: task.transportIcon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.cyan)
+                            }
+
                             if showAssignee && !task.assignedTo.isEmpty {
                                 Text("•")
                                     .foregroundStyle(.primary.opacity(0.3))
@@ -3189,6 +3246,7 @@ struct AddTaskView: View {
     @State private var showQuotaAlert = false
     @State private var giftText = ""
     @State private var includeGift = false
+    @State private var transportType = "none"
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty && !selectedChildren.isEmpty
@@ -3401,6 +3459,8 @@ struct AddTaskView: View {
                             }
                         }
 
+                        transportPicker
+
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Assign To")
@@ -3483,7 +3543,8 @@ struct AddTaskView: View {
                                     isRecurring: recurring,
                                     giftText: trimmedGift,
                                     createdBy: authManager.userName,
-                                    createdByID: authManager.appleUserID
+                                    createdByID: authManager.appleUserID,
+                                    transportType: transportType
                                 )
                                 modelContext.insert(task)
                                 createdTasks.append(task)
@@ -3493,6 +3554,16 @@ struct AddTaskView: View {
                                     taskName: trimmedName,
                                     assignedTo: member,
                                     dueDate: date
+                                )
+                            }
+                        }
+                        if transportType != "none" {
+                            for member in selectedChildren {
+                                notificationManager.sendTransportNotification(
+                                    taskName: trimmedName,
+                                    assignedTo: member,
+                                    transportType: transportType,
+                                    dueDate: dates.first ?? targetDate
                                 )
                             }
                         }
@@ -3644,6 +3715,69 @@ struct AddTaskView: View {
                     .foregroundStyle(.cyan.opacity(0.8))
             }
         }
+    }
+
+    private var transportPicker: some View {
+        let iconName: String = {
+            switch transportType {
+            case "pickup": return "car.fill"
+            case "dropoff": return "car.side.fill"
+            case "both": return "car.2.fill"
+            default: return "car"
+            }
+        }()
+        let label: String = {
+            switch transportType {
+            case "pickup": return "Pickup Needed"
+            case "dropoff": return "Drop-off Needed"
+            case "both": return "Pickup & Drop-off"
+            default: return "No Transport"
+            }
+        }()
+        let isActive = transportType != "none"
+
+        return Button {
+            transportType = Item.nextTransportType(after: transportType)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isActive ? .cyan : .primary.opacity(0.4))
+                    .frame(width: 40, height: 40)
+                    .background(isActive ? .cyan.opacity(0.2) : .primary.opacity(0.1), in: Circle())
+                    .overlay(
+                        Circle().strokeBorder(isActive ? .cyan.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("Tap to change")
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.4))
+                }
+
+                Spacer()
+
+                if isActive {
+                    Button {
+                        transportType = "none"
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.primary.opacity(0.3))
+                    }
+                }
+            }
+            .padding(14)
+            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isActive ? .cyan.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var smartSchedulerSection: some View {
@@ -3919,6 +4053,7 @@ struct EditTaskView: View {
     @State private var rewardText: String
     @State private var includeGift: Bool
     @State private var giftText: String
+    @State private var transportType: String
     @State private var showDeleteConfirm = false
 
     private let originalName: String
@@ -3942,6 +4077,7 @@ struct EditTaskView: View {
         _rewardText = State(initialValue: task.reward > 0 ? String(format: "%.2f", task.reward) : "")
         _includeGift = State(initialValue: !task.giftText.isEmpty)
         _giftText = State(initialValue: task.giftText)
+        _transportType = State(initialValue: task.transportType)
     }
 
     private var isValid: Bool {
@@ -4119,6 +4255,8 @@ struct EditTaskView: View {
                             }
                         }
 
+                        editTransportPicker
+
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Assign To")
                                 .font(.caption)
@@ -4233,6 +4371,7 @@ struct EditTaskView: View {
         task.assignedTo = selectedChild
         task.reward = rewardValue
         task.giftText = trimmedGift
+        task.transportType = transportType
         notificationManager.cancelTaskReminder(taskId: task.id)
         notificationManager.scheduleTaskReminder(
             taskId: task.id,
@@ -4260,6 +4399,7 @@ struct EditTaskView: View {
             sibling.assignedTo = selectedChild
             sibling.reward = rewardValue
             sibling.giftText = trimmedGift
+            sibling.transportType = transportType
             var siblingDateComponents = calendar.dateComponents([.year, .month, .day], from: sibling.targetDate)
             siblingDateComponents.hour = newTimeComponents.hour
             siblingDateComponents.minute = newTimeComponents.minute
@@ -4309,6 +4449,70 @@ struct EditTaskView: View {
                     )
             )
         }
+    }
+
+    private var editTransportPicker: some View {
+        let iconName: String = {
+            switch transportType {
+            case "pickup": return "car.fill"
+            case "dropoff": return "car.side.fill"
+            case "both": return "car.2.fill"
+            default: return "car"
+            }
+        }()
+        let label: String = {
+            switch transportType {
+            case "pickup": return "Pickup Needed"
+            case "dropoff": return "Drop-off Needed"
+            case "both": return "Pickup & Drop-off"
+            default: return "No Transport"
+            }
+        }()
+        let isActive = transportType != "none"
+
+        return Button {
+            transportType = Item.nextTransportType(after: transportType)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isActive ? .cyan : .primary.opacity(0.4))
+                    .frame(width: 40, height: 40)
+                    .background(isActive ? .cyan.opacity(0.2) : .primary.opacity(0.1), in: Circle())
+                    .overlay(
+                        Circle().strokeBorder(isActive ? .cyan.opacity(0.4) : .primary.opacity(0.15), lineWidth: 1)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("Tap to change")
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.4))
+                }
+
+                Spacer()
+
+                if isActive {
+                    Button {
+                        transportType = "none"
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.primary.opacity(0.3))
+                    }
+                }
+            }
+            .padding(14)
+            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isActive ? .cyan.opacity(0.3) : .primary.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canEdit)
     }
 }
 
@@ -4424,7 +4628,7 @@ struct ChildrenManagementView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(calmAccent, in: Capsule())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
             }
         }
         .frame(maxWidth: .infinity)
@@ -4964,7 +5168,7 @@ struct ParentOnboardingView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .background(calmAccent, in: Capsule())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
             }
         }
         .frame(maxWidth: .infinity)
@@ -6173,6 +6377,490 @@ struct ShoppingBagView: View {
             modelContext.delete(item)
             Task { await cloudKitManager.deleteShoppingItem(id: id, familyCode: familyCode) }
         }
+    }
+}
+
+// MARK: - Annual Reminders View
+
+struct AnnualRemindersView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @Query(sort: \AnnualReminder.dueDate) private var reminders: [AnnualReminder]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    @State private var showAddReminder = false
+    @State private var selectedCategory: ReminderCategory?
+    @State private var reminderToEdit: AnnualReminder?
+    @State private var reminderToDelete: AnnualReminder?
+
+    private var filteredReminders: [AnnualReminder] {
+        if let cat = selectedCategory {
+            return reminders.filter { $0.category == cat.rawValue }
+        }
+        return Array(reminders)
+    }
+
+    private var groupedReminders: [(ReminderCategory, [AnnualReminder])] {
+        let grouped = Dictionary(grouping: filteredReminders) { $0.categoryEnum }
+        return ReminderCategory.allCases.compactMap { cat in
+            let items = grouped[cat] ?? []
+            return items.isEmpty ? nil : (cat, items)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            categoryChip(nil, label: "All", icon: "tray.full.fill")
+                            ForEach(ReminderCategory.allCases, id: \.self) { cat in
+                                categoryChip(cat, label: cat.rawValue, icon: cat.icon)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    }
+
+                    if filteredReminders.isEmpty {
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "calendar.badge.plus")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.primary.opacity(0.3))
+                            Text("No reminders yet")
+                                .font(.headline)
+                                .foregroundStyle(.primary.opacity(0.5))
+                            Text("Add annual reminders for insurance, vehicle, medical and more")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.35))
+                                .multilineTextAlignment(.center)
+                            Spacer()
+                        }
+                        .padding(32)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 16) {
+                                ForEach(groupedReminders, id: \.0) { category, items in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: category.icon)
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(category.color)
+                                            Text(category.rawValue)
+                                                .font(.subheadline.weight(.bold))
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .padding(.horizontal, 4)
+
+                                        ForEach(items) { reminder in
+                                            reminderRow(reminder)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 80)
+                        }
+                    }
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Button { showAddReminder = true } label: {
+                    Image(systemName: "plus")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(calmAccent, in: Circle())
+                        .shadow(color: calmAccent.opacity(0.4), radius: 8, y: 4)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
+            .navigationTitle("Annual Reminders")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showAddReminder) {
+                AddAnnualReminderView(theme: theme)
+            }
+            .sheet(item: $reminderToEdit) { reminder in
+                AddAnnualReminderView(theme: theme, editingReminder: reminder)
+            }
+            .alert("Delete Reminder?", isPresented: Binding(
+                get: { reminderToDelete != nil },
+                set: { if !$0 { reminderToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { reminderToDelete = nil }
+                Button("Delete", role: .destructive) {
+                    if let reminder = reminderToDelete {
+                        let id = reminder.id
+                        notificationManager.cancelAnnualReminder(reminderId: id)
+                        modelContext.delete(reminder)
+                        Task { await cloudKitManager.deleteAnnualReminder(id: id) }
+                        reminderToDelete = nil
+                    }
+                }
+            } message: {
+                if let r = reminderToDelete {
+                    Text("Delete \"\(r.name)\"?")
+                }
+            }
+        }
+    }
+
+    private func categoryChip(_ cat: ReminderCategory?, label: String, icon: String) -> some View {
+        let isSelected = selectedCategory == cat
+        return Button { selectedCategory = cat } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(label)
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isSelected ? (cat?.color ?? calmAccent) : .primary.opacity(0.15), in: Capsule())
+            .foregroundStyle(isSelected ? .white : .primary.opacity(0.7))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func reminderRow(_ reminder: AnnualReminder) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                markDone(reminder)
+            } label: {
+                ZStack {
+                    Circle()
+                        .strokeBorder(reminder.isOverdue ? .red : reminder.isDueSoon ? .orange : .primary.opacity(0.3), lineWidth: 2)
+                        .frame(width: 28, height: 28)
+                    if reminder.isDone {
+                        Circle().fill(.green).frame(width: 28, height: 28)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button { reminderToEdit = reminder } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(reminder.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(reminder.dueDate, format: .dateTime.month().day().year())
+                            .font(.caption)
+                            .foregroundStyle(.primary.opacity(0.5))
+                        if reminder.isOverdue {
+                            Text("Overdue")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.red)
+                        } else if reminder.isDueSoon {
+                            Text("\(reminder.daysUntilDue)d left")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.orange)
+                        }
+                        if reminder.repeats {
+                            HStack(spacing: 2) {
+                                Image(systemName: "repeat")
+                                    .font(.system(size: 9))
+                                Text(reminder.frequencyEnum.label)
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(.primary.opacity(0.35))
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .buttonStyle(.plain)
+
+            Button { reminderToDelete = reminder } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red.opacity(0.6))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    reminder.isOverdue ? .red.opacity(0.3) : reminder.isDueSoon ? .orange.opacity(0.2) : .clear,
+                    lineWidth: 1
+                )
+        )
+    }
+
+    private func markDone(_ reminder: AnnualReminder) {
+        if reminder.repeats {
+            reminder.advanceToNextDue()
+            reminder.isDone = false
+            notificationManager.scheduleAnnualReminder(
+                reminderId: reminder.id, name: reminder.name,
+                dueDate: reminder.dueDate, remindDaysBefore: reminder.remindDays
+            )
+        } else {
+            reminder.isDone = true
+            notificationManager.cancelAnnualReminder(reminderId: reminder.id)
+        }
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushAnnualReminder(reminder, familyCode: familyCode) }
+    }
+}
+
+// MARK: - Add Annual Reminder View
+
+struct AddAnnualReminderView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var editingReminder: AnnualReminder?
+
+    @State private var name = ""
+    @State private var selectedCategory: ReminderCategory = .home
+    @State private var dueDate = Date()
+    @State private var repeatFrequency: ReminderRepeat = .yearly
+    @State private var remindDays: Set<Int> = [30, 14, 7]
+    @State private var notes = ""
+
+    private var isEditing: Bool { editingReminder != nil }
+
+    private var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer().frame(height: 20)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Category")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary.opacity(0.7))
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
+                                ForEach(ReminderCategory.allCases, id: \.self) { cat in
+                                    Button { selectedCategory = cat } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: cat.icon)
+                                                .font(.system(size: 12, weight: .semibold))
+                                            Text(cat.rawValue)
+                                                .font(.caption.weight(.medium))
+                                                .lineLimit(1)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(selectedCategory == cat ? cat.color : .primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                                        .foregroundStyle(selectedCategory == cat ? .white : .primary.opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if let templates = reminderTemplates[selectedCategory], !templates.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Quick Pick")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.primary.opacity(0.7))
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(templates) { template in
+                                            Button { name = template.name } label: {
+                                                Text(template.name)
+                                                    .font(.caption.weight(.medium))
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 6)
+                                                    .background(name == template.name ? selectedCategory.color.opacity(0.3) : .primary.opacity(0.1), in: Capsule())
+                                                    .foregroundStyle(.primary.opacity(0.8))
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Reminder Name")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary.opacity(0.7))
+                            TextField("e.g. Car Insurance Renewal", text: $name)
+                                .font(.title3.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .padding(16)
+                                .background(.primary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(name.isEmpty ? Color.primary.opacity(0.35) : Color.green.opacity(0.6), lineWidth: 1.5)
+                                )
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Due Date")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.5))
+                            DatePicker("", selection: $dueDate, displayedComponents: .date)
+                                .datePickerStyle(.compact)
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Remind Me Before")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary.opacity(0.7))
+                            HStack(spacing: 8) {
+                                ForEach([30, 14, 7, 1], id: \.self) { days in
+                                    Button {
+                                        if remindDays.contains(days) {
+                                            remindDays.remove(days)
+                                        } else {
+                                            remindDays.insert(days)
+                                        }
+                                    } label: {
+                                        Text(days == 1 ? "1 day" : "\(days) days")
+                                            .font(.caption.weight(.medium))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(remindDays.contains(days) ? selectedCategory.color : .primary.opacity(0.12), in: Capsule())
+                                            .foregroundStyle(remindDays.contains(days) ? .white : .primary.opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Repeat")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary.opacity(0.7))
+                            Picker("Repeat", selection: $repeatFrequency) {
+                                ForEach(ReminderRepeat.allCases, id: \.self) { freq in
+                                    Text(freq.label).tag(freq)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        .padding(14)
+                            .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Notes (optional)")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.5))
+                            TextField("Policy number, amount, etc.", text: $notes, axis: .vertical)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .lineLimit(3...5)
+                                .padding(14)
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                        }
+
+                        Spacer().frame(height: 40)
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
+            .navigationTitle(isEditing ? "Edit Reminder" : "Add Reminder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .fontWeight(.semibold)
+                        .disabled(!isValid)
+                }
+            }
+            .onAppear {
+                if let r = editingReminder {
+                    name = r.name
+                    selectedCategory = r.categoryEnum
+                    dueDate = r.dueDate
+                    repeatFrequency = r.frequencyEnum
+                    remindDays = Set(r.remindDays)
+                    notes = r.notes
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func save() {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let sortedDays = remindDays.sorted(by: >)
+        let familyCode = authManager.familyCode
+
+        if let reminder = editingReminder {
+            reminder.name = trimmedName
+            reminder.category = selectedCategory.rawValue
+            reminder.dueDate = dueDate
+            reminder.repeatFrequency = repeatFrequency.rawValue
+            reminder.repeatYearly = repeatFrequency != .none
+            reminder.setRemindDays(sortedDays)
+            reminder.notes = notes
+            notificationManager.cancelAnnualReminder(reminderId: reminder.id)
+            notificationManager.scheduleAnnualReminder(
+                reminderId: reminder.id, name: trimmedName,
+                dueDate: dueDate, remindDaysBefore: sortedDays
+            )
+            Task { await cloudKitManager.pushAnnualReminder(reminder, familyCode: familyCode) }
+        } else {
+            let reminder = AnnualReminder(
+                name: trimmedName,
+                category: selectedCategory.rawValue,
+                dueDate: dueDate,
+                repeatYearly: repeatFrequency != .none,
+                repeatFrequency: repeatFrequency.rawValue,
+                remindDaysBefore: {
+                    if let data = try? JSONEncoder().encode(sortedDays),
+                       let str = String(data: data, encoding: .utf8) { return str }
+                    return "[30,14,7]"
+                }(),
+                notes: notes
+            )
+            modelContext.insert(reminder)
+            notificationManager.scheduleAnnualReminder(
+                reminderId: reminder.id, name: trimmedName,
+                dueDate: dueDate, remindDaysBefore: sortedDays
+            )
+            Task { await cloudKitManager.pushAnnualReminder(reminder, familyCode: familyCode) }
+        }
+        dismiss()
     }
 }
 

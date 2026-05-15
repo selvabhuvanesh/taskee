@@ -429,6 +429,7 @@ final class CloudKitManager {
         let createdBy: String
         let createdByID: String
         let lastRemindedAt: Date?
+        let transportType: String
 
         init(_ task: Item) {
             self.id = task.id.uuidString
@@ -445,6 +446,7 @@ final class CloudKitManager {
             self.createdBy = task.createdBy
             self.createdByID = task.createdByID
             self.lastRemindedAt = task.lastRemindedAt
+            self.transportType = task.transportType
         }
     }
 
@@ -475,6 +477,7 @@ final class CloudKitManager {
         if let reminded = snap.lastRemindedAt {
             record["lastRemindedAt"] = reminded as NSDate
         }
+        record["transportType"] = snap.transportType
 
         return await saveRecord(record, to: familyDatabase)
     }
@@ -728,6 +731,7 @@ final class CloudKitManager {
             result.newTasks = await syncTasks(context: context, familyCode: familyCode)
             await syncRedemptions(context: context, familyCode: familyCode)
             await syncShoppingItems(context: context, familyCode: familyCode)
+            await syncAnnualReminders(context: context, familyCode: familyCode)
         }
 
         let memberChanges = await syncMembers(context: context, familyCode: familyCode)
@@ -792,6 +796,8 @@ final class CloudKitManager {
                 if !remoteCreatedBy.isEmpty { local.createdBy = remoteCreatedBy }
                 let remoteCreatedByID = record["createdByID"] as? String ?? ""
                 if !remoteCreatedByID.isEmpty { local.createdByID = remoteCreatedByID }
+                let remoteTransport = record["transportType"] as? String ?? ""
+                if !remoteTransport.isEmpty { local.transportType = remoteTransport }
             } else if let uuid = UUID(uuidString: idStr) {
                 let name = record["name"] as? String ?? ""
                 let targetDate = record["targetDate"] as? Date ?? Date()
@@ -808,7 +814,8 @@ final class CloudKitManager {
                     isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1,
                     giftText: record["giftText"] as? String ?? "",
                     createdBy: record["createdBy"] as? String ?? "",
-                    createdByID: record["createdByID"] as? String ?? ""
+                    createdByID: record["createdByID"] as? String ?? "",
+                    transportType: record["transportType"] as? String ?? "none"
                 )
                 item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
@@ -1259,6 +1266,80 @@ final class CloudKitManager {
         }
     }
 
+    // MARK: - Annual Reminders
+
+    @discardableResult
+    func pushAnnualReminder(_ reminder: AnnualReminder, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+        let recordID = familyRecordID(name: reminder.id.uuidString)
+        let record = CKRecord(recordType: "AnnualReminderRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["name"] = reminder.name
+        record["category"] = reminder.category
+        record["dueDate"] = reminder.dueDate as NSDate
+        record["repeatYearly"] = NSNumber(value: reminder.repeatYearly ? 1 : 0)
+        record["repeatFrequency"] = reminder.repeatFrequency
+        record["remindDaysBefore"] = reminder.remindDaysBefore
+        record["notes"] = reminder.notes
+        record["isDone"] = NSNumber(value: reminder.isDone ? 1 : 0)
+        record["createdAt"] = reminder.createdAt as NSDate
+        return await saveRecord(record, to: familyDatabase)
+    }
+
+    func deleteAnnualReminder(id: UUID) async {
+        let recordID = familyRecordID(name: id.uuidString)
+        do {
+            try await familyDatabase.deleteRecord(withID: recordID)
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
+    func syncAnnualReminders(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(
+            type: "AnnualReminderRecord", familyCode: familyCode,
+            from: familyDatabase, inZone: familyZoneID
+        )
+        let descriptor = FetchDescriptor<AnnualReminder>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.name = record["name"] as? String ?? existing.name
+                existing.category = record["category"] as? String ?? existing.category
+                existing.dueDate = record["dueDate"] as? Date ?? existing.dueDate
+                existing.repeatYearly = ((record["repeatYearly"] as? NSNumber)?.intValue ?? 1) == 1
+                let remoteFreq = record["repeatFrequency"] as? String ?? ""
+                if !remoteFreq.isEmpty { existing.repeatFrequency = remoteFreq }
+                existing.remindDaysBefore = record["remindDaysBefore"] as? String ?? existing.remindDaysBefore
+                existing.notes = record["notes"] as? String ?? existing.notes
+                existing.isDone = ((record["isDone"] as? NSNumber)?.intValue ?? 0) == 1
+            } else if let uuid = UUID(uuidString: idStr) {
+                let item = AnnualReminder(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    category: record["category"] as? String ?? "Home",
+                    dueDate: record["dueDate"] as? Date ?? Date(),
+                    repeatYearly: ((record["repeatYearly"] as? NSNumber)?.intValue ?? 1) == 1,
+                    repeatFrequency: record["repeatFrequency"] as? String ?? "Yearly",
+                    remindDaysBefore: record["remindDaysBefore"] as? String ?? "[30,14,7]",
+                    notes: record["notes"] as? String ?? "",
+                    isDone: ((record["isDone"] as? NSNumber)?.intValue ?? 0) == 1
+                )
+                context.insert(item)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
     // MARK: - Fetch Notifications
 
     func lookupMemberAppleUserID(name: String, familyCode: String) async -> String? {
@@ -1573,6 +1654,8 @@ final class CloudKitManager {
             let remoteCreatedByID = record["createdByID"] as? String ?? ""
             if !remoteCreatedByID.isEmpty { local.createdByID = remoteCreatedByID }
             if let rr = remoteRemindedAt { local.lastRemindedAt = rr }
+            let deltaTransport = record["transportType"] as? String ?? ""
+            if !deltaTransport.isEmpty { local.transportType = deltaTransport }
 
             if oldStatus != newStatus {
                 if newStatus == "approved" {
@@ -1606,7 +1689,8 @@ final class CloudKitManager {
             isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1,
             giftText: record["giftText"] as? String ?? "",
             createdBy: record["createdBy"] as? String ?? "",
-            createdByID: record["createdByID"] as? String ?? ""
+            createdByID: record["createdByID"] as? String ?? "",
+            transportType: record["transportType"] as? String ?? "none"
         )
         item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
         item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
