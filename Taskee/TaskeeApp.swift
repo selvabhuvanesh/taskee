@@ -44,6 +44,9 @@ struct TaskeeApp: App {
             ShoppingItem.self,
             ChatMessage.self,
             AnnualReminder.self,
+            FamilyProject.self,
+            ProjectIdea.self,
+            ProjectVote.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

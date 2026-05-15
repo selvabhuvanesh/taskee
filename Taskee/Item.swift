@@ -29,8 +29,9 @@ final class Item {
     var createdByID: String
     var lastRemindedAt: Date?
     var transportType: String = "none"
+    var projectId: String = ""
 
-    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "", transportType: String = "none") {
+    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "", transportType: String = "none", projectId: String = "") {
         self.id = id
         self.name = name
         self.targetDate = targetDate
@@ -46,9 +47,11 @@ final class Item {
         self.createdByID = createdByID
         self.lastRemindedAt = nil
         self.transportType = transportType
+        self.projectId = projectId
     }
 
     var hasGift: Bool { !giftText.isEmpty }
+    var belongsToProject: Bool { !projectId.isEmpty }
     var needsTransport: Bool { transportType != "none" }
     var needsPickup: Bool { transportType == "pickup" || transportType == "both" }
     var needsDropoff: Bool { transportType == "dropoff" || transportType == "both" }
@@ -498,6 +501,143 @@ let reminderTemplates: [ReminderCategory: [ReminderTemplate]] = [
         ReminderTemplate(name: "Garden / Lawn Prep", category: .seasonal),
     ],
 ]
+
+// MARK: - Family Projects
+
+enum ProjectCategory: String, CaseIterable, Codable {
+    case home = "Home"
+    case travel = "Travel"
+    case pet = "Pet"
+    case fitness = "Fitness"
+    case education = "Education"
+    case fun = "Fun"
+    case finance = "Finance"
+
+    var icon: String {
+        switch self {
+        case .home: return "hammer.fill"
+        case .travel: return "airplane"
+        case .pet: return "pawprint.fill"
+        case .fitness: return "figure.run"
+        case .education: return "book.fill"
+        case .fun: return "party.popper.fill"
+        case .finance: return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .home: return .orange
+        case .travel: return .blue
+        case .pet: return .brown
+        case .fitness: return .green
+        case .education: return .purple
+        case .fun: return .pink
+        case .finance: return .mint
+        }
+    }
+}
+
+@Model
+final class FamilyProject {
+    var id: UUID
+    var name: String
+    var descriptionText: String
+    var category: String
+    var status: String = "ideating"
+    var createdBy: String
+    var targetDate: Date?
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, descriptionText: String = "", category: String = "Home", status: String = "ideating", createdBy: String, targetDate: Date? = nil) {
+        self.id = id
+        self.name = name
+        self.descriptionText = descriptionText
+        self.category = category
+        self.status = status
+        self.createdBy = createdBy
+        self.targetDate = targetDate
+        self.createdAt = Date()
+    }
+
+    var categoryEnum: ProjectCategory {
+        ProjectCategory(rawValue: category) ?? .home
+    }
+
+    var isIdeating: Bool { status == "ideating" }
+    var isPlanning: Bool { status == "planning" }
+    var isInProgress: Bool { status == "inProgress" }
+    var isCompleted: Bool { status == "completed" }
+
+    var statusLabel: String {
+        switch status {
+        case "ideating": return "Ideating"
+        case "planning": return "Planning"
+        case "inProgress": return "Executing"
+        case "completed": return "Completed"
+        default: return status
+        }
+    }
+
+    var statusIcon: String {
+        switch status {
+        case "ideating": return "lightbulb.fill"
+        case "planning": return "list.clipboard.fill"
+        case "inProgress": return "bolt.fill"
+        case "completed": return "checkmark.seal.fill"
+        default: return "folder.fill"
+        }
+    }
+
+    var statusColor: Color {
+        switch status {
+        case "ideating": return .yellow
+        case "planning": return .blue
+        case "inProgress": return .orange
+        case "completed": return .green
+        default: return .gray
+        }
+    }
+
+    static let statusOrder = ["ideating", "planning", "inProgress", "completed"]
+
+    func nextStatus() -> String? {
+        guard let idx = Self.statusOrder.firstIndex(of: status), idx + 1 < Self.statusOrder.count else { return nil }
+        return Self.statusOrder[idx + 1]
+    }
+}
+
+@Model
+final class ProjectIdea {
+    var id: UUID
+    var projectId: String
+    var text: String
+    var submittedBy: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), projectId: String, text: String, submittedBy: String) {
+        self.id = id
+        self.projectId = projectId
+        self.text = text
+        self.submittedBy = submittedBy
+        self.createdAt = Date()
+    }
+}
+
+@Model
+final class ProjectVote {
+    var id: UUID
+    var ideaId: String
+    var memberName: String
+    var isUpvote: Bool
+
+    init(id: UUID = UUID(), ideaId: String, memberName: String, isUpvote: Bool) {
+        self.id = id
+        self.ideaId = ideaId
+        self.memberName = memberName
+        self.isUpvote = isUpvote
+    }
+}
 
 let redemptionTypes = [
     ("cash", "Cash", "banknote.fill"),

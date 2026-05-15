@@ -50,7 +50,9 @@ struct ChildDashboardView: View {
     @State private var giftTaskToReveal: Item?
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
+    @State private var showFamilyProjects = false
     @Query private var shoppingItems: [ShoppingItem]
+    @Query private var allProjects: [FamilyProject]
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @Query private var allGifts: [SurpriseGift]
     @State private var flyingCoins: [FlyingCoin] = []
@@ -227,6 +229,7 @@ struct ChildDashboardView: View {
                             pickupButton
                             familyChatButton
                             shoppingBagButton
+                            familyProjectsButton
                         }
                         .padding(.leading, 20)
 
@@ -351,6 +354,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: childTheme)
+            }
+            .sheet(isPresented: $showFamilyProjects) {
+                FamilyProjectsListView(theme: childTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -798,6 +804,31 @@ struct ChildDashboardView: View {
         .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
     }
 
+    private var familyProjectsButton: some View {
+        Button {
+            showFamilyProjects = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.indigo, in: Circle())
+
+                let activeCount = allProjects.filter { !$0.isCompleted }.count
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .shadow(color: .indigo.opacity(0.3), radius: 8, y: 4)
+    }
+
     private var earningsCard: some View {
         VStack(spacing: 12) {
             HStack(spacing: 0) {
@@ -1175,6 +1206,14 @@ struct ChildDashboardView: View {
                                 Text("•")
                                     .foregroundStyle(.primary.opacity(0.3))
                                 CoinDisplay(count: Int(task.reward), earned: task.isApproved)
+                            }
+
+                            if task.belongsToProject {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 18, height: 18)
+                                    .background(.indigo, in: Circle())
                             }
 
                             if task.hasGift {

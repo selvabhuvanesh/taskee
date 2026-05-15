@@ -430,6 +430,7 @@ final class CloudKitManager {
         let createdByID: String
         let lastRemindedAt: Date?
         let transportType: String
+        let projectId: String
 
         init(_ task: Item) {
             self.id = task.id.uuidString
@@ -447,6 +448,7 @@ final class CloudKitManager {
             self.createdByID = task.createdByID
             self.lastRemindedAt = task.lastRemindedAt
             self.transportType = task.transportType
+            self.projectId = task.projectId
         }
     }
 
@@ -478,6 +480,7 @@ final class CloudKitManager {
             record["lastRemindedAt"] = reminded as NSDate
         }
         record["transportType"] = snap.transportType
+        record["projectId"] = snap.projectId
 
         return await saveRecord(record, to: familyDatabase)
     }
@@ -732,6 +735,9 @@ final class CloudKitManager {
             await syncRedemptions(context: context, familyCode: familyCode)
             await syncShoppingItems(context: context, familyCode: familyCode)
             await syncAnnualReminders(context: context, familyCode: familyCode)
+            await syncProjects(context: context, familyCode: familyCode)
+            await syncIdeas(context: context, familyCode: familyCode)
+            await syncVotes(context: context, familyCode: familyCode)
         }
 
         let memberChanges = await syncMembers(context: context, familyCode: familyCode)
@@ -798,6 +804,8 @@ final class CloudKitManager {
                 if !remoteCreatedByID.isEmpty { local.createdByID = remoteCreatedByID }
                 let remoteTransport = record["transportType"] as? String ?? ""
                 if !remoteTransport.isEmpty { local.transportType = remoteTransport }
+                let remoteProjectId = record["projectId"] as? String ?? ""
+                if !remoteProjectId.isEmpty { local.projectId = remoteProjectId }
             } else if let uuid = UUID(uuidString: idStr) {
                 let name = record["name"] as? String ?? ""
                 let targetDate = record["targetDate"] as? Date ?? Date()
@@ -815,7 +823,8 @@ final class CloudKitManager {
                     giftText: record["giftText"] as? String ?? "",
                     createdBy: record["createdBy"] as? String ?? "",
                     createdByID: record["createdByID"] as? String ?? "",
-                    transportType: record["transportType"] as? String ?? "none"
+                    transportType: record["transportType"] as? String ?? "none",
+                    projectId: record["projectId"] as? String ?? ""
                 )
                 item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
                 item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
@@ -1340,6 +1349,249 @@ final class CloudKitManager {
         }
     }
 
+    // MARK: - Family Projects
+
+    @discardableResult
+    func pushProject(_ project: FamilyProject, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+        let recordID = familyRecordID(name: project.id.uuidString)
+        let record = CKRecord(recordType: "ProjectRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["name"] = project.name
+        record["descriptionText"] = project.descriptionText
+        record["category"] = project.category
+        record["status"] = project.status
+        record["createdBy"] = project.createdBy
+        if let target = project.targetDate {
+            record["targetDate"] = target as NSDate
+        }
+        record["createdAt"] = project.createdAt as NSDate
+        return await saveRecord(record, to: familyDatabase)
+    }
+
+    func deleteRemoteProject(_ projectID: UUID) async {
+        let recordID = familyRecordID(name: projectID.uuidString)
+        do {
+            try await familyDatabase.deleteRecord(withID: recordID)
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func pushIdea(_ idea: ProjectIdea, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+        let recordID = familyRecordID(name: idea.id.uuidString)
+        let record = CKRecord(recordType: "ProjectIdeaRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["projectId"] = idea.projectId
+        record["text"] = idea.text
+        record["submittedBy"] = idea.submittedBy
+        record["createdAt"] = idea.createdAt as NSDate
+        return await saveRecord(record, to: familyDatabase)
+    }
+
+    func deleteRemoteIdea(_ ideaID: UUID) async {
+        let recordID = familyRecordID(name: ideaID.uuidString)
+        do {
+            try await familyDatabase.deleteRecord(withID: recordID)
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func pushVote(_ vote: ProjectVote, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+        let recordID = familyRecordID(name: vote.id.uuidString)
+        let record = CKRecord(recordType: "ProjectVoteRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["ideaId"] = vote.ideaId
+        record["memberName"] = vote.memberName
+        record["isUpvote"] = NSNumber(value: vote.isUpvote ? 1 : 0)
+        return await saveRecord(record, to: familyDatabase)
+    }
+
+    func deleteRemoteVote(_ voteID: UUID) async {
+        let recordID = familyRecordID(name: voteID.uuidString)
+        do {
+            try await familyDatabase.deleteRecord(withID: recordID)
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
+    func syncProjects(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "ProjectRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+        let descriptor = FetchDescriptor<FamilyProject>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.name = record["name"] as? String ?? existing.name
+                existing.descriptionText = record["descriptionText"] as? String ?? existing.descriptionText
+                existing.category = record["category"] as? String ?? existing.category
+                existing.status = record["status"] as? String ?? existing.status
+                existing.createdBy = record["createdBy"] as? String ?? existing.createdBy
+                existing.targetDate = record["targetDate"] as? Date
+                existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+            } else if let uuid = UUID(uuidString: idStr) {
+                let project = FamilyProject(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    descriptionText: record["descriptionText"] as? String ?? "",
+                    category: record["category"] as? String ?? "Home",
+                    status: record["status"] as? String ?? "ideating",
+                    createdBy: record["createdBy"] as? String ?? "",
+                    targetDate: record["targetDate"] as? Date
+                )
+                project.createdAt = record["createdAt"] as? Date ?? Date()
+                context.insert(project)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    func syncIdeas(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "ProjectIdeaRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+        let descriptor = FetchDescriptor<ProjectIdea>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.text = record["text"] as? String ?? existing.text
+                existing.submittedBy = record["submittedBy"] as? String ?? existing.submittedBy
+                existing.projectId = record["projectId"] as? String ?? existing.projectId
+            } else if let uuid = UUID(uuidString: idStr) {
+                let idea = ProjectIdea(
+                    id: uuid,
+                    projectId: record["projectId"] as? String ?? "",
+                    text: record["text"] as? String ?? "",
+                    submittedBy: record["submittedBy"] as? String ?? ""
+                )
+                idea.createdAt = record["createdAt"] as? Date ?? Date()
+                context.insert(idea)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    func syncVotes(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "ProjectVoteRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+        let descriptor = FetchDescriptor<ProjectVote>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.ideaId = record["ideaId"] as? String ?? existing.ideaId
+                existing.memberName = record["memberName"] as? String ?? existing.memberName
+                existing.isUpvote = ((record["isUpvote"] as? NSNumber)?.intValue ?? 1) == 1
+            } else if let uuid = UUID(uuidString: idStr) {
+                let vote = ProjectVote(
+                    id: uuid,
+                    ideaId: record["ideaId"] as? String ?? "",
+                    memberName: record["memberName"] as? String ?? "",
+                    isUpvote: ((record["isUpvote"] as? NSNumber)?.intValue ?? 1) == 1
+                )
+                context.insert(vote)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    private func applyProjectRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+        let descriptor = FetchDescriptor<FamilyProject>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.name = record["name"] as? String ?? existing.name
+            existing.descriptionText = record["descriptionText"] as? String ?? existing.descriptionText
+            existing.category = record["category"] as? String ?? existing.category
+            existing.status = record["status"] as? String ?? existing.status
+            existing.createdBy = record["createdBy"] as? String ?? existing.createdBy
+            existing.targetDate = record["targetDate"] as? Date
+        } else {
+            let project = FamilyProject(
+                id: uuid,
+                name: record["name"] as? String ?? "",
+                descriptionText: record["descriptionText"] as? String ?? "",
+                category: record["category"] as? String ?? "Home",
+                status: record["status"] as? String ?? "ideating",
+                createdBy: record["createdBy"] as? String ?? "",
+                targetDate: record["targetDate"] as? Date
+            )
+            project.createdAt = record["createdAt"] as? Date ?? Date()
+            context.insert(project)
+        }
+    }
+
+    private func applyIdeaRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+        let descriptor = FetchDescriptor<ProjectIdea>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.text = record["text"] as? String ?? existing.text
+            existing.submittedBy = record["submittedBy"] as? String ?? existing.submittedBy
+            existing.projectId = record["projectId"] as? String ?? existing.projectId
+        } else {
+            let idea = ProjectIdea(
+                id: uuid,
+                projectId: record["projectId"] as? String ?? "",
+                text: record["text"] as? String ?? "",
+                submittedBy: record["submittedBy"] as? String ?? ""
+            )
+            idea.createdAt = record["createdAt"] as? Date ?? Date()
+            context.insert(idea)
+        }
+    }
+
+    private func applyVoteRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+        let descriptor = FetchDescriptor<ProjectVote>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.isUpvote = ((record["isUpvote"] as? NSNumber)?.intValue ?? 1) == 1
+        } else {
+            let vote = ProjectVote(
+                id: uuid,
+                ideaId: record["ideaId"] as? String ?? "",
+                memberName: record["memberName"] as? String ?? "",
+                isUpvote: ((record["isUpvote"] as? NSNumber)?.intValue ?? 1) == 1
+            )
+            context.insert(vote)
+        }
+    }
+
     // MARK: - Fetch Notifications
 
     func lookupMemberAppleUserID(name: String, familyCode: String) async -> String? {
@@ -1593,6 +1845,12 @@ final class CloudKitManager {
                 if let change = applyChatRecord(record, context: context) {
                     result.changes.append(change)
                 }
+            case "ProjectRecord":
+                applyProjectRecord(record, context: context)
+            case "ProjectIdeaRecord":
+                applyIdeaRecord(record, context: context)
+            case "ProjectVoteRecord":
+                applyVoteRecord(record, context: context)
             default:
                 break
             }
@@ -1656,6 +1914,8 @@ final class CloudKitManager {
             if let rr = remoteRemindedAt { local.lastRemindedAt = rr }
             let deltaTransport = record["transportType"] as? String ?? ""
             if !deltaTransport.isEmpty { local.transportType = deltaTransport }
+            let deltaProjectId = record["projectId"] as? String ?? ""
+            if !deltaProjectId.isEmpty { local.projectId = deltaProjectId }
 
             if oldStatus != newStatus {
                 if newStatus == "approved" {
@@ -1690,7 +1950,8 @@ final class CloudKitManager {
             giftText: record["giftText"] as? String ?? "",
             createdBy: record["createdBy"] as? String ?? "",
             createdByID: record["createdByID"] as? String ?? "",
-            transportType: record["transportType"] as? String ?? "none"
+            transportType: record["transportType"] as? String ?? "none",
+            projectId: record["projectId"] as? String ?? ""
         )
         item.isArchived = status == "missed" ? false : ((record["isArchived"] as? NSNumber)?.intValue ?? 0) == 1
         item.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
@@ -1822,6 +2083,21 @@ final class CloudKitManager {
             let d = FetchDescriptor<ChatMessage>()
             if let m = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
                 context.delete(m)
+            }
+        case "ProjectRecord":
+            let d = FetchDescriptor<FamilyProject>()
+            if let p = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(p)
+            }
+        case "ProjectIdeaRecord":
+            let d = FetchDescriptor<ProjectIdea>()
+            if let i = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(i)
+            }
+        case "ProjectVoteRecord":
+            let d = FetchDescriptor<ProjectVote>()
+            if let v = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(v)
             }
         default:
             break

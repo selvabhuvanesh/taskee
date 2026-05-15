@@ -336,6 +336,7 @@ struct ContentView: View {
     @State private var showFamilyChat = false
     @State private var showAnnualReminders = false
     @State private var showDayPreview = false
+    @State private var showFamilyProjects = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @State private var editRequest: TaskEditRequest?
@@ -549,6 +550,7 @@ struct ContentView: View {
                         HStack(spacing: 10) {
                             familyChatButton
                             shoppingBagButton
+                            familyProjectsButton
                         }
                         .padding(.leading, 20)
 
@@ -705,6 +707,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showAnnualReminders) {
                 AnnualRemindersView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showFamilyProjects) {
+                FamilyProjectsListView(theme: parentTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -952,6 +957,14 @@ struct ContentView: View {
                             .lineLimit(1)
 
                         Spacer()
+
+                        if task.belongsToProject {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(.indigo, in: Circle())
+                        }
 
                         if task.needsTransport {
                             Image(systemName: task.transportIcon)
@@ -1490,6 +1503,33 @@ struct ContentView: View {
             }
         }
         .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
+    }
+
+    @Query private var allProjects: [FamilyProject]
+
+    private var familyProjectsButton: some View {
+        Button {
+            showFamilyProjects = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.indigo, in: Circle())
+
+                let activeCount = allProjects.filter { !$0.isCompleted }.count
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .shadow(color: .indigo.opacity(0.3), radius: 8, y: 4)
     }
 
     private func handleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
@@ -3070,6 +3110,14 @@ struct TaskRow: View {
                                             .font(.system(size: 16, weight: .medium))
                                             .foregroundStyle(.primary.opacity(0.6))
                                     )
+                            }
+
+                            if task.belongsToProject {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 18, height: 18)
+                                    .background(.indigo, in: Circle())
                             }
 
                             if task.needsTransport {
