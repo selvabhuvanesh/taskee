@@ -415,11 +415,13 @@ struct ProjectDetailView: View {
             if authManager.role == "parent" {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        if let next = project.nextStatus() {
-                            Button {
-                                advanceStatus(to: next)
-                            } label: {
-                                Label("Move to \(FamilyProject.statusOrder.contains(next) ? statusLabelFor(next) : next)", systemImage: "arrow.forward.circle")
+                        ForEach(FamilyProject.statusOrder, id: \.self) { s in
+                            if s != project.status {
+                                Button {
+                                    advanceStatus(to: s)
+                                } label: {
+                                    Label(statusLabelFull(s), systemImage: statusIconFor(s))
+                                }
                             }
                         }
                         Button(role: .destructive) {
@@ -789,6 +791,26 @@ struct ProjectDetailView: View {
         case "inProgress": return "Execute"
         case "completed": return "Done"
         default: return s
+        }
+    }
+
+    private func statusLabelFull(_ s: String) -> String {
+        switch s {
+        case "ideating": return "Move to Ideating"
+        case "planning": return "Move to Planning"
+        case "inProgress": return "Move to Executing"
+        case "completed": return "Mark Completed"
+        default: return s
+        }
+    }
+
+    private func statusIconFor(_ s: String) -> String {
+        switch s {
+        case "ideating": return "lightbulb.fill"
+        case "planning": return "list.clipboard.fill"
+        case "inProgress": return "bolt.fill"
+        case "completed": return "checkmark.seal.fill"
+        default: return "folder.fill"
         }
     }
 }

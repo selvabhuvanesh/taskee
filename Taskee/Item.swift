@@ -233,6 +233,23 @@ final class SurpriseGift {
 }
 
 @Model
+final class WishListItem {
+    var id: UUID
+    var name: String
+    var ownerAppleUserID: String
+    var ownerName: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, ownerAppleUserID: String, ownerName: String, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.ownerAppleUserID = ownerAppleUserID
+        self.ownerName = ownerName
+        self.createdAt = createdAt
+    }
+}
+
+@Model
 final class ShoppingItem {
     var id: UUID
     var name: String
@@ -2488,39 +2505,30 @@ struct QuestProgressBar: View {
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.orange)
-                if !userName.isEmpty {
-                    Text(userName)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(theme.textColor)
-                    Text("·")
-                        .foregroundStyle(theme.tertiaryTextColor)
-                }
-                Text("\(quest.activeDays) day\(quest.activeDays == 1 ? "" : "s")")
+        HStack(spacing: 8) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.orange)
+
+            if !userName.isEmpty {
+                Text(userName)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(theme.secondaryTextColor)
-                Spacer()
-                HStack(spacing: 4) {
-                    Image(systemName: quest.rank.icon)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(quest.rank.color)
-                    Text(quest.rank.rawValue)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(quest.rank.color)
-                }
+                    .foregroundStyle(theme.textColor)
+                Text("·")
+                    .foregroundStyle(theme.tertiaryTextColor)
             }
 
-            ZStack(alignment: .leading) {
-                GeometryReader { geo in
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(theme.cardBackground)
-                        .frame(height: 10)
+            Text("\(quest.activeDays) day\(quest.activeDays == 1 ? "" : "s")")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(theme.secondaryTextColor)
 
-                    RoundedRectangle(cornerRadius: 6)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(.white.opacity(0.2))
+                        .frame(height: 6)
+
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
                                 colors: [quest.rank.color, (quest.nextRank ?? quest.rank).color],
@@ -2528,43 +2536,28 @@ struct QuestProgressBar: View {
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: max(6, geo.size.width * quest.progress), height: 10)
-
-                    ForEach(QuestRank.allCases, id: \.self) { rank in
-                        let position = Double(rank.minDays) / Double(max(quest.totalDaysInMonth, 1))
-                        Circle()
-                            .fill(quest.activeDays >= rank.minDays ? rank.color : theme.tertiaryTextColor)
-                            .frame(width: 14, height: 14)
-                            .overlay(
-                                Image(systemName: rank.icon)
-                                    .font(.system(size: 7, weight: .bold))
-                                    .foregroundStyle(.white)
-                            )
-                            .position(x: geo.size.width * position, y: 5)
-                    }
+                        .frame(width: max(4, geo.size.width * quest.progress), height: 6)
                 }
-                .frame(height: 14)
+                .frame(height: 6)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
             }
+            .frame(height: 6)
 
-            HStack {
-                Text("Rookie")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(quest.activeDays >= 0 ? QuestRank.rookie.color : theme.tertiaryTextColor)
-                Spacer()
-                Text("Knight")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(quest.activeDays >= 10 ? QuestRank.knight.color : theme.tertiaryTextColor)
-                Spacer()
-                Text("Ninja")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(quest.activeDays >= 20 ? QuestRank.ninja.color : theme.tertiaryTextColor)
+            HStack(spacing: 3) {
+                Image(systemName: quest.rank.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(quest.rank.color)
+                Text(quest.rank.rawValue)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(quest.rank.color)
             }
         }
-        .padding(12)
-        .background(theme.cardBackgroundLight, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(theme.tertiaryTextColor, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(quest.rank.color.opacity(0.4), lineWidth: 1)
         )
     }
 }

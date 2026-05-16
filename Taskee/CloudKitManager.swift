@@ -738,6 +738,7 @@ final class CloudKitManager {
             await syncProjects(context: context, familyCode: familyCode)
             await syncIdeas(context: context, familyCode: familyCode)
             await syncVotes(context: context, familyCode: familyCode)
+            await syncWishListItems(context: context, familyCode: familyCode)
         }
 
         let memberChanges = await syncMembers(context: context, familyCode: familyCode)
@@ -1272,6 +1273,202 @@ final class CloudKitManager {
             if !remoteItemIDs.contains(idStr) || pendingDeletes.contains(idStr) {
                 context.delete(item)
             }
+        }
+    }
+
+    // MARK: - Wish List
+
+    struct WishListSnapshot {
+        let id: String
+        let name: String
+        let ownerAppleUserID: String
+        let ownerName: String
+        let createdAt: Date
+
+        init(_ item: WishListItem) {
+            self.id = item.id.uuidString
+            self.name = item.name
+            self.ownerAppleUserID = item.ownerAppleUserID
+            self.ownerName = item.ownerName
+            self.createdAt = item.createdAt
+        }
+    }
+
+    func pushWishListItem(_ item: WishListItem, familyCode: String) async -> Bool {
+        await pushWishListSnapshot(WishListSnapshot(item), familyCode: familyCode)
+    }
+
+    func pushWishListSnapshot(_ snap: WishListSnapshot, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+
+        if familyZoneID != nil {
+            let recordID = familyRecordID(name: snap.id)
+            let record = CKRecord(recordType: "WishListRecord", recordID: recordID)
+            record["familyCode"] = familyCode
+            record["itemID"] = snap.id
+            record["name"] = snap.name
+            record["ownerAppleUserID"] = snap.ownerAppleUserID
+            record["ownerName"] = snap.ownerName
+            record["createdAt"] = snap.createdAt as NSDate
+            record["updatedAt"] = Date() as NSDate
+            return await saveRecord(record, to: familyDatabase)
+        }
+
+        let newRecordName = UUID().uuidString
+        let record = CKRecord(recordType: "WishListRecord", recordID: CKRecord.ID(recordName: newRecordName))
+        record["familyCode"] = familyCode
+        record["itemID"] = snap.id
+        record["name"] = snap.name
+        record["ownerAppleUserID"] = snap.ownerAppleUserID
+        record["ownerName"] = snap.ownerName
+        record["createdAt"] = snap.createdAt as NSDate
+        record["updatedAt"] = Date() as NSDate
+        return await saveRecord(record)
+    }
+
+    func deleteWishListItem(id: UUID, familyCode: String) async {
+        let idStr = id.uuidString
+
+        if familyZoneID != nil {
+            let recordID = familyRecordID(name: idStr)
+            do {
+                try await familyDatabase.deleteRecord(withID: recordID)
+            } catch {
+                lastSyncError = error.localizedDescription
+            }
+            return
+        }
+
+        let predicate = NSPredicate(format: "familyCode == %@ AND itemID == %@", familyCode, idStr)
+        let query = CKQuery(recordType: "WishListRecord", predicate: predicate)
+        do {
+            let (results, _) = try await database.records(matching: query)
+            for (recordID, _) in results {
+                _ = try? await database.deleteRecord(withID: recordID)
+            }
+        } catch { }
+
+        let legacyID = CKRecord.ID(recordName: idStr)
+        _ = try? await database.deleteRecord(withID: legacyID)
+    }
+
+    private func syncWishListItems(context: ModelContext, familyCode: String) async {
+        if familyZoneID != nil {
+            await syncWishListFromZone(context: context, familyCode: familyCode)
+        } else {
+            await syncWishListFromPublic(context: context, familyCode: familyCode)
+        }
+    }
+
+    private func syncWishListFromZone(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "WishListRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+
+        let descriptor = FetchDescriptor<WishListItem>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+
+        for record in remoteRecords {
+            let idStr = record.recordID.recordName
+            if let existing = localByID[idStr] {
+                existing.name = record["name"] as? String ?? existing.name
+                existing.ownerAppleUserID = record["ownerAppleUserID"] as? String ?? existing.ownerAppleUserID
+                existing.ownerName = record["ownerName"] as? String ?? existing.ownerName
+                existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+            } else if let uuid = UUID(uuidString: idStr) {
+                let item = WishListItem(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    ownerAppleUserID: record["ownerAppleUserID"] as? String ?? "",
+                    ownerName: record["ownerName"] as? String ?? "",
+                    createdAt: record["createdAt"] as? Date ?? Date()
+                )
+                context.insert(item)
+            }
+        }
+
+        if !remoteRecords.isEmpty {
+            for item in local where !remoteIDs.contains(item.id.uuidString) {
+                context.delete(item)
+            }
+        }
+    }
+
+    private func syncWishListFromPublic(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "WishListRecord", familyCode: familyCode)
+
+        var latestByItemID: [String: CKRecord] = [:]
+        var duplicateRecordIDs: [CKRecord.ID] = []
+
+        for record in remoteRecords {
+            let itemID = record["itemID"] as? String ?? record.recordID.recordName
+            let recordTime = record["updatedAt"] as? Date ?? record.creationDate ?? .distantPast
+            if let existing = latestByItemID[itemID] {
+                let existingTime = existing["updatedAt"] as? Date ?? existing.creationDate ?? .distantPast
+                if recordTime > existingTime {
+                    duplicateRecordIDs.append(existing.recordID)
+                    latestByItemID[itemID] = record
+                } else {
+                    duplicateRecordIDs.append(record.recordID)
+                }
+            } else {
+                latestByItemID[itemID] = record
+            }
+        }
+
+        for dupID in duplicateRecordIDs {
+            _ = try? await database.deleteRecord(withID: dupID)
+        }
+
+        let descriptor = FetchDescriptor<WishListItem>()
+        let local = (try? context.fetch(descriptor)) ?? []
+        let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id.uuidString, $0) })
+        let remoteItemIDs = Set(latestByItemID.keys)
+
+        for (itemID, record) in latestByItemID {
+            if let existing = localByID[itemID] {
+                existing.name = record["name"] as? String ?? existing.name
+                existing.ownerAppleUserID = record["ownerAppleUserID"] as? String ?? existing.ownerAppleUserID
+                existing.ownerName = record["ownerName"] as? String ?? existing.ownerName
+                existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+            } else if let uuid = UUID(uuidString: itemID) {
+                let item = WishListItem(
+                    id: uuid,
+                    name: record["name"] as? String ?? "",
+                    ownerAppleUserID: record["ownerAppleUserID"] as? String ?? "",
+                    ownerName: record["ownerName"] as? String ?? "",
+                    createdAt: record["createdAt"] as? Date ?? Date()
+                )
+                context.insert(item)
+            }
+        }
+
+        for item in local where !remoteItemIDs.contains(item.id.uuidString) {
+            context.delete(item)
+        }
+    }
+
+    private func applyWishListRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+
+        let descriptor = FetchDescriptor<WishListItem>()
+        let all = (try? context.fetch(descriptor)) ?? []
+
+        if let existing = all.first(where: { $0.id == uuid }) {
+            existing.name = record["name"] as? String ?? existing.name
+            existing.ownerAppleUserID = record["ownerAppleUserID"] as? String ?? existing.ownerAppleUserID
+            existing.ownerName = record["ownerName"] as? String ?? existing.ownerName
+            existing.createdAt = record["createdAt"] as? Date ?? existing.createdAt
+        } else {
+            let item = WishListItem(
+                id: uuid,
+                name: record["name"] as? String ?? "",
+                ownerAppleUserID: record["ownerAppleUserID"] as? String ?? "",
+                ownerName: record["ownerName"] as? String ?? "",
+                createdAt: record["createdAt"] as? Date ?? Date()
+            )
+            context.insert(item)
         }
     }
 
@@ -1851,6 +2048,8 @@ final class CloudKitManager {
                 applyIdeaRecord(record, context: context)
             case "ProjectVoteRecord":
                 applyVoteRecord(record, context: context)
+            case "WishListRecord":
+                applyWishListRecord(record, context: context)
             default:
                 break
             }
@@ -2098,6 +2297,11 @@ final class CloudKitManager {
             let d = FetchDescriptor<ProjectVote>()
             if let v = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
                 context.delete(v)
+            }
+        case "WishListRecord":
+            let d = FetchDescriptor<WishListItem>()
+            if let w = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(w)
             }
         default:
             break

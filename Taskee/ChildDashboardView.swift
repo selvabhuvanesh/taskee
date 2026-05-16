@@ -51,6 +51,7 @@ struct ChildDashboardView: View {
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
     @State private var showFamilyProjects = false
+    @State private var showWishList = false
     @Query private var shoppingItems: [ShoppingItem]
     @Query private var allProjects: [FamilyProject]
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
@@ -230,6 +231,7 @@ struct ChildDashboardView: View {
                             familyChatButton
                             shoppingBagButton
                             familyProjectsButton
+                            wishListButton
                         }
                         .padding(.leading, 20)
 
@@ -357,6 +359,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showFamilyProjects) {
                 FamilyProjectsListView(theme: childTheme)
+            }
+            .sheet(isPresented: $showWishList) {
+                WishListView(theme: childTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -827,6 +832,19 @@ struct ChildDashboardView: View {
             }
         }
         .shadow(color: .indigo.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var wishListButton: some View {
+        Button {
+            showWishList = true
+        } label: {
+            Image(systemName: "star.fill")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.yellow.opacity(0.85), in: Circle())
+        }
+        .shadow(color: .yellow.opacity(0.3), radius: 8, y: 4)
     }
 
     private var earningsCard: some View {

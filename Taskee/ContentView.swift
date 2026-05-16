@@ -337,6 +337,9 @@ struct ContentView: View {
     @State private var showAnnualReminders = false
     @State private var showDayPreview = false
     @State private var showFamilyProjects = false
+    @State private var showWishList = false
+    @State private var isSearching = false
+    @State private var searchText = ""
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @State private var editRequest: TaskEditRequest?
@@ -369,7 +372,22 @@ struct ContentView: View {
     }
 
     private var filteredTasks: [Item] {
-        showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed } : myTasks
+        let base = showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed } : myTasks
+        if isSearching {
+            let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+            if !query.isEmpty {
+                return base.filter { task in
+                    task.name.lowercased().contains(query)
+                    || task.assignedTo.lowercased().contains(query)
+                    || task.status.lowercased().contains(query)
+                    || task.createdBy.lowercased().contains(query)
+                    || task.transportLabel.lowercased().contains(query)
+                    || task.dueDateLabel.lowercased().contains(query)
+                    || task.targetDate.formatted(.dateTime.month(.wide).day().year()).lowercased().contains(query)
+                }
+            }
+        }
+        return base
     }
 
     private var calendarDayTasks: [Item] {
@@ -423,17 +441,23 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text("My Tasks")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(parentTheme.textColor)
+                        QuestProgressBar(
+                            quest: MonthlyQuest.compute(tasks: tasks, userName: authManager.userName),
+                            theme: parentTheme
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+
                     if !children.isEmpty || otherParent != nil {
                         familyStrip
-                            .padding(.top, 8)
+                            .padding(.top, 6)
                     }
-
-                    QuestProgressBar(
-                        quest: MonthlyQuest.compute(tasks: tasks, userName: authManager.userName),
-                        theme: parentTheme
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
 
                     if !upcomingReminders.isEmpty {
                         Button { showAnnualReminders = true } label: {
@@ -468,6 +492,41 @@ struct ContentView: View {
                         .padding(.top, 4)
                     }
 
+                    if isSearching {
+                        HStack(spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                                TextField("Search tasks...", text: $searchText)
+                                    .font(.subheadline)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                if !searchText.isEmpty {
+                                    Button {
+                                        searchText = ""
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(8)
+                            .background(parentTheme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+
+                            Button("Cancel") {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    searchText = ""
+                                    isSearching = false
+                                }
+                            }
+                            .font(.subheadline)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                    }
+
                     ScrollViewReader { proxy in
                         ScrollView {
                             if showCalendarView {
@@ -492,7 +551,7 @@ struct ContentView: View {
                             } else {
                                 VStack(spacing: 0) {
                                     viewModeToggle
-                                    if isExpanded {
+                                    if isExpanded || isSearching {
                                         expandedListContent
                                     } else {
                                         groupListContent
@@ -551,6 +610,7 @@ struct ContentView: View {
                             familyChatButton
                             shoppingBagButton
                             familyProjectsButton
+                            wishListButton
                         }
                         .padding(.leading, 20)
 
@@ -559,13 +619,14 @@ struct ContentView: View {
                         addTaskButton
                             .padding(.trailing, 20)
                     }
-                    .padding(.bottom, 8)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.5))
                 }
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
-            .navigationTitle("My Tasks")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     HStack(spacing: 12) {
@@ -710,6 +771,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showFamilyProjects) {
                 FamilyProjectsListView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showWishList) {
+                WishListView(theme: parentTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -984,8 +1048,11 @@ struct ContentView: View {
 
     private var familyStrip: some View {
         HStack {
-            dayPreviewButton
-                .padding(.leading, 16)
+            HStack(spacing: 10) {
+                dayPreviewButton
+                searchButton
+            }
+            .padding(.leading, 16)
 
             Spacer()
             HStack(spacing: 14) {
@@ -1452,6 +1519,22 @@ struct ContentView: View {
         .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
     }
 
+    private var searchButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSearching.toggle()
+                if !isSearching { searchText = "" }
+            }
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(isSearching ? .orange : .teal, in: Circle())
+        }
+        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+    }
+
     private var familyChatButton: some View {
         Button {
             showFamilyChat = true
@@ -1530,6 +1613,19 @@ struct ContentView: View {
             }
         }
         .shadow(color: .indigo.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var wishListButton: some View {
+        Button {
+            showWishList = true
+        } label: {
+            Image(systemName: "star.fill")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.yellow.opacity(0.85), in: Circle())
+        }
+        .shadow(color: .yellow.opacity(0.3), radius: 8, y: 4)
     }
 
     private func handleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
@@ -3415,6 +3511,168 @@ struct TaskDetailView: View {
     }
 }
 
+// MARK: - Wish List View
+
+struct WishListView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(AuthManager.self) private var authManager
+    @Query(sort: \WishListItem.createdAt) private var allWishListItems: [WishListItem]
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    @State private var newItemName = ""
+    @State private var editingItem: WishListItem?
+    @State private var editText = ""
+    @State private var itemToDelete: WishListItem?
+
+    private var myItems: [WishListItem] {
+        allWishListItems.filter { $0.ownerAppleUserID == authManager.appleUserID }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                        TextField("Add a wish...", text: $newItemName)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.sentences)
+                            .onSubmit { addItem() }
+                        if !newItemName.isEmpty {
+                            Button {
+                                addItem()
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.yellow)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.yellow.opacity(0.3), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+
+                    if myItems.isEmpty {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            Image(systemName: "star.circle")
+                                .font(.system(size: 50))
+                                .foregroundStyle(.primary.opacity(0.3))
+                            Text("Your wish list is empty")
+                                .font(.headline)
+                                .foregroundStyle(.primary.opacity(0.5))
+                            Text("Add things you'd love to receive!")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary.opacity(0.3))
+                        }
+                        Spacer()
+                    } else {
+                        List {
+                            ForEach(myItems) { item in
+                                HStack(spacing: 12) {
+                                    Image(systemName: "star.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.yellow)
+
+                                    if editingItem?.id == item.id {
+                                        TextField("Wish name", text: $editText)
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                            .onSubmit { saveEdit(item) }
+                                        Button {
+                                            saveEdit(item)
+                                        } label: {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.green)
+                                        }
+                                    } else {
+                                        Text(item.name)
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Button {
+                                            editingItem = item
+                                            editText = item.name
+                                        } label: {
+                                            Image(systemName: "pencil")
+                                                .font(.caption)
+                                                .foregroundStyle(.primary.opacity(0.4))
+                                        }
+                                    }
+                                }
+                                .listRowBackground(theme.cardBackground)
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        deleteItem(item)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                    }
+                }
+            }
+            .navigationTitle("My Wish List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+    }
+
+    private func addItem() {
+        let trimmed = newItemName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let item = WishListItem(
+            name: trimmed,
+            ownerAppleUserID: authManager.appleUserID,
+            ownerName: authManager.userName
+        )
+        modelContext.insert(item)
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushWishListItem(item, familyCode: familyCode) }
+        newItemName = ""
+    }
+
+    private func saveEdit(_ item: WishListItem) {
+        let trimmed = editText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        item.name = trimmed
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushWishListItem(item, familyCode: familyCode) }
+        editingItem = nil
+        editText = ""
+    }
+
+    private func deleteItem(_ item: WishListItem) {
+        let id = item.id
+        let familyCode = authManager.familyCode
+        modelContext.delete(item)
+        Task { await cloudKitManager.deleteWishListItem(id: id, familyCode: familyCode) }
+    }
+}
+
 // MARK: - Add Task View (Parent)
 
 struct AddTaskView: View {
@@ -3425,6 +3683,7 @@ struct AddTaskView: View {
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    @Query(sort: \WishListItem.createdAt) private var allWishListItems: [WishListItem]
     let children: [FamilyMember]
     var otherParent: FamilyMember? = nil
     var preselectedChild: String = ""
@@ -3641,7 +3900,40 @@ struct AddTaskView: View {
                             )
 
                             if includeGift {
-                                Text("Gift Description")
+                                let assigneeWishes = allWishListItems.filter { wish in
+                                    selectedChildren.contains(wish.ownerName)
+                                }
+
+                                if !assigneeWishes.isEmpty {
+                                    Text("Pick from wish list")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary.opacity(0.5))
+
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(assigneeWishes) { wish in
+                                                Button {
+                                                    giftText = wish.name
+                                                } label: {
+                                                    HStack(spacing: 6) {
+                                                        Image(systemName: "star.fill")
+                                                            .font(.system(size: 10))
+                                                            .foregroundStyle(.yellow)
+                                                        Text(wish.name)
+                                                            .font(.caption.weight(.medium))
+                                                            .foregroundStyle(giftText == wish.name ? .white : .primary)
+                                                    }
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 8)
+                                                    .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text("Or type a custom gift")
                                     .font(.caption)
                                     .foregroundStyle(.primary.opacity(0.5))
 
@@ -4237,6 +4529,7 @@ struct EditTaskView: View {
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    @Query(sort: \WishListItem.createdAt) private var allWishListItems: [WishListItem]
     @Bindable var task: Item
     let children: [FamilyMember]
     var otherParent: FamilyMember? = nil
@@ -4436,7 +4729,38 @@ struct EditTaskView: View {
                             .disabled(!canEdit)
 
                             if includeGift {
-                                Text("Gift Description")
+                                let assigneeWishes = allWishListItems.filter { $0.ownerName == selectedChild }
+
+                                if !assigneeWishes.isEmpty {
+                                    Text("Pick from wish list")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary.opacity(0.5))
+
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(assigneeWishes) { wish in
+                                                Button {
+                                                    giftText = wish.name
+                                                } label: {
+                                                    HStack(spacing: 6) {
+                                                        Image(systemName: "star.fill")
+                                                            .font(.system(size: 10))
+                                                            .foregroundStyle(.yellow)
+                                                        Text(wish.name)
+                                                            .font(.caption.weight(.medium))
+                                                            .foregroundStyle(giftText == wish.name ? .white : .primary)
+                                                    }
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 8)
+                                                    .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text("Or type a custom gift")
                                     .font(.caption)
                                     .foregroundStyle(.primary.opacity(0.5))
 

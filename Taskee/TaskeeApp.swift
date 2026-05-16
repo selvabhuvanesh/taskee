@@ -47,6 +47,7 @@ struct TaskeeApp: App {
             FamilyProject.self,
             ProjectIdea.self,
             ProjectVote.self,
+            WishListItem.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,
