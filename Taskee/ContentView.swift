@@ -351,9 +351,49 @@ struct ContentView: View {
     @State private var pendingEditTask: Item?
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Query private var allRedemptions: [RewardRedemption]
+    @Query private var allGifts: [SurpriseGift]
+    @State private var showParentRedeem = false
+    @State private var showParentGifts = false
+    @State private var giftTaskToReveal: Item?
 
     private var pendingRedemptions: [RewardRedemption] {
         allRedemptions.filter { $0.isPending }
+    }
+
+    private var myRedemptions: [RewardRedemption] {
+        allRedemptions.filter { $0.childName == authManager.userName }
+    }
+
+    private var parentInReviewCoins: Int {
+        activeTasks
+            .filter { $0.assignedTo == authManager.userName && $0.isInReview && $0.reward > 0 }
+            .reduce(0) { $0 + Int($1.reward) }
+    }
+
+    private var parentPendingRedemptionCoins: Int {
+        myRedemptions.filter { $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+    }
+
+    private var parentAwaitingCoins: Int {
+        parentPendingRedemptionCoins + parentInReviewCoins
+    }
+
+    private var parentRedeemedCoins: Int {
+        myRedemptions.filter { $0.isApproved || $0.isFulfilled || $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+    }
+
+    private var parentTotalEarned: Int {
+        activeTasks
+            .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
+            .reduce(0) { $0 + Int($1.reward) }
+    }
+
+    private var parentCollectableCoins: Int {
+        max(0, parentTotalEarned - parentRedeemedCoins)
+    }
+
+    private var parentUnredeemedGifts: Int {
+        allGifts.filter { $0.childName == authManager.userName && !$0.isRedeemed }.count
     }
 
     private var activeTasks: [Item] {
@@ -372,7 +412,7 @@ struct ContentView: View {
     }
 
     private var filteredTasks: [Item] {
-        let base = showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed } : myTasks
+        let base = showOpenOnly ? myTasks.filter { (!$0.isApproved && !$0.isMissed) || ($0.hasGift && !$0.giftRevealed) } : myTasks
         if isSearching {
             let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
             if !query.isEmpty {
@@ -490,6 +530,12 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
                         .padding(.top, 4)
+                    }
+
+                    if parentTotalEarned > 0 || parentAwaitingCoins > 0 {
+                        parentEarningsCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
                     }
 
                     if isSearching {
@@ -804,6 +850,16 @@ struct ContentView: View {
                     theme: parentTheme
                 )
             }
+            .sheet(isPresented: $showParentRedeem) {
+                RedeemRewardsView(
+                    availableCoins: parentCollectableCoins,
+                    childName: authManager.userName,
+                    theme: parentTheme
+                )
+            }
+            .sheet(isPresented: $showParentGifts) {
+                MyGiftsView(childName: authManager.userName, theme: parentTheme)
+            }
             .sheet(isPresented: $showShareSheet) {
                 ShareSheet(items: [ShareTextWithLink(text: parentShareMessage, url: appStoreURL)])
             }
@@ -814,6 +870,20 @@ struct ContentView: View {
                 PendingApprovalsView(theme: parentTheme) { reward in
                     celebrationReward = reward
                     showCelebration = true
+                }
+            }
+            .fullScreenCover(item: $giftTaskToReveal) { task in
+                GiftRevealView(giftText: task.giftText) {
+                    task.giftRevealed = true
+                    let gift = SurpriseGift(
+                        childName: authManager.userName,
+                        giftDescription: task.giftText,
+                        taskName: task.name
+                    )
+                    modelContext.insert(gift)
+                    let snapshot = CloudKitManager.TaskSnapshot(task)
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
                 }
             }
             .onChange(of: notificationManager.showPendingApprovals) { _, newValue in
@@ -1221,7 +1291,7 @@ struct ContentView: View {
     }
 
     private func scheduleStickyNote(from tips: [String]) {
-        let delay = Double.random(in: 15...45)
+        let delay = Double.random(in: 120...300)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard stickyNote == nil else { return }
             let msg = tips.randomElement() ?? ""
@@ -1405,6 +1475,27 @@ struct ContentView: View {
                                 )
                         )
                         .draggable(TaskTransfer(id: task.id))
+
+                        if task.hasGift && task.isApproved && !task.giftRevealed && task.assignedTo == authManager.userName {
+                            Button {
+                                giftTaskToReveal = task
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "gift.fill")
+                                        .font(.system(size: 14, weight: .bold))
+                                    Text("Open Gift")
+                                        .font(.caption.weight(.bold))
+                                }
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    LinearGradient(colors: [.pink, .purple], startPoint: .leading, endPoint: .trailing),
+                                    in: Capsule()
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .id(index == todayGroupIndex ? "Today" : group.key)
@@ -1626,6 +1717,107 @@ struct ContentView: View {
                 .background(.yellow.opacity(0.85), in: Circle())
         }
         .shadow(color: .yellow.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var parentEarningsCard: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                VStack(spacing: 4) {
+                    Image(systemName: "star.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.green)
+                    Text("\(parentCollectableCoins)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                        .contentTransition(.numericText())
+                    Text("Ready to Redeem")
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
+
+                Rectangle()
+                    .fill(.primary.opacity(0.15))
+                    .frame(width: 1, height: 40)
+
+                VStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                    Text("\(parentAwaitingCoins)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                        .contentTransition(.numericText())
+                    Text("Awaiting Approval")
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    showParentRedeem = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "gift.fill")
+                            .font(.caption)
+                        Text("Redeem")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity)
+                    .background(parentCollectableCoins > 0 ? .orange : parentTheme.cardBackgroundLight, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(parentCollectableCoins <= 0)
+
+                Button {
+                    showParentGifts = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "gift.fill")
+                            .font(.caption)
+                            .foregroundStyle(.pink)
+                        Text("Gifts")
+                            .font(.caption.weight(.semibold))
+                        if parentUnredeemedGifts > 0 {
+                            Text("\(parentUnredeemedGifts)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .frame(minWidth: 14, minHeight: 14)
+                                .background(.pink, in: Circle())
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                }
+
+                Button {
+                    showRewardsHistory = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.caption)
+                        Text("History")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+        .padding(14)
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.green.opacity(0.2), lineWidth: 1)
+        )
     }
 
     private func handleTaskDrop(taskId: UUID, toDate referenceDate: Date) -> Bool {
@@ -2286,10 +2478,11 @@ struct DateTasksView: View {
         task.status = "approved"
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 && !task.assignedTo.isEmpty {
-            if let child = children.first(where: { $0.name == task.assignedTo }) {
-                child.recomputeEarned(from: allTasks)
+            let allFamilyMembers = children + [otherParent].compactMap { $0 }
+            if let member = allFamilyMembers.first(where: { $0.name == task.assignedTo }) {
+                member.recomputeEarned(from: allTasks)
                 let familyCode = authManager.familyCode
-                Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
+                Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
             }
         }
         if !task.assignedTo.isEmpty {

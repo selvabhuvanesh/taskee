@@ -1108,7 +1108,7 @@ struct ChildDashboardView: View {
     }
 
     private func scheduleStickyNote(from tips: [String]) {
-        let delay = Double.random(in: 15...45)
+        let delay = Double.random(in: 120...300)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard stickyNote == nil else { return }
             let msg = tips.randomElement() ?? ""
