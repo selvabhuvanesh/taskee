@@ -851,13 +851,15 @@ struct ChildDashboardView: View {
         VStack(spacing: 12) {
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
-                    Image(systemName: "star.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.green)
-                    Text("\(collectableCoins)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(.green)
-                        .contentTransition(.numericText())
+                    HStack(spacing: 6) {
+                        Image(systemName: "star.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.green)
+                        Text("\(collectableCoins)")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(.green)
+                            .contentTransition(.numericText())
+                    }
                     Text("Ready to Redeem")
                         .font(.caption2)
                         .foregroundStyle(.primary.opacity(0.7))
@@ -869,15 +871,17 @@ struct ChildDashboardView: View {
                     .frame(width: 1, height: 50)
 
                 VStack(spacing: 4) {
-                    Image(systemName: "clock.fill")
-                        .font(.title2)
-                        .foregroundStyle(.orange)
-                        .scaleEffect(coinLandBounce ? 1.3 : 1.0)
-                    Text("\(awaitingApprovalCoins)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(.orange)
-                        .scaleEffect(coinLandBounce ? 1.3 : 1.0)
-                        .contentTransition(.numericText())
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.fill")
+                            .font(.title2)
+                            .foregroundStyle(.orange)
+                            .scaleEffect(coinLandBounce ? 1.3 : 1.0)
+                        Text("\(awaitingApprovalCoins)")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .scaleEffect(coinLandBounce ? 1.3 : 1.0)
+                            .contentTransition(.numericText())
+                    }
                     Text("Awaiting Approval")
                         .font(.caption2)
                         .foregroundStyle(.primary.opacity(0.7))

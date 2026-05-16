@@ -494,6 +494,12 @@ struct ContentView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
+                    if parentTotalEarned > 0 || parentAwaitingCoins > 0 {
+                        parentEarningsCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                    }
+
                     if !children.isEmpty || otherParent != nil {
                         familyStrip
                             .padding(.top, 6)
@@ -530,12 +536,6 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
                         .padding(.top, 4)
-                    }
-
-                    if parentTotalEarned > 0 || parentAwaitingCoins > 0 {
-                        parentEarningsCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
                     }
 
                     if isSearching {
@@ -1723,13 +1723,15 @@ struct ContentView: View {
         VStack(spacing: 10) {
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
-                    Image(systemName: "star.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                    Text("\(parentCollectableCoins)")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(.green)
-                        .contentTransition(.numericText())
+                    HStack(spacing: 6) {
+                        Image(systemName: "star.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.green)
+                        Text("\(parentCollectableCoins)")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(.green)
+                            .contentTransition(.numericText())
+                    }
                     Text("Ready to Redeem")
                         .font(.caption2)
                         .foregroundStyle(.primary.opacity(0.7))
@@ -1741,13 +1743,15 @@ struct ContentView: View {
                     .frame(width: 1, height: 40)
 
                 VStack(spacing: 4) {
-                    Image(systemName: "clock.fill")
-                        .font(.title3)
-                        .foregroundStyle(.orange)
-                    Text("\(parentAwaitingCoins)")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(.orange)
-                        .contentTransition(.numericText())
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.fill")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                        Text("\(parentAwaitingCoins)")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .contentTransition(.numericText())
+                    }
                     Text("Awaiting Approval")
                         .font(.caption2)
                         .foregroundStyle(.primary.opacity(0.7))
