@@ -532,35 +532,74 @@ final class CloudKitManager {
 
     var lastPushResult: String = ""
 
+    private func isTransientCKError(_ error: Error) -> Bool {
+        guard let ckError = error as? CKError else { return false }
+        switch ckError.code {
+        case .networkUnavailable, .networkFailure, .serviceUnavailable,
+             .requestRateLimited, .zoneBusy, .serverResponseLost:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func retryDelay(for error: Error, attempt: Int) -> Double {
+        if let ckError = error as? CKError,
+           let suggested = ckError.userInfo[CKErrorRetryAfterKey] as? Double {
+            return suggested
+        }
+        return min(Double(1 << attempt), 30)
+    }
+
     private func saveRecord(_ record: CKRecord, to targetDB: CKDatabase? = nil) async -> Bool {
         let db = targetDB ?? database
         let status = record["status"] as? String ?? "n/a"
         let type = record.recordType
         let id = record.recordID.recordName
+        let maxAttempts = 4
 
-        do {
-            let (saveResults, _) = try await db.modifyRecords(
-                saving: [record],
-                deleting: [],
-                savePolicy: .allKeys
-            )
-            for (_, result) in saveResults {
-                if case .failure(let error) = result {
+        for attempt in 0..<maxAttempts {
+            do {
+                let (saveResults, _) = try await db.modifyRecords(
+                    saving: [record],
+                    deleting: [],
+                    savePolicy: .allKeys
+                )
+                var perRecordError: Error?
+                for (_, result) in saveResults {
+                    if case .failure(let error) = result {
+                        perRecordError = error
+                    }
+                }
+                if let error = perRecordError {
+                    if attempt < maxAttempts - 1 && isTransientCKError(error) {
+                        let delay = retryDelay(for: error, attempt: attempt)
+                        print("[CloudKit] SAVE RETRY \(type) \(id) attempt \(attempt + 1), waiting \(delay)s: \(error.localizedDescription)")
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        continue
+                    }
                     lastSyncError = error.localizedDescription
                     lastPushResult = "FAIL \(type) \(id) status=\(status): \(error.localizedDescription)"
                     print("[CloudKit] SAVE FAIL \(type) \(id): \(error.localizedDescription)")
                     return false
                 }
+                lastPushResult = "OK \(type) \(id) status=\(status)"
+                print("[CloudKit] SAVE OK \(type) \(id)")
+                return true
+            } catch {
+                if attempt < maxAttempts - 1 && isTransientCKError(error) {
+                    let delay = retryDelay(for: error, attempt: attempt)
+                    print("[CloudKit] SAVE RETRY \(type) \(id) attempt \(attempt + 1), waiting \(delay)s: \(error.localizedDescription)")
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                lastSyncError = error.localizedDescription
+                lastPushResult = "ERROR \(type) \(id) status=\(status): \(error.localizedDescription)"
+                print("[CloudKit] SAVE ERROR \(type) \(id): \(error.localizedDescription)")
+                return false
             }
-            lastPushResult = "OK \(type) \(id) status=\(status)"
-            print("[CloudKit] SAVE OK \(type) \(id)")
-            return true
-        } catch {
-            lastSyncError = error.localizedDescription
-            lastPushResult = "ERROR \(type) \(id) status=\(status): \(error.localizedDescription)"
-            print("[CloudKit] SAVE ERROR \(type) \(id): \(error.localizedDescription)")
-            return false
         }
+        return false
     }
 
     // MARK: - Delete
@@ -755,24 +794,34 @@ final class CloudKitManager {
         let db = targetDB ?? database
         let predicate = NSPredicate(format: "familyCode == %@", familyCode)
         let query = CKQuery(recordType: type, predicate: predicate)
-        var all: [CKRecord] = []
+        let maxAttempts = 4
 
-        do {
-            var (results, cursor) = try await db.records(matching: query, inZoneWith: zoneID)
-            all.append(contentsOf: results.compactMap { try? $0.1.get() })
+        for attempt in 0..<maxAttempts {
+            var all: [CKRecord] = []
+            do {
+                var (results, cursor) = try await db.records(matching: query, inZoneWith: zoneID)
+                all.append(contentsOf: results.compactMap { try? $0.1.get() })
 
-            while let c = cursor {
-                let (more, next) = try await db.records(continuingMatchFrom: c)
-                all.append(contentsOf: more.compactMap { try? $0.1.get() })
-                cursor = next
+                while let c = cursor {
+                    let (more, next) = try await db.records(continuingMatchFrom: c)
+                    all.append(contentsOf: more.compactMap { try? $0.1.get() })
+                    cursor = next
+                }
+                print("[CloudKit] FETCH \(type): \(all.count) records for family=\(familyCode)")
+                return all
+            } catch {
+                if attempt < maxAttempts - 1 && isTransientCKError(error) {
+                    let delay = retryDelay(for: error, attempt: attempt)
+                    print("[CloudKit] FETCH RETRY \(type) attempt \(attempt + 1), waiting \(delay)s: \(error.localizedDescription)")
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                lastSyncError = error.localizedDescription
+                print("[CloudKit] FETCH ERROR \(type): \(error.localizedDescription)")
+                return []
             }
-        } catch {
-            lastSyncError = error.localizedDescription
-            print("[CloudKit] FETCH ERROR \(type): \(error.localizedDescription)")
         }
-
-        print("[CloudKit] FETCH \(type): \(all.count) records for family=\(familyCode)")
-        return all
+        return []
     }
 
     @discardableResult
@@ -1970,50 +2019,62 @@ final class CloudKitManager {
         guard let zoneID = familyZoneID else { return SyncResult() }
 
         let isInitialSync = loadChangeToken() == nil
-        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
-            previousServerChangeToken: loadChangeToken()
-        )
+        let maxAttempts = 4
+        var collector = DeltaSyncCollector()
 
-        let collector = DeltaSyncCollector()
+        for attempt in 0..<maxAttempts {
+            collector = DeltaSyncCollector()
+            let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
+                previousServerChangeToken: loadChangeToken()
+            )
+            let operation = CKFetchRecordZoneChangesOperation(
+                recordZoneIDs: [zoneID],
+                configurationsByRecordZoneID: [zoneID: config]
+            )
 
-        let operation = CKFetchRecordZoneChangesOperation(
-            recordZoneIDs: [zoneID],
-            configurationsByRecordZoneID: [zoneID: config]
-        )
-
-        operation.recordWasChangedBlock = { _, result in
-            if case .success(let record) = result {
-                collector.records.append(record)
+            operation.recordWasChangedBlock = { _, result in
+                if case .success(let record) = result {
+                    collector.records.append(record)
+                }
             }
-        }
 
-        operation.recordWithIDWasDeletedBlock = { recordID, recordType in
-            collector.deletedIDs.append((recordID, recordType))
-        }
-
-        operation.recordZoneFetchResultBlock = { _, result in
-            switch result {
-            case .success((let serverToken, _, _)):
-                collector.token = serverToken
-            case .failure(let error):
-                collector.error = error
+            operation.recordWithIDWasDeletedBlock = { recordID, recordType in
+                collector.deletedIDs.append((recordID, recordType))
             }
-        }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            operation.fetchRecordZoneChangesResultBlock = { _ in
-                continuation.resume()
+            operation.recordZoneFetchResultBlock = { _, result in
+                switch result {
+                case .success((let serverToken, _, _)):
+                    collector.token = serverToken
+                case .failure(let error):
+                    collector.error = error
+                }
             }
-            familyDatabase.add(operation)
-        }
 
-        if let error = collector.error {
-            if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
-                clearChangeToken()
-                print("[CloudKit] Change token expired, will do full sync next time")
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                operation.fetchRecordZoneChangesResultBlock = { _ in
+                    continuation.resume()
+                }
+                familyDatabase.add(operation)
             }
-            lastSyncError = error.localizedDescription
-            return SyncResult()
+
+            if let error = collector.error {
+                if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
+                    clearChangeToken()
+                    print("[CloudKit] Change token expired, will do full sync next time")
+                    lastSyncError = error.localizedDescription
+                    return SyncResult()
+                }
+                if attempt < maxAttempts - 1 && isTransientCKError(error) {
+                    let delay = retryDelay(for: error, attempt: attempt)
+                    print("[CloudKit] DELTA SYNC RETRY attempt \(attempt + 1), waiting \(delay)s: \(error.localizedDescription)")
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                lastSyncError = error.localizedDescription
+                return SyncResult()
+            }
+            break
         }
 
         var result = SyncResult()
