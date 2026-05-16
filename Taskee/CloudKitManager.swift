@@ -102,7 +102,9 @@ final class CloudKitManager {
             print("[CloudKit] Found owned zone: \(zoneName)")
             await ensureShareExists(familyCode: familyCode)
             return
-        } catch { }
+        } catch {
+            print("[CloudKit] Zone not owned: \(error.localizedDescription)")
+        }
 
         // 2. Check shared DB (are we a participant?)
         do {
@@ -113,7 +115,9 @@ final class CloudKitManager {
                 print("[CloudKit] Found shared zone: \(zoneName) owner=\(matchedZone.zoneID.ownerName)")
                 return
             }
-        } catch { }
+        } catch {
+            print("[CloudKit] Shared zone lookup failed: \(error.localizedDescription)")
+        }
 
         // 3. Zone not found — check if we're the family creator
         let isCreator = await isFamilyCreator(familyCode: familyCode, appleUserID: appleUserID)
@@ -1184,7 +1188,10 @@ final class CloudKitManager {
             for (recordID, _) in results {
                 _ = try? await database.deleteRecord(withID: recordID)
             }
-        } catch { }
+        } catch {
+            lastSyncError = error.localizedDescription
+            print("[CloudKit] Shopping delete failed: \(error.localizedDescription)")
+        }
 
         let legacyID = CKRecord.ID(recordName: idStr)
         _ = try? await database.deleteRecord(withID: legacyID)
@@ -1395,7 +1402,10 @@ final class CloudKitManager {
             for (recordID, _) in results {
                 _ = try? await database.deleteRecord(withID: recordID)
             }
-        } catch { }
+        } catch {
+            lastSyncError = error.localizedDescription
+            print("[CloudKit] WishList delete failed: \(error.localizedDescription)")
+        }
 
         let legacyID = CKRecord.ID(recordName: idStr)
         _ = try? await database.deleteRecord(withID: legacyID)
@@ -1855,7 +1865,9 @@ final class CloudKitManager {
                     return appleID
                 }
             }
-        } catch { }
+        } catch {
+            print("[CloudKit] Apple User ID lookup failed: \(error.localizedDescription)")
+        }
         return nil
     }
 
@@ -1962,7 +1974,9 @@ final class CloudKitManager {
         do {
             _ = try await database.subscription(for: id)
             return
-        } catch { }
+        } catch {
+            print("[CloudKit] Subscription \(id) not found, creating new one")
+        }
 
         let predicate = NSPredicate(format: "familyCode == %@", familyCode)
         let sub = CKQuerySubscription(
@@ -1991,7 +2005,9 @@ final class CloudKitManager {
         do {
             _ = try await db.subscription(for: subID)
             return
-        } catch { }
+        } catch {
+            print("[CloudKit] Database subscription \(subID) not found, creating new one")
+        }
 
         let sub = CKDatabaseSubscription(subscriptionID: subID)
         let info = CKSubscription.NotificationInfo()

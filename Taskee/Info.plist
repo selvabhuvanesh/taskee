@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>taskoot</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Taskoot uses your photo library to let you choose a custom avatar for your profile.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
