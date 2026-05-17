@@ -118,7 +118,7 @@ struct ChildDashboardView: View {
     private var myTasks: [Item] {
         let assigned = allTasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived }
         if showAll { return assigned }
-        return assigned.filter { (!$0.isApproved && !$0.isMissed) || ($0.hasGift && !$0.giftRevealed) }
+        return assigned.filter { (!$0.isApproved && !$0.isMissed && !$0.isCancelled) || ($0.hasGift && !$0.giftRevealed) }
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {

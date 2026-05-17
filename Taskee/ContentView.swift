@@ -412,7 +412,7 @@ struct ContentView: View {
     }
 
     private var filteredTasks: [Item] {
-        let base = showOpenOnly ? myTasks.filter { (!$0.isApproved && !$0.isMissed) || ($0.hasGift && !$0.giftRevealed) } : myTasks
+        let base = showOpenOnly ? myTasks.filter { (!$0.isApproved && !$0.isMissed && !$0.isCancelled) || ($0.hasGift && !$0.giftRevealed) } : myTasks
         if isSearching {
             let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
             if !query.isEmpty {
@@ -1939,7 +1939,7 @@ struct DateTasksView: View {
 
     private var filteredTasks: [Item] {
         if showOpenOnly {
-            return liveTasks.filter { !$0.isArchived && !$0.isApproved && !$0.isMissed }
+            return liveTasks.filter { !$0.isArchived && !$0.isApproved && !$0.isMissed && !$0.isCancelled }
         } else {
             return liveTasks
         }
@@ -2588,7 +2588,7 @@ struct ChildTasksView: View {
     }
 
     private var filteredTasks: [Item] {
-        showOpenOnly ? tasks.filter { !$0.isApproved && !$0.isMissed } : tasks
+        showOpenOnly ? tasks.filter { !$0.isApproved && !$0.isMissed && !$0.isCancelled } : tasks
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -3294,6 +3294,7 @@ struct TaskRow: View {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
+        if task.isCancelled { return .gray }
         return Color.primary.opacity(0.4)
     }
 
@@ -3301,6 +3302,7 @@ struct TaskRow: View {
         if task.isApproved { return "Done" }
         if task.isInReview { return "Review" }
         if task.isMissed { return "Missed" }
+        if task.isCancelled { return "Cancelled" }
         return "To Do"
     }
 
@@ -3535,6 +3537,7 @@ struct TaskDetailView: View {
         if task.isApproved { return "Approved" }
         if task.isInReview { return "In Review" }
         if task.isMissed { return "Missed" }
+        if task.isCancelled { return "Cancelled" }
         return "Open"
     }
 
@@ -3542,6 +3545,7 @@ struct TaskDetailView: View {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
+        if task.isCancelled { return .gray }
         return calmAccent
     }
 

@@ -376,6 +376,16 @@ struct ProjectDetailView: View {
     @State private var newIdeaText = ""
     @State private var showAddTask = false
     @State private var showDeleteConfirm = false
+    @State private var editRequest: TaskEditRequest?
+    @State private var taskToDelete: Item?
+
+    private var children: [FamilyMember] {
+        members.filter { $0.memberRole == "child" && $0.isAccepted }
+    }
+
+    private var otherParent: FamilyMember? {
+        members.first { $0.memberRole == "parent" && $0.appleUserID != authManager.appleUserID && $0.isAccepted }
+    }
 
     private var ideas: [ProjectIdea] {
         allIdeas.filter { $0.projectId == project.id.uuidString }
@@ -387,9 +397,10 @@ struct ProjectDetailView: View {
     }
 
     private var taskProgress: Double {
-        guard !projectTasks.isEmpty else { return 0 }
-        let done = projectTasks.filter { $0.isApproved }.count
-        return Double(done) / Double(projectTasks.count)
+        let activeTasks = projectTasks.filter { !$0.isCancelled }
+        guard !activeTasks.isEmpty else { return 0 }
+        let done = activeTasks.filter { $0.isApproved }.count
+        return Double(done) / Double(activeTasks.count)
     }
 
     var body: some View {
@@ -443,6 +454,37 @@ struct ProjectDetailView: View {
         }
         .sheet(isPresented: $showAddTask) {
             AddProjectTaskView(project: project, theme: theme)
+        }
+        .sheet(item: $editRequest) { request in
+            NavigationStack {
+                EditTaskView(
+                    task: request.task, children: children, otherParent: otherParent, theme: theme, editAll: request.editAll,
+                    onDelete: { taskToDelete = request.task; editRequest = nil },
+                    onMarkMissed: {
+                        request.task.status = "missed"
+                        let familyCode = authManager.familyCode
+                        Task { await cloudKitManager.pushTask(request.task, familyCode: familyCode) }
+                        editRequest = nil
+                    }
+                )
+            }
+        }
+        .alert("Delete Task?", isPresented: Binding(
+            get: { taskToDelete != nil },
+            set: { if !$0 { taskToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let task = taskToDelete {
+                    let taskId = task.id
+                    modelContext.delete(task)
+                    try? modelContext.save()
+                    Task { await cloudKitManager.deleteRemoteTask(taskId) }
+                }
+                taskToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { taskToDelete = nil }
+        } message: {
+            Text("This will permanently remove the task.")
         }
         .environment(\.colorScheme, theme.colorScheme)
     }
@@ -522,12 +564,13 @@ struct ProjectDetailView: View {
                 }
             }
 
-            if !projectTasks.isEmpty {
+            if !projectTasks.filter({ !$0.isCancelled }).isEmpty {
+                let active = projectTasks.filter { !$0.isCancelled }
                 VStack(spacing: 4) {
                     ProgressView(value: taskProgress)
                         .tint(.green)
                     HStack {
-                        Text("\(projectTasks.filter { $0.isApproved }.count)/\(projectTasks.count) tasks done")
+                        Text("\(active.filter { $0.isApproved }.count)/\(active.count) tasks done")
                             .font(.caption2)
                             .foregroundStyle(theme.secondaryTextColor)
                         Spacer()
@@ -562,7 +605,7 @@ struct ProjectDetailView: View {
                 ideaRow(idea)
             }
 
-            if !project.isCompleted {
+            if project.status == "ideating" {
                 HStack(spacing: 8) {
                     TextField("Add an idea...", text: $newIdeaText)
                         .textFieldStyle(.roundedBorder)
@@ -659,7 +702,12 @@ struct ProjectDetailView: View {
                     .padding(.vertical, 8)
             } else {
                 ForEach(projectTasks.sorted(by: { $0.targetDate < $1.targetDate })) { task in
-                    projectTaskRow(task)
+                    Button {
+                        editRequest = TaskEditRequest(task: task, editAll: false)
+                    } label: {
+                        projectTaskRow(task)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -669,18 +717,22 @@ struct ProjectDetailView: View {
 
     private func projectTaskRow(_ task: Item) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: task.isApproved ? "checkmark.circle.fill" : "circle")
+            Image(systemName: taskStatusIcon(task))
                 .font(.system(size: 18))
-                .foregroundStyle(task.isApproved ? .green : theme.secondaryTextColor)
+                .foregroundStyle(taskStatusColor(task))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.name)
                     .font(.subheadline)
                     .foregroundStyle(theme.textColor)
-                    .strikethrough(task.isApproved)
+                    .strikethrough(task.isApproved || task.isCancelled)
 
                 HStack(spacing: 6) {
-                    if !task.assignedTo.isEmpty {
+                    if task.assignedTo.isEmpty {
+                        Text("Unassigned")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    } else {
                         Text(task.assignedTo)
                             .font(.caption2)
                             .foregroundStyle(theme.tertiaryTextColor)
@@ -693,7 +745,43 @@ struct ProjectDetailView: View {
 
             Spacer()
 
-            if task.isInReview {
+            if task.isMissed {
+                Text("Missed")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.red.opacity(0.2), in: Capsule())
+            } else if task.isCancelled {
+                Text("Cancelled")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.gray)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.gray.opacity(0.2), in: Capsule())
+            } else if task.assignedTo.isEmpty && !task.isApproved {
+                Button {
+                    pickUpTask(task)
+                } label: {
+                    Text("Pick Up")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.teal, in: Capsule())
+                }
+            } else if !task.assignedTo.isEmpty && !task.isApproved && !task.isInReview {
+                Button {
+                    unassignTask(task)
+                } label: {
+                    Text("Unassign")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.orange.opacity(0.2), in: Capsule())
+                }
+            } else if task.isInReview {
                 Text("Review")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.orange)
@@ -704,9 +792,65 @@ struct ProjectDetailView: View {
         }
         .padding(10)
         .background(theme.cardBackgroundLight, in: RoundedRectangle(cornerRadius: 10))
+        .contextMenu {
+            if !task.isApproved && !task.isMissed && !task.isCancelled {
+                Button {
+                    updateTaskStatus(task, to: "missed")
+                } label: {
+                    Label("Mark as Missed", systemImage: "clock.badge.xmark")
+                }
+                Button(role: .destructive) {
+                    updateTaskStatus(task, to: "cancelled")
+                } label: {
+                    Label("Cancel Task", systemImage: "xmark.circle")
+                }
+            }
+            if task.isMissed || task.isCancelled {
+                Button {
+                    updateTaskStatus(task, to: "open")
+                } label: {
+                    Label("Reopen Task", systemImage: "arrow.uturn.backward")
+                }
+            }
+        }
+    }
+
+    private func taskStatusIcon(_ task: Item) -> String {
+        if task.isApproved { return "checkmark.circle.fill" }
+        if task.isMissed { return "clock.badge.xmark.fill" }
+        if task.isCancelled { return "xmark.circle.fill" }
+        return "circle"
+    }
+
+    private func taskStatusColor(_ task: Item) -> Color {
+        if task.isApproved { return .green }
+        if task.isMissed { return .red }
+        if task.isCancelled { return .gray }
+        return theme.secondaryTextColor
     }
 
     // MARK: - Actions
+
+    private func pickUpTask(_ task: Item) {
+        task.assignedTo = authManager.userName
+        try? modelContext.save()
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+    }
+
+    private func unassignTask(_ task: Item) {
+        task.assignedTo = ""
+        try? modelContext.save()
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+    }
+
+    private func updateTaskStatus(_ task: Item, to status: String) {
+        task.status = status
+        try? modelContext.save()
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+    }
 
     private func submitIdea() {
         let text = newIdeaText.trimmingCharacters(in: .whitespaces)
@@ -860,12 +1004,26 @@ struct AddProjectTaskView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Assign To")
+                            Text("Assign To (optional)")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(theme.secondaryTextColor)
 
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
+                                    Button {
+                                        selectedMember = ""
+                                    } label: {
+                                        Text("Unassigned")
+                                            .font(.caption.weight(.medium))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                selectedMember.isEmpty ? Color.orange.opacity(0.3) : theme.cardBackgroundLight,
+                                                in: Capsule()
+                                            )
+                                            .foregroundStyle(selectedMember.isEmpty ? .orange : theme.textColor)
+                                    }
+
                                     ForEach(members.filter { $0.isAccepted }, id: \.id) { member in
                                         Button {
                                             selectedMember = member.name
@@ -915,7 +1073,7 @@ struct AddProjectTaskView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") { saveTask() }
-                        .disabled(taskName.trimmingCharacters(in: .whitespaces).isEmpty || selectedMember.isEmpty)
+                        .disabled(taskName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             .environment(\.colorScheme, theme.colorScheme)
@@ -935,23 +1093,25 @@ struct AddProjectTaskView: View {
         modelContext.insert(task)
         try? modelContext.save()
 
-        notificationManager.scheduleTaskReminder(
-            taskId: task.id,
-            taskName: task.name,
-            assignedTo: task.assignedTo,
-            dueDate: task.targetDate
-        )
+        if !selectedMember.isEmpty {
+            notificationManager.scheduleTaskReminder(
+                taskId: task.id,
+                taskName: task.name,
+                assignedTo: task.assignedTo,
+                dueDate: task.targetDate
+            )
+
+            if selectedMember != authManager.userName {
+                notificationManager.sendTaskAssignedNotification(
+                    taskName: task.name,
+                    assignerName: authManager.userName
+                )
+            }
+        }
 
         let familyCode = authManager.familyCode
         Task {
             await cloudKitManager.pushTask(task, familyCode: familyCode)
-        }
-
-        if selectedMember != authManager.userName {
-            notificationManager.sendTaskAssignedNotification(
-                taskName: task.name,
-                assignerName: authManager.userName
-            )
         }
 
         dismiss()
