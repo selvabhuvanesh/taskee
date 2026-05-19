@@ -1378,34 +1378,37 @@ struct ContentView: View {
     private var calendarTaskList: some View {
         LazyVStack(spacing: 10) {
             ForEach(calendarDayTasks) { task in
-                TaskRow(
-                    task: task,
-                    showAssignee: false,
-                    currentUserName: authManager.userName,
-                    theme: parentTheme,
-                    onApprove: {
-                        if !task.canComplete {
-                            tooEarlyTask = task
-                            showTooEarlyAlert = true
-                        } else {
-                            taskToApprove = task
+                HStack(spacing: 0) {
+                    TaskRow(
+                        task: task,
+                        showAssignee: false,
+                        currentUserName: authManager.userName,
+                        theme: parentTheme,
+                        onApprove: {
+                            if !task.canComplete {
+                                tooEarlyTask = task
+                                showTooEarlyAlert = true
+                            } else {
+                                taskToApprove = task
+                            }
+                        },
+                        onEdit: {
+                            if task.isRecurring {
+                                pendingEditTask = task
+                                showEditChoice = true
+                            } else {
+                                editRequest = TaskEditRequest(task: task, editAll: false)
+                            }
+                        },
+                        onDelete: { taskToDelete = task },
+                        onMarkMissed: {
+                            task.status = "missed"
+                            let familyCode = authManager.familyCode
+                            Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                         }
-                    },
-                    onEdit: {
-                        if task.isRecurring {
-                            pendingEditTask = task
-                            showEditChoice = true
-                        } else {
-                            editRequest = TaskEditRequest(task: task, editAll: false)
-                        }
-                    },
-                    onDelete: { taskToDelete = task },
-                    onMarkMissed: {
-                        task.status = "missed"
-                        let familyCode = authManager.familyCode
-                        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                    }
-                )
+                    )
+                    Spacer(minLength: 0)
+                }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
                 .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
@@ -1436,34 +1439,37 @@ struct ContentView: View {
                         .padding(.leading, 4)
 
                     ForEach(group.tasks) { task in
-                        TaskRow(
-                            task: task,
-                            showAssignee: false,
-                            currentUserName: authManager.userName,
-                            theme: parentTheme,
-                            onApprove: {
-                                if !task.canComplete {
-                                    tooEarlyTask = task
-                                    showTooEarlyAlert = true
-                                } else {
-                                    taskToApprove = task
+                        HStack(spacing: 0) {
+                            TaskRow(
+                                task: task,
+                                showAssignee: false,
+                                currentUserName: authManager.userName,
+                                theme: parentTheme,
+                                onApprove: {
+                                    if !task.canComplete {
+                                        tooEarlyTask = task
+                                        showTooEarlyAlert = true
+                                    } else {
+                                        taskToApprove = task
+                                    }
+                                },
+                                onEdit: {
+                                    if task.isRecurring {
+                                        pendingEditTask = task
+                                        showEditChoice = true
+                                    } else {
+                                        editRequest = TaskEditRequest(task: task, editAll: false)
+                                    }
+                                },
+                                onDelete: { taskToDelete = task },
+                                onMarkMissed: {
+                                    task.status = "missed"
+                                    let familyCode = authManager.familyCode
+                                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                                 }
-                            },
-                            onEdit: {
-                                if task.isRecurring {
-                                    pendingEditTask = task
-                                    showEditChoice = true
-                                } else {
-                                    editRequest = TaskEditRequest(task: task, editAll: false)
-                                }
-                            },
-                            onDelete: { taskToDelete = task },
-                            onMarkMissed: {
-                                task.status = "missed"
-                                let familyCode = authManager.familyCode
-                                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                            }
-                        )
+                            )
+                            Spacer(minLength: 0)
+                        }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 2)
                         .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
@@ -1909,6 +1915,7 @@ struct DateTasksView: View {
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    @Query private var allRedemptions: [RewardRedemption]
     let dateLabel: String
     let tasks: [Item]
     let children: [FamilyMember]
@@ -1929,6 +1936,22 @@ struct DateTasksView: View {
     @State private var isExpanded = true
     @State private var showCalendarView = false
     @State private var selectedCalendarDate = Date()
+
+    private var memberTotalEarned: Int {
+        allTasks
+            .filter { $0.assignedTo == memberName && $0.isApproved && $0.reward > 0 }
+            .reduce(0) { $0 + Int($1.reward) }
+    }
+
+    private var memberRedeemedCoins: Int {
+        allRedemptions
+            .filter { $0.childName == memberName && ($0.isApproved || $0.isFulfilled || $0.isPending) }
+            .reduce(0) { $0 + $1.coinAmount }
+    }
+
+    private var memberAvailableCoins: Int {
+        max(0, memberTotalEarned - memberRedeemedCoins)
+    }
 
     private var liveTasks: [Item] {
         if !memberName.isEmpty {
@@ -1978,34 +2001,36 @@ struct DateTasksView: View {
     }
 
     private func dateTaskRowView(_ task: Item) -> some View {
-        TaskRow(
-            task: task,
-            showAssignee: true,
-            currentUserName: authManager.userName,
-            theme: theme,
-            onApprove: {
-                if !task.canComplete {
-                    tooEarlyTask = task
-                    showTooEarlyAlert = true
-                } else {
-                    taskToApprove = task
+        HStack(spacing: 0) {
+            TaskRow(
+                task: task,
+                currentUserName: authManager.userName,
+                theme: theme,
+                onApprove: {
+                    if !task.canComplete {
+                        tooEarlyTask = task
+                        showTooEarlyAlert = true
+                    } else {
+                        taskToApprove = task
+                    }
+                },
+                onEdit: {
+                    if task.isRecurring {
+                        pendingEditTask = task
+                        showEditChoice = true
+                    } else {
+                        editRequest = TaskEditRequest(task: task, editAll: false)
+                    }
+                },
+                onDelete: { taskToDelete = task },
+                onMarkMissed: {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 }
-            },
-            onEdit: {
-                if task.isRecurring {
-                    pendingEditTask = task
-                    showEditChoice = true
-                } else {
-                    editRequest = TaskEditRequest(task: task, editAll: false)
-                }
-            },
-            onDelete: { taskToDelete = task },
-            onMarkMissed: {
-                task.status = "missed"
-                let familyCode = authManager.familyCode
-                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-            }
-        )
+            )
+            Spacer(minLength: 0)
+        }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
         .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
@@ -2063,7 +2088,7 @@ struct DateTasksView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    LazyVStack(spacing: isExpanded ? 10 : 12) {
+                    LazyVStack(spacing: 12) {
                         ForEach(Array(dateGroupedTasks.enumerated()), id: \.element.key) { index, group in
                             if index == dateTodayGroupIndex && datePastTaskCount > 0 {
                                 PastTasksDivider(count: datePastTaskCount)
@@ -2113,10 +2138,21 @@ struct DateTasksView: View {
         HStack(spacing: 14) {
             AvatarView(avatarId: otherParent?.avatar ?? "", size: 56)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(memberName)
                     .font(.headline)
                     .foregroundStyle(.primary)
+
+                HStack(spacing: 8) {
+                    Text("\(memberAvailableCoins) coins")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.yellow.opacity(0.85))
+                    if memberRedeemedCoins > 0 {
+                        Text("(\(memberRedeemedCoins) redeemed)")
+                            .font(.caption2)
+                            .foregroundStyle(.primary.opacity(0.4))
+                    }
+                }
 
                 Text("\(liveTasks.filter { $0.isApproved }.count)/\(liveTasks.count) completed")
                     .font(.caption.weight(.medium))
@@ -2205,7 +2241,7 @@ struct DateTasksView: View {
                         Spacer()
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: 10) {
+                            LazyVStack(spacing: 12) {
                                 ForEach(dateCalendarDayTasks) { task in
                                     dateTaskRowView(task)
                                 }
@@ -2658,34 +2694,37 @@ struct ChildTasksView: View {
     }
 
     private func childTaskRowView(_ task: Item) -> some View {
-        TaskRow(
-            task: task,
-            currentUserName: authManager.userName,
-            canActOnBehalf: true,
-            theme: theme,
-            onApprove: {
-                if !task.canComplete {
-                    tooEarlyTask = task
-                    showTooEarlyAlert = true
-                } else {
-                    taskToApprove = task
+        HStack(spacing: 0) {
+            TaskRow(
+                task: task,
+                currentUserName: authManager.userName,
+                canActOnBehalf: true,
+                theme: theme,
+                onApprove: {
+                    if !task.canComplete {
+                        tooEarlyTask = task
+                        showTooEarlyAlert = true
+                    } else {
+                        taskToApprove = task
+                    }
+                },
+                onEdit: {
+                    if task.isRecurring {
+                        pendingEditTask = task
+                        showEditChoice = true
+                    } else {
+                        editRequest = TaskEditRequest(task: task, editAll: false)
+                    }
+                },
+                onDelete: { taskToDelete = task },
+                onMarkMissed: {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 }
-            },
-            onEdit: {
-                if task.isRecurring {
-                    pendingEditTask = task
-                    showEditChoice = true
-                } else {
-                    editRequest = TaskEditRequest(task: task, editAll: false)
-                }
-            },
-            onDelete: { taskToDelete = task },
-            onMarkMissed: {
-                task.status = "missed"
-                let familyCode = authManager.familyCode
-                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-            }
-        )
+            )
+            Spacer(minLength: 0)
+        }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
         .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
@@ -3489,24 +3528,10 @@ struct TaskRow: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
         .opacity(task.isApproved ? 0.7 : 1)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                onDelete?()
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button {
-                onEdit?()
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .tint(calmAccent)
-        }
         .confirmationDialog("This task was missed", isPresented: $showMissedOptions, titleVisibility: .visible) {
             Button("Reopen & Replan") {
                 task.status = "open"

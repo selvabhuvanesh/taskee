@@ -1659,23 +1659,14 @@ struct CoinDisplay: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(labelColor)
             }
-            if count <= 5 {
-                ForEach(0..<count, id: \.self) { _ in
-                    Image(systemName: "star.circle.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(coinGradient)
-                        .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
-                }
-            } else {
-                Image(systemName: "star.circle.fill")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(coinGradient)
-                    .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
-                    .overlay(
-                        Text("\(count)")
-                            .font(.system(size: 8, weight: .black))
-                            .foregroundStyle(.black)
-                    )
+            Image(systemName: "star.circle.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(coinGradient)
+                .shadow(color: Color(red: 1.0, green: 0.7, blue: 0.0).opacity(0.4), radius: 2, y: 1)
+            if count > 1 {
+                Text("×\(count)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(labelColor)
             }
         }
     }
