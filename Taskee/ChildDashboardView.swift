@@ -225,22 +225,9 @@ struct ChildDashboardView: View {
                         taskList
                     }
 
-                    HStack {
-                        HStack(spacing: 10) {
-                            pickupButton
-                            familyChatButton
-                            shoppingBagButton
-                            familyProjectsButton
-                            wishListButton
-                        }
-                        .padding(.leading, 20)
-
-                        Spacer()
-
-                        addTaskButton
-                            .padding(.trailing, 20)
-                    }
-                    .padding(.bottom, 16)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: 60)
                 }
 
                 CelebrationOverlay(
@@ -261,12 +248,25 @@ struct ChildDashboardView: View {
 
             }
             .overlay(alignment: .bottom) {
-                if let note = stickyNote {
-                    StickyNoteView(message: note.message, color: note.color) {
-                        withAnimation { stickyNote = nil }
+                VStack(spacing: 0) {
+                    if let note = stickyNote {
+                        StickyNoteView(message: note.message, color: note.color) {
+                            withAnimation { stickyNote = nil }
+                        }
+                        .transition(.scale.combined(with: .opacity))
                     }
-                    .padding(.bottom, 80)
-                    .transition(.scale.combined(with: .opacity))
+
+                    HStack(spacing: 14) {
+                        pickupButton
+                        familyChatButton
+                        shoppingBagButton
+                        familyProjectsButton
+                        wishListButton
+                        addTaskButton
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.5))
                 }
             }
             .coordinateSpace(name: "childDashboard")

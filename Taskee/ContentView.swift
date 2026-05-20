@@ -651,20 +651,14 @@ struct ContentView: View {
                         .transition(.scale.combined(with: .opacity))
                     }
 
-                    HStack {
-                        HStack(spacing: 10) {
-                            familyChatButton
-                            shoppingBagButton
-                            familyProjectsButton
-                            wishListButton
-                        }
-                        .padding(.leading, 20)
-
-                        Spacer()
-
+                    HStack(spacing: 14) {
+                        familyChatButton
+                        shoppingBagButton
+                        familyProjectsButton
+                        wishListButton
                         addTaskButton
-                            .padding(.trailing, 20)
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(.black.opacity(0.5))
                 }
