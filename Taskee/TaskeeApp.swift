@@ -34,6 +34,7 @@ struct TaskeeApp: App {
     @State private var isCheckingAcceptance = false
     @State private var pendingSyncTask: Task<Void, Never>?
     @State private var hasCompletedInitialSetup = false
+    @State private var showSplash = true
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -77,7 +78,14 @@ struct TaskeeApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if !authManager.isLoggedIn {
+                if showSplash {
+                    SplashView()
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                withAnimation(.easeOut(duration: 0.5)) { showSplash = false }
+                            }
+                        }
+                } else if !authManager.isLoggedIn {
                     LoginView()
                 } else if isCheckingExistingUser {
                     ZStack {
@@ -465,6 +473,79 @@ struct TaskeeApp: App {
                     senderName: senderName
                 )
             }
+        }
+    }
+}
+
+struct SplashView: View {
+    @State private var opacity: Double = 0
+
+    private var appIcon: UIImage? {
+        if let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let files = primary["CFBundleIconFiles"] as? [String],
+           let name = files.last {
+            return UIImage(named: name)
+        }
+        return UIImage(named: "AppIcon")
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.0, green: 0.5, blue: 0.5),
+                    Color(red: 0.15, green: 0.3, blue: 0.45),
+                    Color(red: 0.3, green: 0.1, blue: 0.4),
+                    Color(red: 0.35, green: 0.05, blue: 0.45)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            if let icon = appIcon {
+                GeometryReader { geo in
+                    let iconSize: CGFloat = 70
+                    let spacing: CGFloat = 10
+                    let step = iconSize + spacing
+                    let cols = Int(geo.size.width / step) + 2
+                    let rows = Int(geo.size.height / step) + 2
+
+                    VStack(spacing: spacing) {
+                        ForEach(0..<rows, id: \.self) { row in
+                            HStack(spacing: spacing) {
+                                ForEach(0..<cols, id: \.self) { _ in
+                                    Image(uiImage: icon)
+                                        .resizable()
+                                        .frame(width: iconSize, height: iconSize)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                        .opacity(0.12)
+                                }
+                            }
+                            .offset(x: row.isMultiple(of: 2) ? 0 : step / 2)
+                        }
+                    }
+                    .offset(x: -step / 2, y: -step / 2)
+                }
+                .ignoresSafeArea()
+
+                VStack(spacing: 16) {
+                    Image(uiImage: icon)
+                        .resizable()
+                        .frame(width: 140, height: 140)
+                        .clipShape(RoundedRectangle(cornerRadius: 30))
+                        .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+
+                    Text("taskoot")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                .opacity(opacity)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeIn(duration: 0.4)) { opacity = 1 }
         }
     }
 }
