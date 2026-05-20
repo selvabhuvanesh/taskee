@@ -541,6 +541,7 @@ struct SplashView: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .opacity(opacity)
             }
         }

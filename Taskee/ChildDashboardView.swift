@@ -767,7 +767,7 @@ struct ChildDashboardView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.purple, in: Circle())
+                    .background(Color(red: 0.4, green: 0.8, blue: 0.2), in: Circle())
 
                 let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
                 let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
@@ -781,7 +781,7 @@ struct ChildDashboardView: View {
                 }
             }
         }
-        .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: Color(red: 0.4, green: 0.8, blue: 0.2).opacity(0.3), radius: 8, y: 4)
     }
 
     private var shoppingBagButton: some View {
@@ -838,13 +838,13 @@ struct ChildDashboardView: View {
         Button {
             showWishList = true
         } label: {
-            Image(systemName: "star.fill")
+            Image(systemName: "wand.and.stars")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(.yellow.opacity(0.85), in: Circle())
+                .background(.purple.opacity(0.85), in: Circle())
         }
-        .shadow(color: .yellow.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
     }
 
     private var earningsCard: some View {
@@ -1131,6 +1131,7 @@ struct ChildDashboardView: View {
         if task.isApproved { return .green }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
+        if task.isCancelled { return .gray }
         return childTheme.tertiaryTextColor
     }
 
@@ -1138,6 +1139,7 @@ struct ChildDashboardView: View {
         if task.isApproved { return "Done" }
         if task.isInReview { return "Review" }
         if task.isMissed { return "Missed" }
+        if task.isCancelled { return "Cancelled" }
         return "To Do"
     }
 
@@ -1184,6 +1186,13 @@ struct ChildDashboardView: View {
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(.primary)
+                        } else if task.isCancelled {
+                            Circle()
+                                .fill(.gray)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "minus")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
                         }
                     }
                     Text(statusLabel(for: task))
@@ -1192,7 +1201,7 @@ struct ChildDashboardView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(task.isApproved)
+            .disabled(task.isApproved || task.isCancelled)
 
             Button {
                 taskToEdit = task
@@ -1202,8 +1211,8 @@ struct ChildDashboardView: View {
                         Text(task.name)
                             .font(childTheme.font(.body))
                             .lineLimit(1)
-                            .strikethrough(task.isApproved)
-                            .foregroundStyle(task.isApproved ? childTheme.tertiaryTextColor : childTheme.textColor)
+                            .strikethrough(task.isApproved || task.isCancelled)
+                            .foregroundStyle(task.isApproved || task.isCancelled ? childTheme.tertiaryTextColor : childTheme.textColor)
 
                         HStack(spacing: 6) {
                             if task.isMissed {
@@ -1218,6 +1227,10 @@ struct ChildDashboardView: View {
                                 Text("Approved")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.green)
+                            } else if task.isCancelled {
+                                Text("Cancelled")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.gray)
                             }
 
                             Text(task.targetDate, format: .dateTime.hour().minute())
@@ -1258,27 +1271,6 @@ struct ChildDashboardView: View {
             }
             .buttonStyle(.plain)
 
-            if task.isOpen && task.isPastDue {
-                Button {
-                    task.status = "missed"
-                    let familyCode = authManager.familyCode
-                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9))
-                        Text("Missed")
-                            .font(.system(size: 10, weight: .semibold))
-                            .fixedSize()
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.red, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
             if task.hasGift && task.isApproved && !task.giftRevealed {
                 Button {
                     giftTaskToReveal = task
@@ -1315,15 +1307,42 @@ struct ChildDashboardView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 16)
-        .opacity(task.isApproved ? 0.7 : 1)
+        .opacity(task.isApproved || task.isCancelled ? 0.7 : 1)
         .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    task.isMissed ? .red.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : childTheme.tertiaryTextColor,
+                    task.isMissed ? .red.opacity(0.3) : task.isCancelled ? .gray.opacity(0.3) : task.isInReview ? .orange.opacity(0.3) : childTheme.tertiaryTextColor,
                     lineWidth: 1
                 )
         )
+        .contextMenu {
+            if task.isOpen || task.isInReview {
+                Button {
+                    task.status = "missed"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                } label: {
+                    Label("Mark as Missed", systemImage: "exclamationmark.triangle")
+                }
+                Button(role: .destructive) {
+                    task.status = "cancelled"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                } label: {
+                    Label("Cancel Task", systemImage: "xmark.circle")
+                }
+            }
+            if task.isMissed || task.isCancelled {
+                Button {
+                    task.status = "open"
+                    let familyCode = authManager.familyCode
+                    Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                } label: {
+                    Label("Reopen Task", systemImage: "arrow.uturn.backward")
+                }
+            }
+        }
         .background(
             GeometryReader { geo in
                 Color.clear
