@@ -1064,6 +1064,20 @@ final class CloudKitManager {
         record["text"] = message.text
         record["reactions"] = message.reactions
         record["sentAt"] = message.sentAt as NSDate
+        record["attachmentName"] = message.attachmentName
+        record["attachmentType"] = message.attachmentType
+
+        if let data = message.attachmentData {
+            let ext = message.attachmentType == "image" ? "jpg" : message.attachmentName.components(separatedBy: ".").last ?? "dat"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(message.id.uuidString + "." + ext)
+            do {
+                try data.write(to: tempURL)
+                record["attachment"] = CKAsset(fileURL: tempURL)
+            } catch {
+                print("[CK] Failed to write attachment temp file: \(error)")
+            }
+        }
+
         return await saveRecord(record, to: familyDatabase)
     }
 
@@ -1071,12 +1085,25 @@ final class CloudKitManager {
         let idStr = record.recordID.recordName
         guard let uuid = UUID(uuidString: idStr) else { return nil }
 
+        let attachmentData: Data? = {
+            let asset = (record["attachment"] as? CKAsset) ?? (record["photo"] as? CKAsset)
+            guard let fileURL = asset?.fileURL else { return nil }
+            return try? Data(contentsOf: fileURL)
+        }()
+        let attachmentName = record["attachmentName"] as? String ?? ""
+        let attachmentType = record["attachmentType"] as? String ?? "image"
+
         let descriptor = FetchDescriptor<ChatMessage>()
         let all = (try? context.fetch(descriptor)) ?? []
 
         if let existing = all.first(where: { $0.id == uuid }) {
             existing.text = record["text"] as? String ?? existing.text
             existing.reactions = record["reactions"] as? String ?? existing.reactions
+            if let attachmentData, existing.attachmentData == nil {
+                existing.attachmentData = attachmentData
+                existing.attachmentName = attachmentName
+                existing.attachmentType = attachmentType
+            }
             return nil
         } else {
             let msg = ChatMessage(
@@ -1085,12 +1112,43 @@ final class CloudKitManager {
                 senderAvatar: record["senderAvatar"] as? String ?? "",
                 senderAppleUserID: record["senderAppleUserID"] as? String ?? "",
                 text: record["text"] as? String ?? "",
-                sentAt: record["sentAt"] as? Date ?? Date()
+                sentAt: record["sentAt"] as? Date ?? Date(),
+                attachmentData: attachmentData,
+                attachmentName: attachmentName,
+                attachmentType: attachmentType
             )
             msg.reactions = record["reactions"] as? String ?? ""
             context.insert(msg)
             return .chatReceived(senderName: msg.senderName, text: msg.text)
         }
+    }
+
+    func clearChatAttachments(familyCode: String, context: ModelContext) async -> Int {
+        let descriptor = FetchDescriptor<ChatMessage>()
+        let all = (try? context.fetch(descriptor)) ?? []
+        var cleared = 0
+
+        for msg in all where msg.attachmentData != nil {
+            msg.attachmentData = nil
+            msg.attachmentName = ""
+            msg.attachmentType = "image"
+            cleared += 1
+
+            let recordID = familyRecordID(name: msg.id.uuidString)
+            let record = CKRecord(recordType: "ChatRecord", recordID: recordID)
+            record["familyCode"] = familyCode
+            record["senderName"] = msg.senderName
+            record["senderAvatar"] = msg.senderAvatar
+            record["senderAppleUserID"] = msg.senderAppleUserID
+            record["text"] = msg.text
+            record["reactions"] = msg.reactions
+            record["sentAt"] = msg.sentAt as NSDate
+            record["attachmentName"] = ""
+            record["attachmentType"] = "image"
+            _ = await saveRecord(record, to: familyDatabase)
+        }
+
+        return cleared
     }
 
     // MARK: - Shopping Items

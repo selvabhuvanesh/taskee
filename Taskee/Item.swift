@@ -276,8 +276,11 @@ final class ChatMessage {
     var text: String
     var reactions: String
     var sentAt: Date
+    @Attribute(.externalStorage, originalName: "photoData") var attachmentData: Data?
+    var attachmentName: String
+    var attachmentType: String
 
-    init(id: UUID = UUID(), senderName: String, senderAvatar: String, senderAppleUserID: String, text: String, sentAt: Date = Date()) {
+    init(id: UUID = UUID(), senderName: String, senderAvatar: String, senderAppleUserID: String, text: String, sentAt: Date = Date(), attachmentData: Data? = nil, attachmentName: String = "", attachmentType: String = "image") {
         self.id = id
         self.senderName = senderName
         self.senderAvatar = senderAvatar
@@ -285,7 +288,15 @@ final class ChatMessage {
         self.text = text
         self.reactions = ""
         self.sentAt = sentAt
+        self.attachmentData = attachmentData
+        self.attachmentName = attachmentName
+        self.attachmentType = attachmentType
     }
+
+    var hasAttachment: Bool { attachmentData != nil }
+    var isImageAttachment: Bool { attachmentType == "image" && hasAttachment }
+    var isVideoAttachment: Bool { attachmentType == "video" && hasAttachment }
+    var isFileAttachment: Bool { attachmentType == "file" && hasAttachment }
 
     var reactionDict: [String: [String]] {
         guard !reactions.isEmpty, let data = reactions.data(using: .utf8),

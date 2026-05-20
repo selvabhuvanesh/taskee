@@ -1028,6 +1028,14 @@ struct ContentView: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.5))
                     Button {
+                        shareDayPreviewToChat(grouped: grouped, totalCount: totalCount)
+                        withAnimation(.spring(duration: 0.3)) { showDayPreview = false }
+                    } label: {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.teal)
+                    }
+                    Button {
                         withAnimation(.spring(duration: 0.3)) { showDayPreview = false }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -1114,6 +1122,104 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func shareDayPreviewToChat(grouped: [(name: String, tasks: [Item])], totalCount: Int) {
+        let dateStr = Date().formatted(.dateTime.weekday(.wide).month(.wide).day())
+        let cardView = VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.teal)
+                Text("Today's Preview")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(totalCount) task\(totalCount == 1 ? "" : "s")")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 6)
+
+            Text(dateStr)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+
+            Rectangle().fill(.white.opacity(0.15)).frame(height: 1)
+
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(grouped, id: \.name) { group in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(group.name)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+
+                        if group.tasks.isEmpty {
+                            Text("No tasks today")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.35))
+                                .padding(.leading, 4)
+                        } else {
+                            ForEach(group.tasks, id: \.id) { task in
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(task.isApproved ? .green : task.isInReview ? .orange : task.isMissed ? .red : .white.opacity(0.3))
+                                        .frame(width: 6, height: 6)
+                                    Text(task.name)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white.opacity(task.isApproved ? 0.5 : 0.85))
+                                        .strikethrough(task.isApproved)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(task.targetDate, format: .dateTime.hour().minute())
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.45))
+                                }
+                                .padding(.leading, 4)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .frame(width: 320)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.1, green: 0.15, blue: 0.25), Color(red: 0.08, green: 0.1, blue: 0.2)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
+
+        let renderer = ImageRenderer(content: cardView)
+        renderer.scale = UIScreen.main.scale
+        guard let uiImage = renderer.uiImage,
+              let photoData = uiImage.jpegData(compressionQuality: 0.85) else { return }
+
+        let message = ChatMessage(
+            senderName: authManager.userName,
+            senderAvatar: authManager.avatar,
+            senderAppleUserID: authManager.appleUserID,
+            text: "",
+            attachmentData: photoData
+        )
+        modelContext.insert(message)
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
     }
 
     private var familyStrip: some View {
@@ -4527,7 +4633,7 @@ struct AddTaskView: View {
                         Text("Parse")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(smartInput.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
@@ -4571,7 +4677,7 @@ struct AddTaskView: View {
                         Text("Create Task")
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .background(parsed.name.isEmpty ? .primary.opacity(0.1) : calmAccent, in: RoundedRectangle(cornerRadius: 12))
@@ -7614,6 +7720,12 @@ struct AddAnnualReminderView: View {
 
 // MARK: - Family Chat View
 
+private struct PhotoWrapper: Identifiable {
+    let id = UUID()
+    let data: Data
+}
+
+
 struct FamilyChatView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -7627,6 +7739,10 @@ struct FamilyChatView: View {
     @State private var messageText = ""
     @State private var displayLimit = 50
     @State private var showReactionPicker: ChatMessage?
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var pendingPhotoData: Data?
+    @State private var tappedPhoto: Data?
+    @State private var showClearAttachmentsAlert = false
     @FocusState private var isInputFocused: Bool
 
     private static let coinReactionKey = "⭐coin"
@@ -7696,9 +7812,32 @@ struct FamilyChatView: View {
             .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, theme.colorScheme)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button(role: .destructive) {
+                            showClearAttachmentsAlert = true
+                        } label: {
+                            Label("Clear All Photos", systemImage: "trash.circle")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Clear All Photos?", isPresented: $showClearAttachmentsAlert) {
+                Button("Clear", role: .destructive) {
+                    let familyCode = authManager.familyCode
+                    Task {
+                        let count = await cloudKitManager.clearChatAttachments(familyCode: familyCode, context: modelContext)
+                        print("[Chat] Cleared \(count) attachments from CloudKit")
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will delete all photos from chat to free up iCloud storage. Text messages will be kept.")
             }
             .onAppear {
                 markChatAsRead()
@@ -7708,6 +7847,21 @@ struct FamilyChatView: View {
             }
         }
         .presentationDetents([.large])
+        .fullScreenCover(item: Binding(
+            get: { tappedPhoto.map { PhotoWrapper(data: $0) } },
+            set: { if $0 == nil { tappedPhoto = nil } }
+        )) { wrapper in
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let uiImage = UIImage(data: wrapper.data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .ignoresSafeArea()
+                }
+            }
+            .onTapGesture { tappedPhoto = nil }
+        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -7738,15 +7892,39 @@ struct FamilyChatView: View {
                 if isMe { Spacer(minLength: 60) }
 
                 VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
-                    Text(message.text)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            isMe ? calmAccent.opacity(0.7) : Color.primary.opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 18)
-                        )
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let photoData = message.attachmentData,
+                           message.isImageAttachment,
+                           let uiImage = UIImage(data: photoData) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: 220, maxHeight: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .onTapGesture {
+                                    tappedPhoto = photoData
+                                }
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        deletePhoto(from: message)
+                                    } label: {
+                                        Label("Delete Photo", systemImage: "trash")
+                                    }
+                                }
+                        }
+
+                        if !message.text.isEmpty {
+                            Text(message.text)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .padding(.horizontal, message.hasAttachment ? 6 : 14)
+                    .padding(.vertical, message.hasAttachment ? 6 : 10)
+                    .background(
+                        isMe ? calmAccent.opacity(0.7) : Color.primary.opacity(0.15),
+                        in: RoundedRectangle(cornerRadius: 18)
+                    )
 
                     if !message.reactionDict.isEmpty {
                         reactionBadges(for: message)
@@ -7866,27 +8044,91 @@ struct FamilyChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 10) {
-            TextField("Message", text: $messageText, axis: .vertical)
-                .lineLimit(1...4)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .padding(12)
-                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
-                .focused($isInputFocused)
-
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.3) : calmAccent)
+        VStack(spacing: 0) {
+            if let pendingPhotoData, let uiImage = UIImage(data: pendingPhotoData) {
+                HStack {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 60, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                self.pendingPhotoData = nil
+                                selectedPhoto = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .offset(x: 6, y: -6)
+                        }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
             }
-            .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            HStack(spacing: 10) {
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(calmAccent.opacity(0.8))
+                }
+
+                TextField("Message", text: $messageText, axis: .vertical)
+                    .lineLimit(1...4)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .padding(12)
+                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
+                    .focused($isInputFocused)
+
+                Button {
+                    sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(canSend ? calmAccent : .primary.opacity(0.3))
+                }
+                .disabled(!canSend)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
         .background(.black.opacity(0.2))
+        .onChange(of: selectedPhoto) {
+            Task { await loadSelectedPhoto() }
+        }
+    }
+
+    private var canSend: Bool {
+        !messageText.trimmingCharacters(in: .whitespaces).isEmpty || pendingPhotoData != nil
+    }
+
+    private func loadSelectedPhoto() async {
+        guard let selectedPhoto else {
+            pendingPhotoData = nil
+            return
+        }
+        guard let data = try? await selectedPhoto.loadTransferable(type: Data.self) else { return }
+        guard let uiImage = UIImage(data: data) else { return }
+        pendingPhotoData = compressPhoto(uiImage)
+    }
+
+    private func compressPhoto(_ image: UIImage) -> Data? {
+        let maxDimension: CGFloat = 800
+        let size = image.size
+        let scale: CGFloat
+        if size.width > maxDimension || size.height > maxDimension {
+            scale = maxDimension / max(size.width, size.height)
+        } else {
+            scale = 1.0
+        }
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+        return resized.jpegData(compressionQuality: 0.6)
     }
 
     private func canShowCoinReaction(for message: ChatMessage) -> Bool {
@@ -7939,21 +8181,33 @@ struct FamilyChatView: View {
 
     private func sendMessage() {
         let trimmed = messageText.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || pendingPhotoData != nil else { return }
 
         let message = ChatMessage(
             senderName: authManager.userName,
             senderAvatar: authManager.avatar,
             senderAppleUserID: authManager.appleUserID,
-            text: trimmed
+            text: trimmed,
+            attachmentData: pendingPhotoData
         )
         modelContext.insert(message)
         messageText = ""
+        pendingPhotoData = nil
+        selectedPhoto = nil
 
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
 
         markChatAsRead()
+    }
+
+    private func deletePhoto(from message: ChatMessage) {
+        message.attachmentData = nil
+        message.attachmentName = ""
+        message.attachmentType = "image"
+
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
     }
 }
 
