@@ -47,6 +47,26 @@ final class AuthManager {
     }
 
     init() {
+        if ScreenshotHelper.isScreenshotMode {
+            let role = ScreenshotHelper.screenshotRole
+            self.isLoggedIn = true
+            self.role = role
+            self.familyCode = "FAM123"
+            self.hasCompletedOnboarding = true
+            self.isPendingApproval = false
+            if role == "parent" {
+                self.appleUserID = "mock-parent-001"
+                self.userName = "Sarah"
+                self.email = "sarah@example.com"
+                self.avatar = "av02"
+            } else {
+                self.appleUserID = "mock-child-001"
+                self.userName = "Alex"
+                self.email = "alex@example.com"
+                self.avatar = "av05"
+            }
+            return
+        }
         self.isLoggedIn = UserDefaults.standard.bool(forKey: "isLoggedIn")
         self.appleUserID = UserDefaults.standard.string(forKey: "appleUserID") ?? ""
         self.email = UserDefaults.standard.string(forKey: "userEmail") ?? ""

@@ -34,9 +34,13 @@ struct TaskeeApp: App {
     @State private var isCheckingAcceptance = false
     @State private var pendingSyncTask: Task<Void, Never>?
     @State private var hasCompletedInitialSetup = false
-    @State private var showSplash = true
+    @State private var showSplash = !ScreenshotHelper.isScreenshotMode
 
     var sharedModelContainer: ModelContainer = {
+        if ScreenshotHelper.isScreenshotMode {
+            return ScreenshotHelper.makeInMemoryContainer()
+        }
+
         let schema = Schema([
             Item.self,
             FamilyMember.self,
@@ -116,6 +120,11 @@ struct TaskeeApp: App {
             .environment(subscriptionManager)
             .environment(cloudKitManager)
             .onAppear {
+                if ScreenshotHelper.isScreenshotMode {
+                    ScreenshotHelper.populateMockData(context: sharedModelContainer.mainContext)
+                    showSplash = false
+                    return
+                }
                 notificationManager.requestPermission()
                 SoundManager.shared.installNotificationSound()
                 UNUserNotificationCenter.current().setBadgeCount(0)
@@ -132,6 +141,7 @@ struct TaskeeApp: App {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                guard !ScreenshotHelper.isScreenshotMode else { return }
                 UNUserNotificationCenter.current().setBadgeCount(0)
                 guard !authManager.familyCode.isEmpty, hasCompletedInitialSetup else { return }
                 Task {
@@ -139,6 +149,7 @@ struct TaskeeApp: App {
                 }
             }
             .task {
+                guard !ScreenshotHelper.isScreenshotMode else { return }
                 subscriptionManager.onTierChanged = { newTier in
                     guard !authManager.familyCode.isEmpty else { return }
                     Task {
@@ -148,6 +159,7 @@ struct TaskeeApp: App {
                 await subscriptionManager.listenForTransactions()
             }
             .task {
+                guard !ScreenshotHelper.isScreenshotMode else { return }
                 await cloudKitManager.checkAvailability()
                 await restoreUserIfNeeded()
 
@@ -155,6 +167,7 @@ struct TaskeeApp: App {
                 await performInitialSync(familyCode: authManager.familyCode)
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
+                guard !ScreenshotHelper.isScreenshotMode else { return }
                 guard !authManager.familyCode.isEmpty else { return }
                 pendingSyncTask?.cancel()
                 pendingSyncTask = Task {
@@ -175,7 +188,7 @@ struct TaskeeApp: App {
                 .environment(cloudKitManager)
             }
             .onChange(of: authManager.isLoggedIn) { _, loggedIn in
-                guard loggedIn else { return }
+                guard loggedIn, !ScreenshotHelper.isScreenshotMode else { return }
                 Task {
                     await cloudKitManager.checkAvailability()
                     await restoreUserIfNeeded()

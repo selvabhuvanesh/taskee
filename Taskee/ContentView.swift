@@ -813,6 +813,13 @@ struct ContentView: View {
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: parentTheme)
             }
+            .onAppear {
+                if ScreenshotHelper.isScreenshotMode && ScreenshotHelper.shouldOpenChat {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showFamilyChat = true
+                    }
+                }
+            }
             .sheet(isPresented: $showAnnualReminders) {
                 AnnualRemindersView(theme: parentTheme)
             }
@@ -1781,6 +1788,7 @@ struct ContentView: View {
             }
         }
         .shadow(color: Color(red: 0.4, green: 0.8, blue: 0.2).opacity(0.3), radius: 8, y: 4)
+        .accessibilityIdentifier("familyChatButton")
     }
 
     @Query private var shoppingItems: [ShoppingItem]

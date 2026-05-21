@@ -39,7 +39,7 @@ final class SubscriptionManager {
         }
     }
 
-    private(set) var tier: Tier = .free
+    private(set) var tier: Tier = ScreenshotHelper.isScreenshotMode ? .pro : .free
     var products: [Product] = []
     var purchaseError: String?
 
@@ -163,6 +163,7 @@ final class SubscriptionManager {
     // MARK: - StoreKit 2
 
     func loadProducts() async {
+        guard !ScreenshotHelper.isScreenshotMode else { return }
         do {
             products = try await Product.products(for: SubscriptionManager.allIDs)
                 .sorted { $0.price < $1.price }
@@ -208,6 +209,7 @@ final class SubscriptionManager {
     private var localTier: Tier = .free
 
     func refreshTier() async {
+        guard !ScreenshotHelper.isScreenshotMode else { return }
         var resolved: Tier = .free
 
         for await result in Transaction.currentEntitlements {
@@ -227,6 +229,7 @@ final class SubscriptionManager {
     var onTierChanged: ((Tier) -> Void)?
 
     func listenForTransactions() async {
+        guard !ScreenshotHelper.isScreenshotMode else { return }
         for await result in Transaction.updates {
             if let _ = try? checkVerified(result) {
                 await refreshTier()

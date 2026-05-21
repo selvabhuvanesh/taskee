@@ -357,6 +357,13 @@ struct ChildDashboardView: View {
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: childTheme)
             }
+            .onAppear {
+                if ScreenshotHelper.isScreenshotMode && ScreenshotHelper.shouldOpenChat {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showFamilyChat = true
+                    }
+                }
+            }
             .sheet(isPresented: $showFamilyProjects) {
                 FamilyProjectsListView(theme: childTheme)
             }
@@ -782,6 +789,7 @@ struct ChildDashboardView: View {
             }
         }
         .shadow(color: Color(red: 0.4, green: 0.8, blue: 0.2).opacity(0.3), radius: 8, y: 4)
+        .accessibilityIdentifier("familyChatButton")
     }
 
     private var shoppingBagButton: some View {

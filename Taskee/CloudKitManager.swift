@@ -71,6 +71,10 @@ final class CloudKitManager {
     // MARK: - Availability
 
     func checkAvailability() async {
+        guard !ScreenshotHelper.isScreenshotMode else {
+            isAvailable = false
+            return
+        }
         do {
             let status = try await container.accountStatus()
             isAvailable = (status == .available)
