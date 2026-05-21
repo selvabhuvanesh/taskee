@@ -51,10 +51,10 @@ struct PrivacyPolicyView: View {
                             "We use only Apple's first-party services:\n\n• Sign in with Apple — Authentication\n• Apple CloudKit (iCloud) — Family data sync\n• Apple StoreKit 2 — In-app subscriptions\n• Apple Push Notifications — Task reminders\n\nWe do not integrate any third-party analytics, advertising, or tracking services.")
 
                         policySection("Data Sharing",
-                            "We do not sell, trade, or share your personal information with third parties. Your family data is shared only with members of your family group through Apple CloudKit.")
+                            "FamiLogic LLC does not sell, trade, or share your personal information with third parties. Your family data is shared only with members of your family group through Apple CloudKit.")
 
                         policySection("Children's Privacy",
-                            "taskoot is designed for family use, including children. Children join a family group managed by a parent. We collect only the minimum information needed (name and avatar) and do not collect children's email addresses independently.")
+                            "Taskoot is designed for family use, including children. Children join a family group managed by a parent. FamiLogic LLC collects only the minimum information needed (name and avatar) and does not collect children's email addresses independently.")
 
                         policySection("Data Retention & Deletion",
                             "You can delete your account and all associated data by removing yourself from the family group and deleting the app. Local data is removed when the app is uninstalled. CloudKit data can be managed through your iCloud account settings.")
@@ -63,7 +63,13 @@ struct PrivacyPolicyView: View {
                             "You have the right to access, correct, or delete your personal data, and to withdraw consent at any time by discontinuing use of the app.")
 
                         policySection("Contact Us",
-                            "If you have questions about this privacy policy, please contact us at support@taskoot.com")
+                            "If you have questions about this privacy policy, please contact FamiLogic LLC at support@taskoot.com")
+
+                        Text("© 2026 FamiLogic LLC. All rights reserved.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.3))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 4)
 
                         Text("Last updated: May 10, 2026")
                             .font(.caption)
@@ -5513,7 +5519,7 @@ struct ChildrenManagementView: View {
                 .foregroundStyle(.primary.opacity(0.35))
 
             ShareLink(
-                item: "Join my family on taskoot! Use invite code: \(authManager.familyCode)"
+                item: "Join my family on Taskoot! Use invite code: \(authManager.familyCode)"
             ) {
                 Label("Share Invite", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.medium))
@@ -6053,7 +6059,7 @@ struct ParentOnboardingView: View {
                 .multilineTextAlignment(.center)
 
             ShareLink(
-                item: "Join my family on taskoot! Use invite code: \(authManager.familyCode)"
+                item: "Join my family on Taskoot! Use invite code: \(authManager.familyCode)"
             ) {
                 Label("Share Invite", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.medium))
@@ -6621,7 +6627,7 @@ struct SubscriptionView: View {
             }
 
             if subscriptionManager.tier == .free && subscriptionManager.isTrialExpired {
-                Text("Your free trial has expired. Upgrade to continue using taskoot.")
+                Text("Your free trial has expired. Upgrade to continue using Taskoot.")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .multilineTextAlignment(.leading)

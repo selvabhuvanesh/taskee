@@ -537,9 +537,12 @@ struct SplashView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 30))
                         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
 
-                    Text("taskoot")
+                    Text("Taskoot")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                    Text("by FamiLogic LLC")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.4))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .opacity(opacity)
@@ -572,7 +575,7 @@ struct PendingApprovalView: View {
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
 
-                Text("Your request to join the family has been sent. Ask your parent to open taskoot and approve your request.")
+                Text("Your request to join the family has been sent. Ask your parent to open Taskoot and approve your request.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)

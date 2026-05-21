@@ -163,7 +163,7 @@ final class CloudKitManager {
 
             let share = CKShare(recordZoneID: zoneID)
             share.publicPermission = .readWrite
-            share[CKShare.SystemFieldKey.title] = "taskoot Family"
+            share[CKShare.SystemFieldKey.title] = "Taskoot Family"
 
             try await privateDatabase.save(share)
             if let url = share.url {
@@ -187,7 +187,7 @@ final class CloudKitManager {
 
         let share = CKShare(recordZoneID: zoneID)
         share.publicPermission = .readWrite
-        share[CKShare.SystemFieldKey.title] = "taskoot Family"
+        share[CKShare.SystemFieldKey.title] = "Taskoot Family"
 
         do {
             try await privateDatabase.save(share)

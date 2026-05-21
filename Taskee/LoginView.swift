@@ -55,7 +55,7 @@ struct LoginView: View {
                 .font(.system(size: 72))
                 .foregroundStyle(calmAccent)
 
-            Text("taskoot")
+            Text("Taskoot")
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(.white)
 
@@ -64,6 +64,10 @@ struct LoginView: View {
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
+
+            Text("by FamiLogic LLC")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.3))
         }
     }
 
