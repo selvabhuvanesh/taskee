@@ -149,7 +149,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         guard !intervals.isEmpty else { return }
 
         let center = UNUserNotificationCenter.current()
-        let allPossibleIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        var allPossibleIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        allPossibleIDs.append("reminder-\(taskId.uuidString)")
         center.removePendingNotificationRequests(withIdentifiers: allPossibleIDs)
 
         for minutes in intervals {
@@ -187,7 +188,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func cancelTaskReminder(taskId: UUID) {
-        let allIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        var allIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        allIDs.append("reminder-\(taskId.uuidString)")
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: allIDs)
     }
 
@@ -347,6 +349,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             DispatchQueue.main.async {
                 self.showPendingApprovals = true
             }
+        }
+
+        if category == "TASK_REMINDER",
+           response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           let spokenText = response.notification.request.content.userInfo["spokenText"] as? String {
+            speakReminder(spokenText)
         }
 
         if response.actionIdentifier == Self.pickupAckActionID {

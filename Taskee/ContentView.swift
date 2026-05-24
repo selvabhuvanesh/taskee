@@ -6564,6 +6564,47 @@ struct SettingsView: View {
                             )
                         }
 
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Siri Announce (Hands-Free)")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.7))
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Let Siri read your task reminders aloud through AirPods, CarPlay, or HomePod — even when the app is closed.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary.opacity(0.7))
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label("Turn on Announce Notifications", systemImage: "1.circle.fill")
+                                    Label("Select Taskoot from the app list", systemImage: "2.circle.fill")
+                                }
+                                .font(.subheadline)
+                                .foregroundStyle(.primary.opacity(0.8))
+
+                                Button {
+                                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "speaker.wave.2.fill")
+                                        Text("Open Notification Settings")
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(.blue, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                            .padding(14)
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                            )
+                        }
+
                         Spacer()
                     }
                     .padding(.horizontal, 24)
@@ -6579,7 +6620,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
     }
 }
 
