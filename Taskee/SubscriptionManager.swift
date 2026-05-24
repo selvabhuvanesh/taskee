@@ -179,7 +179,13 @@ final class SubscriptionManager {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
                 await transaction.finish()
-                await refreshTier()
+                if Self.proIDs.contains(transaction.productID) {
+                    localTier = .pro
+                } else if Self.familyIDs.contains(transaction.productID) {
+                    localTier = .family
+                }
+                tier = max(localTier, familyTier)
+                onTierChanged?(tier)
                 return true
             case .userCancelled:
                 return false
