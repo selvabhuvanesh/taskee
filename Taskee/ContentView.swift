@@ -6622,6 +6622,7 @@ struct SettingsView: View {
         }
         .presentationDetents([.large])
     }
+
 }
 
 // MARK: - Edit Profile View

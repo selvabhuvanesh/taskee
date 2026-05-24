@@ -354,7 +354,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         if category == "TASK_REMINDER",
            response.actionIdentifier == UNNotificationDefaultActionIdentifier,
            let spokenText = response.notification.request.content.userInfo["spokenText"] as? String {
-            speakReminder(spokenText)
+            DispatchQueue.main.async { self.speakReminder(spokenText) }
         }
 
         if response.actionIdentifier == Self.pickupAckActionID {
@@ -396,7 +396,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let category = notification.request.content.categoryIdentifier
         if category == "TASK_REMINDER" {
             if let spokenText = notification.request.content.userInfo["spokenText"] as? String {
-                speakReminder(spokenText)
+                DispatchQueue.main.async { self.speakReminder(spokenText) }
             } else {
                 SoundManager.shared.playReminderBeep()
             }
