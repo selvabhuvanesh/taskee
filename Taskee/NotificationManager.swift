@@ -5,6 +5,7 @@
 
 import Foundation
 import UserNotifications
+import AVFoundation
 
 @Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
@@ -66,38 +67,128 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().setNotificationCategories([taskReminder, taskReview, pickup])
     }
 
+    // MARK: - Reminder Intervals
+
+    static let allReminderIntervals: [(minutes: Int, label: String)] = [
+        (30, "30 minutes before"),
+        (15, "15 minutes before"),
+        (5, "5 minutes before"),
+        (0, "At task time"),
+    ]
+
+    private static let reminderIntervalsKey = "enabledReminderIntervals"
+
+    var enabledReminderIntervals: [Int] {
+        get {
+            if let stored = UserDefaults.standard.array(forKey: Self.reminderIntervalsKey) as? [Int] {
+                return stored
+            }
+            return [30, 15, 5, 0]
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.reminderIntervalsKey)
+        }
+    }
+
+    func isIntervalEnabled(_ minutes: Int) -> Bool {
+        enabledReminderIntervals.contains(minutes)
+    }
+
+    func toggleInterval(_ minutes: Int) {
+        var current = enabledReminderIntervals
+        if let idx = current.firstIndex(of: minutes) {
+            current.remove(at: idx)
+        } else {
+            current.append(minutes)
+            current.sort(by: >)
+        }
+        enabledReminderIntervals = current
+    }
+
+    // MARK: - Voice Reminder
+
+    private let voiceSynthesizer = AVSpeechSynthesizer()
+
+    func speakReminder(_ text: String) {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try session.overrideOutputAudioPort(.speaker)
+            try session.setActive(true)
+        } catch { }
+
+        if voiceSynthesizer.isSpeaking {
+            voiceSynthesizer.stopSpeaking(at: .immediate)
+        }
+
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.volume = 1.0
+        voiceSynthesizer.speak(utterance)
+    }
+
+    private func timeLabel(forMinutes minutes: Int) -> String {
+        switch minutes {
+        case 0: return "now"
+        case 1: return "in 1 minute"
+        default: return "in \(minutes) minutes"
+        }
+    }
+
+    private func bodyTimeLabel(forMinutes minutes: Int) -> String {
+        switch minutes {
+        case 0: return "is due now"
+        case 1: return "is due in 1 minute"
+        default: return "is due in \(minutes) minutes"
+        }
+    }
+
     func scheduleTaskReminder(taskId: UUID, taskName: String, assignedTo: String, dueDate: Date) {
-        let reminderDate = dueDate.addingTimeInterval(-30 * 60)
-        guard reminderDate > Date() else { return }
+        let intervals = enabledReminderIntervals
+        guard !intervals.isEmpty else { return }
 
-        let content = UNMutableNotificationContent()
-        content.title = "Task Due Soon"
-        content.body = assignedTo.isEmpty
-            ? "\"\(taskName)\" is due in 30 minutes"
-            : "\"\(taskName)\" assigned to \(assignedTo) is due in 30 minutes"
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
-        content.categoryIdentifier = "TASK_REMINDER"
-        content.interruptionLevel = .timeSensitive
+        let center = UNUserNotificationCenter.current()
+        let allPossibleIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        center.removePendingNotificationRequests(withIdentifiers: allPossibleIDs)
 
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: reminderDate
-        )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        for minutes in intervals {
+            let reminderDate = dueDate.addingTimeInterval(-Double(minutes) * 60)
+            guard reminderDate > Date() else { continue }
 
-        let request = UNNotificationRequest(
-            identifier: "reminder-\(taskId.uuidString)",
-            content: content,
-            trigger: trigger
-        )
+            let spokenText = assignedTo.isEmpty
+                ? "\(taskName) \(timeLabel(forMinutes: minutes))"
+                : "\(taskName) for \(assignedTo) \(timeLabel(forMinutes: minutes))"
 
-        UNUserNotificationCenter.current().add(request)
+            let content = UNMutableNotificationContent()
+            content.title = minutes == 0 ? "Task Due Now" : "Task Due Soon"
+            content.body = assignedTo.isEmpty
+                ? "\"\(taskName)\" \(bodyTimeLabel(forMinutes: minutes))"
+                : "\"\(taskName)\" assigned to \(assignedTo) \(bodyTimeLabel(forMinutes: minutes))"
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
+            content.categoryIdentifier = "TASK_REMINDER"
+            content.interruptionLevel = .timeSensitive
+            content.userInfo = ["spokenText": spokenText]
+
+            let components = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: reminderDate
+            )
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+
+            let request = UNNotificationRequest(
+                identifier: "reminder-\(taskId.uuidString)-\(minutes)",
+                content: content,
+                trigger: trigger
+            )
+
+            center.add(request)
+        }
     }
 
     func cancelTaskReminder(taskId: UUID) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(
-            withIdentifiers: ["reminder-\(taskId.uuidString)"]
-        )
+        let allIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: allIDs)
     }
 
     func scheduleAnnualReminder(reminderId: UUID, name: String, dueDate: Date, remindDaysBefore: [Int]) {
@@ -295,7 +386,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let category = notification.request.content.categoryIdentifier
-        if category == "TASK_REMINDER" || category == "TASK_ASSIGNED" {
+        if category == "TASK_REMINDER" {
+            if let spokenText = notification.request.content.userInfo["spokenText"] as? String {
+                speakReminder(spokenText)
+            } else {
+                SoundManager.shared.playReminderBeep()
+            }
+            completionHandler([.banner, .list])
+        } else if category == "TASK_ASSIGNED" {
             SoundManager.shared.playReminderBeep()
             completionHandler([.banner, .list])
         } else {

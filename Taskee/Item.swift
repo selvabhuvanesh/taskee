@@ -53,6 +53,83 @@ final class Item {
     var hasGift: Bool { !giftText.isEmpty }
     var belongsToProject: Bool { !projectId.isEmpty }
     var needsTransport: Bool { transportType != "none" }
+
+    var emoji: String {
+        let lower = name.lowercased()
+        for (keyword, emoji) in Self.emojiMap {
+            if lower.contains(keyword) { return emoji }
+        }
+        return "✅"
+    }
+
+    private static let emojiMap: [(String, String)] = [
+        // School & learning
+        ("homework", "📚"), ("study", "📖"), ("read", "📕"), ("book", "📗"),
+        ("math", "🔢"), ("science", "🔬"), ("history", "🏛️"), ("essay", "✍️"),
+        ("school", "🏫"), ("class", "🎓"), ("exam", "📝"), ("test", "📝"),
+        ("project", "📋"), ("assignment", "📄"), ("practice", "🎯"),
+        ("tutor", "👩‍🏫"), ("lesson", "📓"), ("learn", "💡"),
+
+        // Chores & cleaning
+        ("clean", "🧹"), ("vacuum", "🧹"), ("sweep", "🧹"), ("mop", "🧽"),
+        ("dishes", "🍽️"), ("laundry", "👕"), ("wash", "🧼"), ("fold", "👔"),
+        ("tidy", "🧹"), ("organize", "📦"), ("trash", "🗑️"), ("garbage", "🗑️"),
+        ("recycle", "♻️"), ("dust", "✨"), ("scrub", "🧽"), ("wipe", "🧻"),
+
+        // Cooking & food
+        ("cook", "👩‍🍳"), ("dinner", "🍽️"), ("lunch", "🥪"), ("breakfast", "🥣"),
+        ("snack", "🍎"), ("bake", "🧁"), ("meal", "🍲"), ("grocery", "🛒"),
+        ("shopping", "🛍️"), ("eat", "🍴"),
+
+        // Outdoor & sports
+        ("walk", "🚶"), ("run", "🏃"), ("exercise", "💪"), ("gym", "🏋️"),
+        ("swim", "🏊"), ("bike", "🚲"), ("soccer", "⚽"), ("football", "🏈"),
+        ("basketball", "🏀"), ("baseball", "⚾"), ("tennis", "🎾"),
+        ("sport", "🏅"), ("dance", "💃"), ("yoga", "🧘"), ("hike", "🥾"),
+        ("play", "🎮"), ("game", "🎲"), ("outside", "🌳"), ("park", "🌿"),
+        ("garden", "🌱"), ("water plant", "🪴"), ("plant", "🌱"), ("lawn", "🌿"),
+        ("mow", "🌿"),
+
+        // Pets
+        ("dog", "🐕"), ("cat", "🐈"), ("pet", "🐾"), ("feed", "🥣"),
+        ("fish", "🐟"), ("hamster", "🐹"), ("bird", "🐦"),
+
+        // Music & arts
+        ("piano", "🎹"), ("guitar", "🎸"), ("music", "🎵"), ("sing", "🎤"),
+        ("drum", "🥁"), ("violin", "🎻"), ("art", "🎨"), ("draw", "✏️"),
+        ("paint", "🖌️"), ("craft", "✂️"), ("color", "🖍️"),
+
+        // Personal care
+        ("brush teeth", "🪥"), ("brushing", "🪥"), ("teeth", "🪥"), ("shower", "🚿"), ("bath", "🛁"),
+        ("hair", "💇"), ("bed", "🛏️"), ("sleep", "😴"), ("nap", "💤"),
+        ("wake", "⏰"), ("dress", "👗"), ("clothes", "👚"),
+        ("mind detox", "🧠"), ("detox", "🧠"), ("meditat", "🧘"),
+
+        // Transport & errands
+        ("drive", "🚗"), ("pick up", "🚗"), ("pickup", "🚗"), ("drop off", "🚗"),
+        ("dropoff", "🚗"), ("school bus", "🚌"), ("bus", "🚌"),
+        ("dentist", "🦷"), ("doctor", "🏥"), ("health check", "🩺"),
+        ("appointment", "📅"), ("errand", "🏃"),
+
+        // Home maintenance
+        ("hvac", "🌬️"), ("filter", "🌬️"), ("deep clean", "🧼"), ("car wash", "🚗"), ("car clean", "🧽"),
+
+        // Digital & screen
+        ("screen", "📱"), ("phone", "📱"), ("computer", "💻"), ("email", "📧"),
+        ("call", "📞"), ("video", "📹"), ("movie", "🎬"), ("tv", "📺"),
+
+        // Social & family
+        ("friend", "👫"), ("birthday", "🎂"), ("party", "🎉"), ("gift", "🎁"),
+        ("visit", "🏠"), ("meet", "🤝"), ("help", "🤲"), ("share", "💝"),
+        ("thank", "🙏"), ("letter", "✉️"), ("card", "💌"),
+
+        // Money & work
+        ("save", "💰"), ("money", "💵"), ("earn", "💰"), ("chore", "📋"),
+        ("job", "💼"), ("work", "⚒️"), ("task", "📌"),
+
+        // Travel
+        ("pack", "🧳"), ("travel", "✈️"), ("trip", "🗺️"), ("camp", "⛺"),
+    ]
     var needsPickup: Bool { transportType == "pickup" || transportType == "both" }
     var needsDropoff: Bool { transportType == "dropoff" || transportType == "both" }
 
@@ -854,6 +931,193 @@ let taskTemplates = [
     TaskTemplate(name: "Clean Your Room", icon: "sparkles", color: .purple, suggestedRecurrence: .weekly, suggestedReward: 10),
     TaskTemplate(name: "Read a Book", icon: "book.closed.fill", color: .orange, suggestedRecurrence: .daily, suggestedReward: 5),
     TaskTemplate(name: "Walk the Dog", icon: "dog.fill", color: .cyan, suggestedRecurrence: .daily, suggestedReward: 5),
+]
+
+// MARK: - Task Dictionary
+
+struct TaskDictionaryEntry: Identifiable {
+    let id = UUID()
+    let name: String
+    let emoji: String
+    let frequencyLabel: String
+    let recurrence: RecurrenceType
+    let suggestedReward: Int
+}
+
+struct TaskDictionaryCategory: Identifiable {
+    let id = UUID()
+    let name: String
+    let icon: String
+    let color: Color
+    let tasks: [TaskDictionaryEntry]
+}
+
+let taskDictionary: [TaskDictionaryCategory] = [
+    TaskDictionaryCategory(name: "Morning Routine", icon: "sunrise.fill", color: .orange, tasks: [
+        TaskDictionaryEntry(name: "Brush Teeth", emoji: "🪥", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Make Bed", emoji: "🛏️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Get Dressed", emoji: "👕", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Eat Breakfast", emoji: "🥣", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Pack School Bag", emoji: "🎒", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Take Vitamins", emoji: "💊", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Wash Face", emoji: "🧴", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+    ]),
+    TaskDictionaryCategory(name: "School & Learning", icon: "graduationcap.fill", color: calmAccent, tasks: [
+        TaskDictionaryEntry(name: "Do Homework", emoji: "📚", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Study for Test", emoji: "📝", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Read for 30 Minutes", emoji: "📖", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Practice Spelling", emoji: "✍️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Practice Math", emoji: "🔢", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Complete Assignment", emoji: "📄", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 6),
+        TaskDictionaryEntry(name: "Science Project", emoji: "🔬", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 15),
+        TaskDictionaryEntry(name: "Book Report", emoji: "📗", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Practice Typing", emoji: "⌨️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "School Bus Time", emoji: "🚌", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+    ]),
+    TaskDictionaryCategory(name: "Household Chores", icon: "house.fill", color: .green, tasks: [
+        TaskDictionaryEntry(name: "Clean Room", emoji: "🧹", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Take Out Trash", emoji: "🗑️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Do Dishes", emoji: "🍽️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Load Dishwasher", emoji: "🍽️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Unload Dishwasher", emoji: "🍽️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Vacuum Room", emoji: "🧹", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Sweep Floor", emoji: "🧹", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Mop Floor", emoji: "🧽", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Do Laundry", emoji: "👕", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Fold Clothes", emoji: "👔", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Put Away Groceries", emoji: "🛒", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Wipe Counters", emoji: "🧻", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Organize Closet", emoji: "📦", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Dust Furniture", emoji: "✨", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Clean Bathroom", emoji: "🧽", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Set the Table", emoji: "🍽️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Clear the Table", emoji: "🍽️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Take Out Recycling", emoji: "♻️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Tidy Living Room", emoji: "🛋️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Deep Cleaning", emoji: "🧼", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 15),
+        TaskDictionaryEntry(name: "HVAC Filter Change", emoji: "🌬️", frequencyLabel: "Quarterly", recurrence: .monthly, suggestedReward: 5),
+    ]),
+    TaskDictionaryCategory(name: "Cooking & Meals", icon: "fork.knife", color: .red, tasks: [
+        TaskDictionaryEntry(name: "Help Cook Dinner", emoji: "👩‍🍳", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Prepare Lunch Box", emoji: "🥪", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Make a Snack", emoji: "🍎", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Bake Something", emoji: "🧁", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Grocery Shopping", emoji: "🛒", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Meal Prep", emoji: "🍲", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 6),
+    ]),
+    TaskDictionaryCategory(name: "Outdoor & Yard", icon: "leaf.fill", color: Color(red: 0.2, green: 0.7, blue: 0.3), tasks: [
+        TaskDictionaryEntry(name: "Mow the Lawn", emoji: "🌿", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Water Plants", emoji: "🪴", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Rake Leaves", emoji: "🍂", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 6),
+        TaskDictionaryEntry(name: "Pull Weeds", emoji: "🌱", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Shovel Snow", emoji: "❄️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Sweep Porch", emoji: "🧹", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Plant Seeds", emoji: "🌻", frequencyLabel: "Quarterly", recurrence: .monthly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Clean Garage", emoji: "🏠", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 12),
+    ]),
+    TaskDictionaryCategory(name: "Car / Vehicle", icon: "car.fill", color: Color(red: 0.3, green: 0.3, blue: 0.8), tasks: [
+        TaskDictionaryEntry(name: "Car Wash (Exterior)", emoji: "🚗", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Car Cleaning (Interior)", emoji: "🧽", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Check Tire Pressure", emoji: "🛞", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Oil Change", emoji: "🛢️", frequencyLabel: "Quarterly", recurrence: .monthly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Refuel / Charge Vehicle", emoji: "⛽", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Vehicle Inspection", emoji: "🔍", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Registration Renewal", emoji: "📋", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Replace Wiper Blades", emoji: "🌧️", frequencyLabel: "Half-Yearly", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Organize Trunk", emoji: "📦", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 4),
+    ]),
+    TaskDictionaryCategory(name: "Pet Care", icon: "pawprint.fill", color: .brown, tasks: [
+        TaskDictionaryEntry(name: "Feed Pet", emoji: "🐾", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Walk the Dog", emoji: "🐕", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Clean Litter Box", emoji: "🐈", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Refill Water Bowl", emoji: "💧", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Brush Pet", emoji: "🐾", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Give Pet a Bath", emoji: "🛁", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Clean Fish Tank", emoji: "🐟", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Vet Appointment", emoji: "🏥", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+    ]),
+    TaskDictionaryCategory(name: "Health & Hygiene", icon: "heart.fill", color: .pink, tasks: [
+        TaskDictionaryEntry(name: "Shower / Bath", emoji: "🚿", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Floss Teeth", emoji: "🦷", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Exercise / Workout", emoji: "💪", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Drink Enough Water", emoji: "💧", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Yoga", emoji: "🧘", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Stretching", emoji: "🤸", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Haircut Appointment", emoji: "💇", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Dentist Appointment", emoji: "🦷", frequencyLabel: "Half-Yearly", recurrence: .none, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Annual Health Check", emoji: "🩺", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Eye Exam", emoji: "👁️", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Bedtime Brushing", emoji: "🪥", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 1),
+        TaskDictionaryEntry(name: "Early Bedtime", emoji: "😴", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Mind Detox", emoji: "🧠", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+    ]),
+    TaskDictionaryCategory(name: "Music & Arts", icon: "music.note", color: .purple, tasks: [
+        TaskDictionaryEntry(name: "Practice Piano", emoji: "🎹", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Practice Guitar", emoji: "🎸", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Practice Violin", emoji: "🎻", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Practice Drums", emoji: "🥁", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Music Lesson", emoji: "🎵", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Art Class", emoji: "🎨", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Drawing Practice", emoji: "✏️", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Craft Project", emoji: "✂️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 6),
+        TaskDictionaryEntry(name: "Singing Practice", emoji: "🎤", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Coloring / Painting", emoji: "🖌️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+    ]),
+    TaskDictionaryCategory(name: "Sports & Fitness", icon: "figure.run", color: .cyan, tasks: [
+        TaskDictionaryEntry(name: "Soccer Practice", emoji: "⚽", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Basketball Practice", emoji: "🏀", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Swimming Lesson", emoji: "🏊", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Bike Ride", emoji: "🚲", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 4),
+        TaskDictionaryEntry(name: "Go for a Run", emoji: "🏃", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Tennis Practice", emoji: "🎾", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Dance Class", emoji: "💃", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Gymnastics", emoji: "🤸", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Martial Arts", emoji: "🥋", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Go to the Playground", emoji: "🛝", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 2),
+    ]),
+    TaskDictionaryCategory(name: "Social & Family", icon: "person.2.fill", color: .indigo, tasks: [
+        TaskDictionaryEntry(name: "Call Grandparents", emoji: "📞", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Write Thank-You Card", emoji: "💌", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Help a Sibling", emoji: "🤝", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Family Game Night", emoji: "🎲", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Volunteer / Community Service", emoji: "🤲", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 15),
+        TaskDictionaryEntry(name: "Play with Younger Sibling", emoji: "👫", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Visit a Friend", emoji: "🏠", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Birthday Card for Friend", emoji: "🎂", frequencyLabel: "Monthly", recurrence: .none, suggestedReward: 3),
+    ]),
+    TaskDictionaryCategory(name: "Money & Savings", icon: "dollarsign.circle.fill", color: .yellow, tasks: [
+        TaskDictionaryEntry(name: "Save Allowance", emoji: "💰", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Track Spending", emoji: "📊", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Piggy Bank Deposit", emoji: "🐷", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Garage Sale Prep", emoji: "🏷️", frequencyLabel: "Quarterly", recurrence: .monthly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Lemonade Stand", emoji: "🍋", frequencyLabel: "Monthly", recurrence: .none, suggestedReward: 10),
+    ]),
+    TaskDictionaryCategory(name: "Safety & Life Skills", icon: "shield.fill", color: .teal, tasks: [
+        TaskDictionaryEntry(name: "Practice Fire Drill", emoji: "🧯", frequencyLabel: "Quarterly", recurrence: .monthly, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Learn to Cook a Meal", emoji: "👨‍🍳", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Learn First Aid", emoji: "🩹", frequencyLabel: "Half-Yearly", recurrence: .none, suggestedReward: 8),
+        TaskDictionaryEntry(name: "Sew a Button", emoji: "🧵", frequencyLabel: "Monthly", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Sort Recycling", emoji: "♻️", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Check Smoke Detectors", emoji: "🔔", frequencyLabel: "Half-Yearly", recurrence: .none, suggestedReward: 5),
+    ]),
+    TaskDictionaryCategory(name: "Seasonal & Special", icon: "calendar.badge.clock", color: Color(red: 0.8, green: 0.4, blue: 0.2), tasks: [
+        TaskDictionaryEntry(name: "Spring Cleaning", emoji: "🧹", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 20),
+        TaskDictionaryEntry(name: "Back to School Prep", emoji: "🎒", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Holiday Decorating", emoji: "🎄", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 10),
+        TaskDictionaryEntry(name: "Summer Reading Challenge", emoji: "📚", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Birthday Planning", emoji: "🎂", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Holiday Cards", emoji: "✉️", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "School Supplies Shopping", emoji: "📎", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+        TaskDictionaryEntry(name: "Costume Prep", emoji: "🎭", frequencyLabel: "Annual", recurrence: .none, suggestedReward: 5),
+    ]),
+    TaskDictionaryCategory(name: "Technology & Screen", icon: "desktopcomputer", color: .gray, tasks: [
+        TaskDictionaryEntry(name: "Limit Screen Time", emoji: "📱", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Back Up Homework Files", emoji: "💻", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 2),
+        TaskDictionaryEntry(name: "Clean Up Email", emoji: "📧", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Organize Photos", emoji: "📸", frequencyLabel: "Monthly", recurrence: .monthly, suggestedReward: 3),
+        TaskDictionaryEntry(name: "Learn a Coding Lesson", emoji: "💻", frequencyLabel: "Weekly", recurrence: .weekly, suggestedReward: 8),
+        TaskDictionaryEntry(name: "No-Screen Hour", emoji: "🚫", frequencyLabel: "Daily", recurrence: .daily, suggestedReward: 3),
+    ]),
 ]
 
 // MARK: - Avatars

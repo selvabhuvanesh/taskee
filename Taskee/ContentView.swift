@@ -329,6 +329,7 @@ struct ContentView: View {
     @State private var showRedemptionApprovals = false
     @State private var showRewardsHistory = false
     @State private var showEditProfile = false
+    @State private var showSettings = false
     @State private var stickyNote: (message: String, color: Color)?
     @State private var showReminderSent = false
     @State private var reminderSentChildName = ""
@@ -777,6 +778,11 @@ struct ContentView: View {
                                 Label("Annual Reminders", systemImage: "calendar.badge.clock")
                             }
                             Button {
+                                showSettings = true
+                            } label: {
+                                Label("Settings", systemImage: "gearshape.fill")
+                            }
+                            Button {
                                 showShareSheet = true
                             } label: {
                                 Label("Refer Your Friends", systemImage: "person.badge.plus")
@@ -840,6 +846,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView(theme: parentTheme)
             }
             .sheet(isPresented: $showThemePicker) {
                 ChildThemePickerView(theme: $parentTheme)
@@ -3555,7 +3564,7 @@ struct TaskRow: View {
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.name)
+                        Text("\(task.emoji) \(task.name)")
                             .font(theme.font(.body))
                             .lineLimit(1)
                             .strikethrough(task.isApproved || task.isCancelled)
@@ -3632,36 +3641,18 @@ struct TaskRow: View {
             }
             .buttonStyle(.plain)
 
-            if onEdit != nil || onDelete != nil {
-                HStack(spacing: 14) {
-                    if let onEdit {
-                        Button {
-                            onEdit()
-                        } label: {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 34, height: 34)
-                                .background(calmAccent.opacity(0.6), in: Circle())
-                                .overlay(Circle().strokeBorder(calmAccent.opacity(0.4), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if let onDelete {
-                        Button {
-                            onDelete()
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 34, height: 34)
-                                .background(.red.opacity(0.5), in: Circle())
-                                .overlay(Circle().strokeBorder(.red.opacity(0.4), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                    }
+            if let onDelete {
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(.red.opacity(0.5), in: Circle())
+                        .overlay(Circle().strokeBorder(.red.opacity(0.4), lineWidth: 1))
                 }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4088,6 +4079,7 @@ struct AddTaskView: View {
     @State private var giftText = ""
     @State private var includeGift = false
     @State private var transportType = "none"
+    @State private var showDictionary = false
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty && !selectedChildren.isEmpty
@@ -4133,6 +4125,23 @@ struct AddTaskView: View {
         }
     }
 
+    private func applyDictionaryEntry(_ entry: TaskDictionaryEntry) {
+        taskName = entry.name
+        rewardText = "\(entry.suggestedReward)"
+        recurrenceType = entry.recurrence
+        switch entry.recurrence {
+        case .daily: occurrences = 10
+        case .weekly:
+            occurrences = 4
+            if selectedWeekdays.isEmpty {
+                let weekday = Calendar.current.component(.weekday, from: targetDate)
+                selectedWeekdays.insert(weekday)
+            }
+        case .monthly: occurrences = 4
+        case .none: break
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -4153,8 +4162,6 @@ struct AddTaskView: View {
                         if useSmartScheduler {
                             smartSchedulerSection
                         } else {
-
-                        templatePicker
 
                         if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
                             VStack(spacing: 8) {
@@ -4209,9 +4216,26 @@ struct AddTaskView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Task Name")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.primary.opacity(0.7))
+                            HStack {
+                                Text("Task Name")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.primary.opacity(0.7))
+                                Spacer()
+                                Button {
+                                    showDictionary = true
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "book.fill")
+                                            .font(.system(size: 12))
+                                        Text("Task Dictionary")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .foregroundStyle(calmAccent)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(calmAccent.opacity(0.15), in: Capsule())
+                                }
+                            }
 
                             TextField("What needs to be done?", text: $taskName)
                                 .font(.title3.weight(.medium))
@@ -4455,6 +4479,11 @@ struct AddTaskView: View {
             }
         }
         .presentationDetents([.large])
+        .sheet(isPresented: $showDictionary) {
+            TaskDictionaryView(theme: theme) { entry in
+                applyDictionaryEntry(entry)
+            }
+        }
         .alert("Task Limit Reached", isPresented: $showQuotaAlert) {
             NavigationLink("Upgrade Plan") {
                 SubscriptionView(theme: theme)
@@ -4510,6 +4539,8 @@ struct AddTaskView: View {
             }
         }
     }
+
+    // templatePicker kept for potential future use but no longer shown in the form
 
     private var recurrenceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -4898,6 +4929,169 @@ struct AddTaskView: View {
     }
 }
 
+// MARK: - Task Dictionary View
+
+struct TaskDictionaryView: View {
+    @Environment(\.dismiss) private var dismiss
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var onSelect: (TaskDictionaryEntry) -> Void
+    @State private var searchText = ""
+    @State private var expandedCategory: UUID?
+
+    private var filteredCategories: [TaskDictionaryCategory] {
+        if searchText.isEmpty { return taskDictionary }
+        let query = searchText.lowercased()
+        return taskDictionary.compactMap { category in
+            let filtered = category.tasks.filter { $0.name.lowercased().contains(query) }
+            if filtered.isEmpty { return nil }
+            return TaskDictionaryCategory(name: category.name, icon: category.icon, color: category.color, tasks: filtered)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.primary.opacity(0.4))
+                            TextField("Search tasks...", text: $searchText)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                        }
+                        .padding(12)
+                        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                        ForEach(filteredCategories) { category in
+                            VStack(spacing: 0) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        expandedCategory = expandedCategory == category.id ? nil : category.id
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: category.icon)
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(category.color)
+                                            .frame(width: 32, height: 32)
+                                            .background(category.color.opacity(0.15), in: Circle())
+                                        Text(category.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Text("\(category.tasks.count)")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.primary.opacity(0.4))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(.primary.opacity(0.08), in: Capsule())
+                                        Image(systemName: expandedCategory == category.id ? "chevron.up" : "chevron.down")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary.opacity(0.4))
+                                    }
+                                    .padding(14)
+                                }
+                                .buttonStyle(.plain)
+
+                                if expandedCategory == category.id || !searchText.isEmpty {
+                                    VStack(spacing: 2) {
+                                        ForEach(category.tasks) { entry in
+                                            Button {
+                                                onSelect(entry)
+                                                dismiss()
+                                            } label: {
+                                                HStack(spacing: 12) {
+                                                    Text(entry.emoji)
+                                                        .font(.title3)
+                                                        .frame(width: 36)
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text(entry.name)
+                                                            .font(.subheadline.weight(.medium))
+                                                            .foregroundStyle(.primary)
+                                                        HStack(spacing: 6) {
+                                                            Text(entry.frequencyLabel)
+                                                                .font(.caption2.weight(.semibold))
+                                                                .foregroundStyle(frequencyColor(entry.frequencyLabel))
+                                                                .padding(.horizontal, 6)
+                                                                .padding(.vertical, 2)
+                                                                .background(frequencyColor(entry.frequencyLabel).opacity(0.15), in: Capsule())
+                                                            HStack(spacing: 2) {
+                                                                Image(systemName: "star.fill")
+                                                                    .font(.system(size: 9))
+                                                                    .foregroundStyle(.yellow)
+                                                                Text("\(entry.suggestedReward)")
+                                                                    .font(.caption2.weight(.bold))
+                                                                    .foregroundStyle(.primary.opacity(0.5))
+                                                            }
+                                                        }
+                                                    }
+                                                    Spacer()
+                                                    Image(systemName: "plus.circle.fill")
+                                                        .font(.system(size: 20))
+                                                        .foregroundStyle(calmAccent)
+                                                }
+                                                .padding(.vertical, 10)
+                                                .padding(.horizontal, 14)
+                                            }
+                                            .buttonStyle(.plain)
+
+                                            if entry.id != category.tasks.last?.id {
+                                                Divider().opacity(0.15).padding(.leading, 62)
+                                            }
+                                        }
+                                    }
+                                    .padding(.bottom, 8)
+                                }
+                            }
+                            .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
+                            )
+                            .padding(.horizontal, 16)
+                        }
+
+                        Spacer().frame(height: 20)
+                    }
+                }
+            }
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
+            .navigationTitle("Task Dictionary")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .onAppear {
+            if !searchText.isEmpty || filteredCategories.count == 1 {
+                expandedCategory = filteredCategories.first?.id
+            }
+        }
+    }
+
+    private func frequencyColor(_ label: String) -> Color {
+        switch label {
+        case "Daily": return .green
+        case "Weekly": return .blue
+        case "Monthly": return .purple
+        case "Quarterly": return .orange
+        case "Half-Yearly": return .pink
+        case "Annual": return .red
+        default: return .gray
+        }
+    }
+}
+
 // MARK: - Edit Task View (Parent)
 
 struct TaskEditRequest: Identifiable {
@@ -4930,6 +5124,13 @@ struct EditTaskView: View {
     @State private var giftText: String
     @State private var transportType: String
     @State private var showDeleteConfirm = false
+    @State private var showFrequencyChangeConfirm = false
+
+    @State private var newFrequency: RecurrenceType = .none
+    @State private var originalFrequency: RecurrenceType = .none
+    @State private var newOccurrences: Int = 4
+    @State private var newWeekdays: Set<Int> = []
+    @State private var frequencyDetected = false
 
     private let originalName: String
     private let originalAssignee: String
@@ -4961,6 +5162,24 @@ struct EditTaskView: View {
 
     private var rewardValue: Double {
         Double(rewardText) ?? 0
+    }
+
+    private var editStepperMax: Int {
+        switch newFrequency {
+        case .daily: return 90
+        case .weekly: return 52
+        case .monthly: return 12
+        case .none: return 52
+        }
+    }
+
+    private var editRecurrenceUnitLabel: String {
+        switch newFrequency {
+        case .none: return ""
+        case .daily: return newOccurrences == 1 ? "day" : "days"
+        case .weekly: return newOccurrences == 1 ? "week" : "weeks"
+        case .monthly: return newOccurrences == 1 ? "month" : "months"
+        }
     }
 
     var body: some View {
@@ -4997,6 +5216,85 @@ struct EditTaskView: View {
                                     Text("All in Series").tag(true)
                                 }
                                 .pickerStyle(.segmented)
+
+                                if editAll && frequencyDetected {
+                                    Divider().opacity(0.3)
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Change Frequency")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary.opacity(0.7))
+
+                                        Picker("Frequency", selection: $newFrequency) {
+                                            Text("Daily").tag(RecurrenceType.daily)
+                                            Text("Weekly").tag(RecurrenceType.weekly)
+                                            Text("Monthly").tag(RecurrenceType.monthly)
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .onChange(of: newFrequency) { _, newValue in
+                                            switch newValue {
+                                            case .daily: newOccurrences = 10
+                                            case .weekly:
+                                                newOccurrences = 4
+                                                if newWeekdays.isEmpty {
+                                                    let weekday = Calendar.current.component(.weekday, from: targetDate)
+                                                    newWeekdays.insert(weekday)
+                                                }
+                                            case .monthly: newOccurrences = 4
+                                            case .none: break
+                                            }
+                                        }
+
+                                        if newFrequency != originalFrequency {
+                                            if newFrequency == .weekly {
+                                                HStack(spacing: 8) {
+                                                    ForEach(1...7, id: \.self) { day in
+                                                        Button {
+                                                            if newWeekdays.contains(day) {
+                                                                if newWeekdays.count > 1 {
+                                                                    newWeekdays.remove(day)
+                                                                }
+                                                            } else {
+                                                                newWeekdays.insert(day)
+                                                            }
+                                                        } label: {
+                                                            Text(weekdayLabels[day - 1])
+                                                                .font(.caption.weight(.bold))
+                                                                .frame(width: 32, height: 32)
+                                                                .background(
+                                                                    newWeekdays.contains(day) ? calmAccent : .primary.opacity(0.15),
+                                                                    in: Circle()
+                                                                )
+                                                                .foregroundStyle(Color.primary.opacity(newWeekdays.contains(day) ? 1 : 0.5))
+                                                        }
+                                                    }
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                            }
+
+                                            Stepper(value: $newOccurrences, in: 2...editStepperMax) {
+                                                HStack {
+                                                    Text("Repeat for")
+                                                        .foregroundStyle(.primary)
+                                                    Spacer()
+                                                    Text("\(newOccurrences) \(editRecurrenceUnitLabel)")
+                                                        .foregroundStyle(.primary.opacity(0.7))
+                                                }
+                                                .font(.caption)
+                                            }
+                                            .tint(.primary)
+
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "exclamationmark.triangle.fill")
+                                                    .font(.system(size: 11))
+                                                    .foregroundStyle(.orange)
+                                                Text("This will delete the current series and create a new one.")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.orange)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             .padding(12)
                             .background(calmAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
@@ -5004,6 +5302,32 @@ struct EditTaskView: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(calmAccent.opacity(0.3), lineWidth: 1)
                             )
+                            .onAppear {
+                                guard !frequencyDetected else { return }
+                                let siblings = allTasks.filter {
+                                    $0.name == originalName && $0.assignedTo == originalAssignee
+                                    && $0.isRecurring && !$0.isArchived
+                                }
+                                let sortedDates = siblings.map(\.targetDate).sorted()
+                                let detected: RecurrenceType
+                                if sortedDates.count >= 2 {
+                                    let calendar = Calendar.current
+                                    let intervals = zip(sortedDates, sortedDates.dropFirst()).map {
+                                        calendar.dateComponents([.day], from: $0.0, to: $0.1).day ?? 0
+                                    }
+                                    let avgInterval = intervals.reduce(0, +) / max(intervals.count, 1)
+                                    if avgInterval <= 1 { detected = .daily }
+                                    else if avgInterval <= 10 { detected = .weekly }
+                                    else { detected = .monthly }
+                                } else {
+                                    detected = .daily
+                                }
+                                originalFrequency = detected
+                                newFrequency = detected
+                                let weekdays = Set(siblings.map { Calendar.current.component(.weekday, from: $0.targetDate) })
+                                newWeekdays = weekdays
+                                frequencyDetected = true
+                            }
                         } else if task.isRecurring {
                             HStack(spacing: 8) {
                                 Image(systemName: "repeat")
@@ -5254,7 +5578,9 @@ struct EditTaskView: View {
                 if canEdit {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save") {
-                            if editAll {
+                            if editAll && newFrequency != originalFrequency {
+                                showFrequencyChangeConfirm = true
+                            } else if editAll {
                                 saveAllRecurring()
                             } else {
                                 saveSingleTask()
@@ -5264,6 +5590,14 @@ struct EditTaskView: View {
                         .disabled(!isValid)
                     }
                 }
+            }
+            .alert("Change Frequency?", isPresented: $showFrequencyChangeConfirm) {
+                Button("Change", role: .destructive) {
+                    saveWithNewFrequency()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will delete all tasks in the current series and create a new \(newFrequency.rawValue.lowercased()) series with \(newOccurrences) occurrences starting from the selected date.")
             }
         }
         .presentationDetents([.large])
@@ -5330,6 +5664,90 @@ struct EditTaskView: View {
             }
         }
         dismiss()
+    }
+
+    private func saveWithNewFrequency() {
+        let trimmedName = taskName.trimmingCharacters(in: .whitespaces)
+        let trimmedGift = includeGift ? giftText.trimmingCharacters(in: .whitespaces) : ""
+        let familyCode = authManager.familyCode
+        let calendar = Calendar.current
+
+        let siblings = allTasks.filter {
+            $0.name == originalName && $0.assignedTo == originalAssignee
+            && $0.isRecurring && !$0.isArchived
+        }
+        for sibling in siblings {
+            notificationManager.cancelTaskReminder(taskId: sibling.id)
+            modelContext.delete(sibling)
+        }
+        try? modelContext.save()
+
+        let dates = generateEditTaskDates(calendar: calendar)
+        var createdTasks: [Item] = []
+        for date in dates {
+            let newTask = Item(
+                name: trimmedName,
+                targetDate: date,
+                assignedTo: selectedChild,
+                reward: rewardValue,
+                isRecurring: true,
+                giftText: trimmedGift,
+                createdBy: authManager.userName,
+                createdByID: authManager.appleUserID,
+                transportType: transportType
+            )
+            modelContext.insert(newTask)
+            createdTasks.append(newTask)
+            notificationManager.scheduleTaskReminder(
+                taskId: newTask.id,
+                taskName: trimmedName,
+                assignedTo: selectedChild,
+                dueDate: date
+            )
+        }
+        try? modelContext.save()
+
+        Task {
+            for created in createdTasks {
+                await cloudKitManager.pushTask(created, familyCode: familyCode)
+            }
+        }
+        dismiss()
+    }
+
+    private func generateEditTaskDates(calendar: Calendar) -> [Date] {
+        switch newFrequency {
+        case .none:
+            return [targetDate]
+        case .daily:
+            return (0..<newOccurrences).compactMap { i in
+                calendar.date(byAdding: .day, value: i, to: targetDate)
+            }
+        case .weekly:
+            guard !newWeekdays.isEmpty else { return [targetDate] }
+            var dates: [Date] = []
+            let timeComponents = calendar.dateComponents([.hour, .minute], from: targetDate)
+            let weekStart = calendar.dateInterval(of: .weekOfYear, for: targetDate)?.start ?? targetDate
+            for week in 0..<newOccurrences {
+                guard let weekBase = calendar.date(byAdding: .weekOfYear, value: week, to: weekStart) else { continue }
+                let baseWeekday = calendar.component(.weekday, from: weekBase)
+                for day in newWeekdays.sorted() {
+                    let dayOffset = (day - baseWeekday + 7) % 7
+                    guard let dayDate = calendar.date(byAdding: .day, value: dayOffset, to: weekBase) else { continue }
+                    var components = calendar.dateComponents([.year, .month, .day], from: dayDate)
+                    components.hour = timeComponents.hour
+                    components.minute = timeComponents.minute
+                    if let finalDate = calendar.date(from: components), finalDate >= targetDate {
+                        dates.append(finalDate)
+                    }
+                }
+            }
+            return dates
+        case .monthly:
+            return (0..<newOccurrences).compactMap { i in
+                calendar.date(byAdding: .month, value: i, to: targetDate)
+            }
+        }
     }
 
     private func editChildChip(name: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -6084,6 +6502,84 @@ struct ParentOnboardingView: View {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Settings View
+
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(NotificationManager.self) private var notificationManager
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer().frame(height: 12)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Voice Reminders")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.7))
+
+                            VStack(spacing: 0) {
+                                ForEach(Array(NotificationManager.allReminderIntervals.enumerated()), id: \.element.minutes) { index, interval in
+                                    HStack {
+                                        Image(systemName: interval.minutes == 0 ? "bell.fill" : "bell")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(.primary.opacity(0.6))
+                                            .frame(width: 24)
+                                        Text(interval.label)
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Toggle("", isOn: Binding(
+                                            get: { notificationManager.isIntervalEnabled(interval.minutes) },
+                                            set: { _ in notificationManager.toggleInterval(interval.minutes) }
+                                        ))
+                                        .labelsHidden()
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+
+                                    if index < NotificationManager.allReminderIntervals.count - 1 {
+                                        Divider()
+                                            .padding(.leading, 52)
+                                    }
+                                }
+                            }
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                            )
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                }
+            }
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

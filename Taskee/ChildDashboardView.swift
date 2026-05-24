@@ -37,6 +37,7 @@ struct ChildDashboardView: View {
     @State private var showRewardsHistory = false
     @State private var showMyGifts = false
     @State private var showEditProfile = false
+    @State private var showSettings = false
     @State private var showShareSheet = false
     @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
@@ -315,6 +316,11 @@ struct ChildDashboardView: View {
                                 Label("Customize Theme", systemImage: "paintpalette.fill")
                             }
                             Button {
+                                showSettings = true
+                            } label: {
+                                Label("Settings", systemImage: "gearshape.fill")
+                            }
+                            Button {
                                 showShareSheet = true
                             } label: {
                                 Label("Refer Your Friends", systemImage: "person.badge.plus")
@@ -338,6 +344,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: childTheme)
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView(theme: childTheme)
             }
             .sheet(isPresented: $showThemePicker) {
                 ChildThemePickerView(theme: $childTheme)
@@ -1216,7 +1225,7 @@ struct ChildDashboardView: View {
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.name)
+                        Text("\(task.emoji) \(task.name)")
                             .font(childTheme.font(.body))
                             .lineLimit(1)
                             .strikethrough(task.isApproved || task.isCancelled)
@@ -1391,6 +1400,7 @@ struct AddChildTaskView: View {
     @State private var smartInput = ""
     @State private var parsedTask: ParsedTask?
     @State private var showQuotaAlert = false
+    @State private var showDictionary = false
 
     private var isValid: Bool {
         !taskName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1431,6 +1441,22 @@ struct AddChildTaskView: View {
         }
     }
 
+    private func applyDictionaryEntry(_ entry: TaskDictionaryEntry) {
+        taskName = entry.name
+        recurrenceType = entry.recurrence
+        switch entry.recurrence {
+        case .daily: occurrences = 10
+        case .weekly:
+            occurrences = 4
+            if selectedWeekdays.isEmpty {
+                let weekday = Calendar.current.component(.weekday, from: targetDate)
+                selectedWeekdays.insert(weekday)
+            }
+        case .monthly: occurrences = 4
+        case .none: break
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -1455,8 +1481,6 @@ struct AddChildTaskView: View {
                         if useSmartScheduler {
                             smartSchedulerSection
                         } else {
-
-                        templatePicker
 
                         if let remaining = subscriptionManager.tasksRemaining(allTasks: allTasks) {
                             VStack(spacing: 6) {
@@ -1491,9 +1515,26 @@ struct AddChildTaskView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Task Name")
-                                .font(.caption)
-                                .foregroundStyle(.primary.opacity(0.5))
+                            HStack {
+                                Text("Task Name")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+                                Spacer()
+                                Button {
+                                    showDictionary = true
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "book.fill")
+                                            .font(.system(size: 12))
+                                        Text("Task Dictionary")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .foregroundStyle(calmAccent)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(calmAccent.opacity(0.15), in: Capsule())
+                                }
+                            }
 
                             TextField("What do you need to do?", text: $taskName)
                                 .font(.body)
@@ -1610,6 +1651,11 @@ struct AddChildTaskView: View {
             }
         }
         .presentationDetents([.large])
+        .sheet(isPresented: $showDictionary) {
+            TaskDictionaryView(theme: theme) { entry in
+                applyDictionaryEntry(entry)
+            }
+        }
         .alert("Task Limit Reached", isPresented: $showQuotaAlert) {
             Button("OK", role: .cancel) { }
         } message: {
