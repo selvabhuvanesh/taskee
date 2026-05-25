@@ -107,7 +107,26 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Voice Reminder
 
+    private static let voiceEnabledKey = "voiceReminderEnabled"
+
+    var isVoiceEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: Self.voiceEnabledKey) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: Self.voiceEnabledKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.voiceEnabledKey)
+        }
+    }
+
     private let voiceSynthesizer = AVSpeechSynthesizer()
+
+    private static var soundsDirectory: URL {
+        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Sounds")
+    }
 
     func speakReminder(_ text: String) {
         do {
@@ -126,6 +145,73 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         utterance.rate = 0.5
         utterance.volume = 1.0
         voiceSynthesizer.speak(utterance)
+    }
+
+    private func generateVoiceFile(text: String, identifier: String) async -> String? {
+        let dir = Self.soundsDirectory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let filename = "voice-\(identifier).caf"
+        let fileURL = dir.appendingPathComponent(filename)
+        try? FileManager.default.removeItem(at: fileURL)
+
+        let synth = AVSpeechSynthesizer()
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.volume = 1.0
+
+        let result: Bool = await withCheckedContinuation { continuation in
+            var audioFile: AVAudioFile?
+            var completed = false
+
+            synth.write(utterance) { buffer in
+                guard !completed else { return }
+
+                guard let pcmBuffer = buffer as? AVAudioPCMBuffer, pcmBuffer.frameLength > 0 else {
+                    completed = true
+                    continuation.resume(returning: audioFile != nil)
+                    return
+                }
+
+                if audioFile == nil {
+                    audioFile = try? AVAudioFile(
+                        forWriting: fileURL,
+                        settings: pcmBuffer.format.settings
+                    )
+                }
+                try? audioFile?.write(from: pcmBuffer)
+            }
+        }
+
+        guard result, FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return filename
+    }
+
+    private func deleteVoiceFiles(for taskId: UUID) {
+        let dir = Self.soundsDirectory
+        for interval in Self.allReminderIntervals {
+            let filename = "voice-reminder-\(taskId.uuidString)-\(interval.minutes).caf"
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(filename))
+        }
+    }
+
+    func cleanupOrphanedVoiceFiles() {
+        let dir = Self.soundsDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+
+        let voiceFiles = files.filter { $0.hasPrefix("voice-") && $0.hasSuffix(".caf") }
+        guard !voiceFiles.isEmpty else { return }
+
+        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+            let activeIDs = Set(requests.map { $0.identifier })
+            for file in voiceFiles {
+                let stem = String(file.dropFirst(6).dropLast(4))
+                if !activeIDs.contains(stem) {
+                    try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+                }
+            }
+        }
     }
 
     private func timeLabel(forMinutes minutes: Int) -> String {
@@ -152,6 +238,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         var allPossibleIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
         allPossibleIDs.append("reminder-\(taskId.uuidString)")
         center.removePendingNotificationRequests(withIdentifiers: allPossibleIDs)
+        deleteVoiceFiles(for: taskId)
 
         for minutes in intervals {
             let reminderDate = dueDate.addingTimeInterval(-Double(minutes) * 60)
@@ -161,29 +248,45 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 ? "\(taskName) \(timeLabel(forMinutes: minutes))"
                 : "\(taskName) for \(assignedTo) \(timeLabel(forMinutes: minutes))"
 
-            let content = UNMutableNotificationContent()
-            content.title = minutes == 0 ? "Task Due Now" : "Task Due Soon"
-            content.body = assignedTo.isEmpty
-                ? "\"\(taskName)\" \(bodyTimeLabel(forMinutes: minutes))"
-                : "\"\(taskName)\" assigned to \(assignedTo) \(bodyTimeLabel(forMinutes: minutes))"
-            content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
-            content.categoryIdentifier = "TASK_REMINDER"
-            content.interruptionLevel = .timeSensitive
-            content.userInfo = ["spokenText": spokenText]
+            let identifier = "reminder-\(taskId.uuidString)-\(minutes)"
+            let voiceOn = isVoiceEnabled
 
-            let components = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute],
-                from: reminderDate
-            )
-            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            Task {
+                var voiceFilename: String?
+                if voiceOn {
+                    voiceFilename = await generateVoiceFile(text: spokenText, identifier: identifier)
+                }
 
-            let request = UNNotificationRequest(
-                identifier: "reminder-\(taskId.uuidString)-\(minutes)",
-                content: content,
-                trigger: trigger
-            )
+                let content = UNMutableNotificationContent()
+                content.title = minutes == 0 ? "Task Due Now" : "Task Due Soon"
+                content.body = assignedTo.isEmpty
+                    ? "\"\(taskName)\" \(bodyTimeLabel(forMinutes: minutes))"
+                    : "\"\(taskName)\" assigned to \(assignedTo) \(bodyTimeLabel(forMinutes: minutes))"
+                if let voiceFilename {
+                    content.sound = UNNotificationSound(named: UNNotificationSoundName(voiceFilename))
+                } else {
+                    content.sound = UNNotificationSound(named: UNNotificationSoundName("reminder.wav"))
+                }
+                content.categoryIdentifier = "TASK_REMINDER"
+                content.interruptionLevel = .timeSensitive
+                if voiceOn {
+                    content.userInfo = ["spokenText": spokenText]
+                }
 
-            center.add(request)
+                let components = Calendar.current.dateComponents(
+                    [.year, .month, .day, .hour, .minute],
+                    from: reminderDate
+                )
+                let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+
+                let request = UNNotificationRequest(
+                    identifier: identifier,
+                    content: content,
+                    trigger: trigger
+                )
+
+                try? await center.add(request)
+            }
         }
     }
 
@@ -191,6 +294,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         var allIDs = Self.allReminderIntervals.map { "reminder-\(taskId.uuidString)-\($0.minutes)" }
         allIDs.append("reminder-\(taskId.uuidString)")
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: allIDs)
+        deleteVoiceFiles(for: taskId)
     }
 
     func scheduleAnnualReminder(reminderId: UUID, name: String, dueDate: Date, remindDaysBefore: [Int]) {

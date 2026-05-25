@@ -6527,7 +6527,42 @@ struct SettingsView: View {
                         Spacer().frame(height: 12)
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Voice Reminders")
+                            Text("Reminders")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.7))
+
+                            HStack {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.primary.opacity(0.6))
+                                    .frame(width: 24)
+                                Text("Voice Reminders")
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { notificationManager.isVoiceEnabled },
+                                    set: { notificationManager.isVoiceEnabled = $0 }
+                                ))
+                                .labelsHidden()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if !notificationManager.isVoiceEnabled {
+                                Text("Reminders will play a beep sound instead of speaking the task name.")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Reminder Timing")
                                 .font(.caption)
                                 .foregroundStyle(.primary.opacity(0.7))
 

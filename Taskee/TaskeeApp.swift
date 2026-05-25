@@ -127,6 +127,7 @@ struct TaskeeApp: App {
                 }
                 notificationManager.requestPermission()
                 SoundManager.shared.installNotificationSound()
+                notificationManager.cleanupOrphanedVoiceFiles()
                 UNUserNotificationCenter.current().setBadgeCount(0)
                 notificationManager.onPickupAcknowledged = { childName in
                     acknowledgePickup(childName: childName)
