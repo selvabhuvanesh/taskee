@@ -340,6 +340,7 @@ struct ContentView: View {
     @State private var showThemePicker = false
     @State private var showSwitchRoleConfirm = false
     @State private var showFamilySetup = false
+    @State private var isSwitchingToFamily = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -805,17 +806,18 @@ struct ContentView: View {
                             Divider()
                             Button {
                                 if isIndividual {
-                                    showFamilySetup = true
+                                    attemptSwitchToFamily()
                                 } else {
                                     showSwitchRoleConfirm = true
                                 }
                             } label: {
                                 if isIndividual {
-                                    Label("Switch to Family Mode", systemImage: "person.3.fill")
+                                    Label(isSwitchingToFamily ? "Switching…" : "Switch to Family Mode", systemImage: "person.3.fill")
                                 } else {
                                     Label("Switch to Individual Mode", systemImage: "person.fill")
                                 }
                             }
+                            .disabled(isSwitchingToFamily)
                             Button(role: .destructive) {
                                 authManager.logout()
                             } label: {
@@ -1038,6 +1040,20 @@ struct ContentView: View {
             }
         }
         RecurringTaskExtender.markExtended()
+    }
+
+    private func attemptSwitchToFamily() {
+        isSwitchingToFamily = true
+        Task {
+            let code = authManager.familyCode
+            let result = await cloudKitManager.validateFamilyCode(code)
+            if result == .valid {
+                withAnimation { authManager.role = "parent" }
+            } else {
+                showFamilySetup = true
+            }
+            isSwitchingToFamily = false
+        }
     }
 
     private func archiveOldTasks() {
@@ -6566,8 +6582,6 @@ struct FamilySetupSheet: View {
     @State private var isValidating = false
     @State private var showInvalidCode = false
     @State private var showCloudUnavailable = false
-    @State private var showAlreadyHasFamily = false
-    @State private var existingFamilyCode = ""
     @State private var showFamilyFull = false
 
     private var isFormValid: Bool {
@@ -6591,7 +6605,7 @@ struct FamilySetupSheet: View {
                             .font(.title2.weight(.bold))
                             .foregroundStyle(.white)
 
-                        Text("Create a new family or join an existing one. Your tasks will carry over.")
+                        Text("Start your own family using your existing code, or join another family with an invite code.")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -6603,8 +6617,13 @@ struct FamilySetupSheet: View {
                                 HStack {
                                     Image(systemName: joinExisting ? "circle" : "checkmark.circle.fill")
                                         .foregroundStyle(joinExisting ? .white.opacity(0.3) : calmAccent)
-                                    Text("Create New Family")
-                                        .foregroundStyle(.white)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Start My Family")
+                                            .foregroundStyle(.white)
+                                        Text("Use your code \(authManager.familyCode) and invite members")
+                                            .font(.caption2)
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
                                     Spacer()
                                 }
                                 .font(.subheadline)
@@ -6618,8 +6637,13 @@ struct FamilySetupSheet: View {
                                 HStack {
                                     Image(systemName: joinExisting ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(joinExisting ? calmAccent : .white.opacity(0.3))
-                                    Text("Join Existing Family")
-                                        .foregroundStyle(.white)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Join Existing Family")
+                                            .foregroundStyle(.white)
+                                        Text("Enter an invite code from another family")
+                                            .font(.caption2)
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
                                     Spacer()
                                 }
                                 .font(.subheadline)
@@ -6654,7 +6678,7 @@ struct FamilySetupSheet: View {
                                 if isValidating {
                                     ProgressView().tint(.white)
                                 }
-                                Text(joinExisting ? "Join Family" : "Create Family")
+                                Text(joinExisting ? "Join Family" : "Start Family")
                             }
                             .font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
@@ -6692,14 +6716,6 @@ struct FamilySetupSheet: View {
             } message: {
                 Text(cloudKitManager.lastSyncError ?? "Unable to connect. Please check your internet connection and try again.")
             }
-            .alert("Family Already Exists", isPresented: $showAlreadyHasFamily) {
-                Button("Use Existing Family") {
-                    completeSwitch(code: existingFamilyCode, isNew: false)
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("You already have a family with code \(existingFamilyCode). Would you like to use it?")
-            }
             .alert("Family Full", isPresented: $showFamilyFull) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -6733,14 +6749,14 @@ struct FamilySetupSheet: View {
         } else {
             isValidating = true
             Task {
-                if let existing = await cloudKitManager.familyAlreadyExists(appleUserID: authManager.appleUserID) {
+                let code = authManager.familyCode
+                let result = await cloudKitManager.validateFamilyCode(code)
+                if result == .valid {
+                    authManager.role = "parent"
                     isValidating = false
-                    existingFamilyCode = existing
-                    showAlreadyHasFamily = true
+                    dismiss()
                     return
                 }
-                authManager.generateFamilyCode()
-                let code = authManager.familyCode
                 let saved = await cloudKitManager.registerFamily(code: code, createdBy: authManager.userName, appleUserID: authManager.appleUserID)
                 if saved {
                     completeSwitch(code: code, isNew: true)

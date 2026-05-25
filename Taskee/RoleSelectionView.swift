@@ -508,7 +508,8 @@ struct RoleSelectionView: View {
     }
 
     private func completeIndividualSetup(name: String) {
-        let code = "IND-" + UUID().uuidString.prefix(8).uppercased()
+        authManager.generateFamilyCode()
+        let code = authManager.familyCode
         let member = FamilyMember(
             name: name,
             memberRole: "individual",
@@ -518,12 +519,18 @@ struct RoleSelectionView: View {
         modelContext.insert(member)
         isValidating = true
         Task {
+            let registered = await cloudKitManager.registerFamily(code: code, createdBy: name, appleUserID: authManager.appleUserID)
+            guard registered else {
+                modelContext.delete(member)
+                showCloudUnavailable = true
+                isValidating = false
+                return
+            }
             let pushed = await cloudKitManager.pushMember(member, familyCode: code)
             if pushed {
                 authManager.userName = name
                 authManager.role = "individual"
                 authManager.avatar = selectedAvatar
-                authManager.familyCode = code
                 authManager.hasCompletedOnboarding = true
                 await cloudKitManager.createFamilyZone(familyCode: code)
                 await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "individual")
