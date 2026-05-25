@@ -49,6 +49,8 @@ struct RoleSelectionView: View {
                         roleCards
                     } else if selectedRole == "parent" {
                         parentSetup
+                    } else if selectedRole == "individual" {
+                        individualSetup
                     } else if !parentalConsentPassed {
                         parentalGateView
                     } else {
@@ -135,6 +137,13 @@ struct RoleSelectionView: View {
                 subtitle: "View and complete tasks assigned by parent",
                 icon: "figure.child",
                 role: "child"
+            )
+
+            roleCard(
+                title: "Individual",
+                subtitle: "Manage your own tasks without a family group",
+                icon: "person.fill",
+                role: "individual"
             )
         }
     }
@@ -446,6 +455,83 @@ struct RoleSelectionView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("This family has reached the maximum number of members (\(subscriptionManager.maxMembers)) for the current plan.")
+        }
+    }
+
+    private var individualSetup: some View {
+        VStack(spacing: 20) {
+            avatarPicker
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your Name")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+
+                TextField("Enter your name", text: $name)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .padding(14)
+                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+            }
+
+            Button {
+                let trimmed = name.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                completeIndividualSetup(name: trimmed)
+            } label: {
+                HStack {
+                    if isValidating {
+                        ProgressView().tint(.white)
+                    }
+                    Text("Get Started")
+                }
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(calmAccent, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isValidating)
+
+            Button {
+                withAnimation(.snappy) { selectedRole = "" }
+            } label: {
+                Text("Back")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+
+    private func completeIndividualSetup(name: String) {
+        let code = "IND-" + UUID().uuidString.prefix(8).uppercased()
+        let member = FamilyMember(
+            name: name,
+            memberRole: "individual",
+            avatar: selectedAvatar,
+            appleUserID: authManager.appleUserID
+        )
+        modelContext.insert(member)
+        isValidating = true
+        Task {
+            let pushed = await cloudKitManager.pushMember(member, familyCode: code)
+            if pushed {
+                authManager.userName = name
+                authManager.role = "individual"
+                authManager.avatar = selectedAvatar
+                authManager.familyCode = code
+                authManager.hasCompletedOnboarding = true
+                await cloudKitManager.createFamilyZone(familyCode: code)
+                await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "individual")
+            } else {
+                modelContext.delete(member)
+                showCloudUnavailable = true
+            }
+            isValidating = false
         }
     }
 

@@ -105,7 +105,7 @@ struct TaskeeApp: App {
                     }
                 } else if authManager.role.isEmpty {
                     RoleSelectionView()
-                } else if authManager.role == "parent" {
+                } else if authManager.role == "parent" || authManager.role == "individual" {
                     ContentView()
                 } else if authManager.isPendingApproval {
                     PendingApprovalView(isCheckingAcceptance: $isCheckingAcceptance) {

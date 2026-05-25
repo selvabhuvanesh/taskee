@@ -302,6 +302,8 @@ struct ContentView: View {
     @Query private var allMembers: [FamilyMember]
     @Query(sort: \AnnualReminder.dueDate) private var annualReminders: [AnnualReminder]
 
+    private var isIndividual: Bool { authManager.role == "individual" }
+
     private var children: [FamilyMember] {
         var seen = Set<String>()
         return allMembers
@@ -336,6 +338,7 @@ struct ContentView: View {
     @State private var showShareSheet = false
     @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
+    @State private var showSwitchRoleConfirm = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -502,13 +505,13 @@ struct ContentView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
-                    if parentTotalEarned > 0 || parentAwaitingCoins > 0 {
+                    if !isIndividual && (parentTotalEarned > 0 || parentAwaitingCoins > 0) {
                         parentEarningsCard
                             .padding(.horizontal, 16)
                             .padding(.top, 4)
                     }
 
-                    if !children.isEmpty || otherParent != nil {
+                    if !isIndividual && (!children.isEmpty || otherParent != nil) {
                         familyStrip
                             .padding(.top, 6)
                     }
@@ -660,10 +663,12 @@ struct ContentView: View {
                     }
 
                     HStack(spacing: 14) {
-                        familyChatButton
-                        shoppingBagButton
-                        familyProjectsButton
-                        wishListButton
+                        if !isIndividual {
+                            familyChatButton
+                            shoppingBagButton
+                            familyProjectsButton
+                            wishListButton
+                        }
                         addTaskButton
                     }
                     .frame(maxWidth: .infinity)
@@ -693,7 +698,7 @@ struct ContentView: View {
                             }
                         }
 
-                        if !pendingRedemptions.isEmpty {
+                        if !isIndividual && !pendingRedemptions.isEmpty {
                             Button {
                                 showRedemptionApprovals = true
                             } label: {
@@ -731,19 +736,21 @@ struct ContentView: View {
                                 }
                         }
 
-                        Button {
-                            showingChildren = true
-                        } label: {
-                            Image(systemName: "person.3.fill")
-                                .font(.subheadline)
-                                .overlay(alignment: .topTrailing) {
-                                    if !pendingChildren.isEmpty {
-                                        Circle()
-                                            .fill(.orange)
-                                            .frame(width: 8, height: 8)
-                                            .offset(x: 3, y: -3)
+                        if !isIndividual {
+                            Button {
+                                showingChildren = true
+                            } label: {
+                                Image(systemName: "person.3.fill")
+                                    .font(.subheadline)
+                                    .overlay(alignment: .topTrailing) {
+                                        if !pendingChildren.isEmpty {
+                                            Circle()
+                                                .fill(.orange)
+                                                .frame(width: 8, height: 8)
+                                                .offset(x: 3, y: -3)
+                                        }
                                     }
-                                }
+                            }
                         }
 
                         Menu {
@@ -762,15 +769,17 @@ struct ContentView: View {
                             } label: {
                                 Label("Customize Theme", systemImage: "paintpalette.fill")
                             }
-                            Button {
-                                showSubscription = true
-                            } label: {
-                                Label("Subscription", systemImage: "crown.fill")
-                            }
-                            Button {
-                                showRewardsHistory = true
-                            } label: {
-                                Label("Rewards History", systemImage: "gift.fill")
+                            if !isIndividual {
+                                Button {
+                                    showSubscription = true
+                                } label: {
+                                    Label("Subscription", systemImage: "crown.fill")
+                                }
+                                Button {
+                                    showRewardsHistory = true
+                                } label: {
+                                    Label("Rewards History", systemImage: "gift.fill")
+                                }
                             }
                             Button {
                                 showAnnualReminders = true
@@ -793,6 +802,15 @@ struct ContentView: View {
                                 Label("Privacy Policy", systemImage: "hand.raised.fill")
                             }
                             Divider()
+                            Button {
+                                showSwitchRoleConfirm = true
+                            } label: {
+                                if isIndividual {
+                                    Label("Switch to Family Mode", systemImage: "person.3.fill")
+                                } else {
+                                    Label("Switch to Individual Mode", systemImage: "person.fill")
+                                }
+                            }
                             Button(role: .destructive) {
                                 authManager.logout()
                             } label: {
@@ -913,6 +931,20 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("\(reminderSentChildName) has been reminded about today's tasks.")
+            }
+            .alert(isIndividual ? "Switch to Family Mode?" : "Switch to Individual Mode?", isPresented: $showSwitchRoleConfirm) {
+                Button("Switch", role: .destructive) {
+                    withAnimation {
+                        authManager.role = isIndividual ? "parent" : "individual"
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                if isIndividual {
+                    Text("Family mode enables coins, gifts, family chat, and multi-member task assignment.")
+                } else {
+                    Text("Individual mode hides family features like coins, gifts, and family chat for a simpler experience.")
+                }
             }
             .modifier(ParentExpandedTaskAlerts(
                 taskToDelete: $taskToDelete,
@@ -4267,133 +4299,137 @@ struct AddTaskView: View {
 
                         recurrenceSection
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Reward (coins)")
-                                .font(.caption)
-                                .foregroundStyle(.primary.opacity(0.5))
+                        if authManager.role != "individual" {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Reward (coins)")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
 
-                            HStack(spacing: 10) {
-                                Image(systemName: "star.circle.fill")
-                                    .foregroundStyle(.yellow)
+                                HStack(spacing: 10) {
+                                    Image(systemName: "star.circle.fill")
+                                        .foregroundStyle(.yellow)
 
-                                TextField("0", text: $rewardText)
-                                    .font(.body)
-                                    .foregroundStyle(.primary)
-                                    .keyboardType(.decimalPad)
-                            }
-                            .padding(14)
-                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
-                            )
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle(isOn: $includeGift) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "gift.fill")
-                                        .foregroundStyle(.pink)
-                                    Text("Add Surprise Gift")
+                                    TextField("0", text: $rewardText)
                                         .font(.body)
                                         .foregroundStyle(.primary)
+                                        .keyboardType(.decimalPad)
                                 }
+                                .padding(14)
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                                )
                             }
-                            .tint(.pink)
-                            .padding(14)
-                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
-                            )
 
-                            if includeGift {
-                                let assigneeWishes = allWishListItems.filter { wish in
-                                    selectedChildren.contains(wish.ownerName)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle(isOn: $includeGift) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "gift.fill")
+                                            .foregroundStyle(.pink)
+                                        Text("Add Surprise Gift")
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                    }
                                 }
+                                .tint(.pink)
+                                .padding(14)
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                                )
 
-                                if !assigneeWishes.isEmpty {
-                                    Text("Pick from wish list")
-                                        .font(.caption)
-                                        .foregroundStyle(.primary.opacity(0.5))
+                                if includeGift {
+                                    let assigneeWishes = allWishListItems.filter { wish in
+                                        selectedChildren.contains(wish.ownerName)
+                                    }
 
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 8) {
-                                            ForEach(assigneeWishes) { wish in
-                                                Button {
-                                                    giftText = wish.name
-                                                } label: {
-                                                    HStack(spacing: 6) {
-                                                        Image(systemName: "star.fill")
-                                                            .font(.system(size: 10))
-                                                            .foregroundStyle(.yellow)
-                                                        Text(wish.name)
-                                                            .font(.caption.weight(.medium))
-                                                            .foregroundStyle(giftText == wish.name ? .white : .primary)
+                                    if !assigneeWishes.isEmpty {
+                                        Text("Pick from wish list")
+                                            .font(.caption)
+                                            .foregroundStyle(.primary.opacity(0.5))
+
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 8) {
+                                                ForEach(assigneeWishes) { wish in
+                                                    Button {
+                                                        giftText = wish.name
+                                                    } label: {
+                                                        HStack(spacing: 6) {
+                                                            Image(systemName: "star.fill")
+                                                                .font(.system(size: 10))
+                                                                .foregroundStyle(.yellow)
+                                                            Text(wish.name)
+                                                                .font(.caption.weight(.medium))
+                                                                .foregroundStyle(giftText == wish.name ? .white : .primary)
+                                                        }
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 8)
+                                                        .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
                                                     }
-                                                    .padding(.horizontal, 12)
-                                                    .padding(.vertical, 8)
-                                                    .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
+                                                    .buttonStyle(.plain)
                                                 }
-                                                .buttonStyle(.plain)
                                             }
                                         }
                                     }
+
+                                    Text("Or type a custom gift")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary.opacity(0.5))
+
+                                    TextField("e.g. New shoes, Movie of choice", text: $giftText)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .padding(14)
+                                        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
+                                        )
                                 }
-
-                                Text("Or type a custom gift")
-                                    .font(.caption)
-                                    .foregroundStyle(.primary.opacity(0.5))
-
-                                TextField("e.g. New shoes, Movie of choice", text: $giftText)
-                                    .font(.body)
-                                    .foregroundStyle(.primary)
-                                    .padding(14)
-                                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
-                                    )
                             }
+
+                            transportPicker
                         }
 
-                        transportPicker
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Assign To")
-                                    .font(.caption)
-                                    .foregroundStyle(.primary.opacity(0.5))
-                                Spacer()
-                                if allMemberNames.count > 1 {
-                                    Button {
-                                        if selectedChildren.count == allMemberNames.count {
-                                            selectedChildren = []
-                                        } else {
-                                            selectedChildren = Set(allMemberNames)
+                        if authManager.role != "individual" {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Assign To")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary.opacity(0.5))
+                                    Spacer()
+                                    if allMemberNames.count > 1 {
+                                        Button {
+                                            if selectedChildren.count == allMemberNames.count {
+                                                selectedChildren = []
+                                            } else {
+                                                selectedChildren = Set(allMemberNames)
+                                            }
+                                        } label: {
+                                            Text(selectedChildren.count == allMemberNames.count ? "Deselect All" : "Select All")
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(calmAccent)
                                         }
-                                    } label: {
-                                        Text(selectedChildren.count == allMemberNames.count ? "Deselect All" : "Select All")
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(calmAccent)
-                                    }
-                                }
-                            }
-
-                            VStack(spacing: 8) {
-                                childChip(name: authManager.userName, isSelected: selectedChildren.contains(authManager.userName)) {
-                                    toggleMember(authManager.userName)
-                                }
-
-                                if let parent = otherParent {
-                                    childChip(name: parent.name, isSelected: selectedChildren.contains(parent.name)) {
-                                        toggleMember(parent.name)
                                     }
                                 }
 
-                                ForEach(children) { child in
-                                    childChip(name: child.name, isSelected: selectedChildren.contains(child.name)) {
-                                        toggleMember(child.name)
+                                VStack(spacing: 8) {
+                                    childChip(name: authManager.userName, isSelected: selectedChildren.contains(authManager.userName)) {
+                                        toggleMember(authManager.userName)
+                                    }
+
+                                    if let parent = otherParent {
+                                        childChip(name: parent.name, isSelected: selectedChildren.contains(parent.name)) {
+                                            toggleMember(parent.name)
+                                        }
+                                    }
+
+                                    ForEach(children) { child in
+                                        childChip(name: child.name, isSelected: selectedChildren.contains(child.name)) {
+                                            toggleMember(child.name)
+                                        }
                                     }
                                 }
                             }
@@ -4740,8 +4776,10 @@ struct AddTaskView: View {
                     VStack(spacing: 12) {
                         smartRow(icon: "pencil.line", label: "Task", value: parsed.name.isEmpty ? "—" : parsed.name)
                         smartRow(icon: "calendar", label: "Date", value: parsed.hasDate ? parsed.targetDate.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : "Not detected — defaults to now")
-                        smartRow(icon: "person.fill", label: "Assign To", value: parsed.assignedTo.isEmpty ? (preselectedChild.isEmpty ? authManager.userName : preselectedChild) : parsed.assignedTo)
-                        smartRow(icon: "star.circle.fill", label: "Reward", value: parsed.reward > 0 ? "\(parsed.reward) coins" : "None")
+                        if authManager.role != "individual" {
+                            smartRow(icon: "person.fill", label: "Assign To", value: parsed.assignedTo.isEmpty ? (preselectedChild.isEmpty ? authManager.userName : preselectedChild) : parsed.assignedTo)
+                            smartRow(icon: "star.circle.fill", label: "Reward", value: parsed.reward > 0 ? "\(parsed.reward) coins" : "None")
+                        }
                         smartRow(icon: "repeat", label: "Recurrence", value: parsed.recurrence.rawValue)
                     }
                     .padding(12)
@@ -5394,123 +5432,125 @@ struct EditTaskView: View {
                             .disabled(!canEdit)
                         }
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Reward (coins)")
-                                .font(.caption)
-                                .foregroundStyle(.primary.opacity(0.5))
-
-                            HStack(spacing: 10) {
-                                Image(systemName: "star.circle.fill")
-                                    .foregroundStyle(.yellow)
-
-                                TextField("0", text: $rewardText)
-                                    .font(.body)
-                                    .foregroundStyle(.primary)
-                                    .keyboardType(.decimalPad)
-                                    .disabled(!canEdit)
-                            }
-                            .padding(14)
-                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
-                            )
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle(isOn: $includeGift) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "gift.fill")
-                                        .foregroundStyle(.pink)
-                                    Text("Surprise Gift")
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                }
-                            }
-                            .tint(.pink)
-                            .padding(14)
-                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
-                            )
-                            .disabled(!canEdit)
-
-                            if includeGift {
-                                let assigneeWishes = allWishListItems.filter { $0.ownerName == selectedChild }
-
-                                if !assigneeWishes.isEmpty {
-                                    Text("Pick from wish list")
-                                        .font(.caption)
-                                        .foregroundStyle(.primary.opacity(0.5))
-
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 8) {
-                                            ForEach(assigneeWishes) { wish in
-                                                Button {
-                                                    giftText = wish.name
-                                                } label: {
-                                                    HStack(spacing: 6) {
-                                                        Image(systemName: "star.fill")
-                                                            .font(.system(size: 10))
-                                                            .foregroundStyle(.yellow)
-                                                        Text(wish.name)
-                                                            .font(.caption.weight(.medium))
-                                                            .foregroundStyle(giftText == wish.name ? .white : .primary)
-                                                    }
-                                                    .padding(.horizontal, 12)
-                                                    .padding(.vertical, 8)
-                                                    .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Text("Or type a custom gift")
+                        if authManager.role != "individual" {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Reward (coins)")
                                     .font(.caption)
                                     .foregroundStyle(.primary.opacity(0.5))
 
-                                TextField("e.g. New shoes, Movie of choice", text: $giftText)
-                                    .font(.body)
-                                    .foregroundStyle(.primary)
-                                    .padding(14)
-                                    .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
-                                    )
-                                    .disabled(!canEdit)
-                            }
-                        }
+                                HStack(spacing: 10) {
+                                    Image(systemName: "star.circle.fill")
+                                        .foregroundStyle(.yellow)
 
-                        editTransportPicker
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Assign To")
-                                .font(.caption)
-                                .foregroundStyle(.primary.opacity(0.5))
-
-                            VStack(spacing: 8) {
-                                editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
-                                    selectedChild = authManager.userName
+                                    TextField("0", text: $rewardText)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .keyboardType(.decimalPad)
+                                        .disabled(!canEdit)
                                 }
+                                .padding(14)
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                                )
+                            }
 
-                                if let parent = otherParent {
-                                    editChildChip(name: parent.name, isSelected: selectedChild == parent.name) {
-                                        selectedChild = parent.name
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle(isOn: $includeGift) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "gift.fill")
+                                            .foregroundStyle(.pink)
+                                        Text("Surprise Gift")
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
                                     }
                                 }
+                                .tint(.pink)
+                                .padding(14)
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                                )
+                                .disabled(!canEdit)
 
-                                ForEach(children) { child in
-                                    editChildChip(name: child.name, isSelected: selectedChild == child.name) {
-                                        selectedChild = child.name
+                                if includeGift {
+                                    let assigneeWishes = allWishListItems.filter { $0.ownerName == selectedChild }
+
+                                    if !assigneeWishes.isEmpty {
+                                        Text("Pick from wish list")
+                                            .font(.caption)
+                                            .foregroundStyle(.primary.opacity(0.5))
+
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 8) {
+                                                ForEach(assigneeWishes) { wish in
+                                                    Button {
+                                                        giftText = wish.name
+                                                    } label: {
+                                                        HStack(spacing: 6) {
+                                                            Image(systemName: "star.fill")
+                                                                .font(.system(size: 10))
+                                                                .foregroundStyle(.yellow)
+                                                            Text(wish.name)
+                                                                .font(.caption.weight(.medium))
+                                                                .foregroundStyle(giftText == wish.name ? .white : .primary)
+                                                        }
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 8)
+                                                        .background(giftText == wish.name ? .pink : .primary.opacity(0.15), in: Capsule())
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text("Or type a custom gift")
+                                        .font(.caption)
+                                        .foregroundStyle(.primary.opacity(0.5))
+
+                                    TextField("e.g. New shoes, Movie of choice", text: $giftText)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .padding(14)
+                                        .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .strokeBorder(.pink.opacity(0.3), lineWidth: 1)
+                                        )
+                                        .disabled(!canEdit)
+                                }
+                            }
+
+                            editTransportPicker
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Assign To")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+
+                                VStack(spacing: 8) {
+                                    editChildChip(name: authManager.userName, isSelected: selectedChild == authManager.userName || selectedChild.isEmpty) {
+                                        selectedChild = authManager.userName
+                                    }
+
+                                    if let parent = otherParent {
+                                        editChildChip(name: parent.name, isSelected: selectedChild == parent.name) {
+                                            selectedChild = parent.name
+                                        }
+                                    }
+
+                                    ForEach(children) { child in
+                                        editChildChip(name: child.name, isSelected: selectedChild == child.name) {
+                                            selectedChild = child.name
+                                        }
                                     }
                                 }
                             }
+                            .disabled(!canEdit)
                         }
-                        .disabled(!canEdit)
 
                         if task.isOpen && task.isPastDue, let onMarkMissed {
                             Button {
