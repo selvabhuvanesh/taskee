@@ -339,6 +339,7 @@ struct ContentView: View {
     @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
     @State private var showSwitchRoleConfirm = false
+    @State private var showFamilySetup = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -803,7 +804,11 @@ struct ContentView: View {
                             }
                             Divider()
                             Button {
-                                showSwitchRoleConfirm = true
+                                if isIndividual {
+                                    showFamilySetup = true
+                                } else {
+                                    showSwitchRoleConfirm = true
+                                }
                             } label: {
                                 if isIndividual {
                                     Label("Switch to Family Mode", systemImage: "person.3.fill")
@@ -932,19 +937,18 @@ struct ContentView: View {
             } message: {
                 Text("\(reminderSentChildName) has been reminded about today's tasks.")
             }
-            .alert(isIndividual ? "Switch to Family Mode?" : "Switch to Individual Mode?", isPresented: $showSwitchRoleConfirm) {
+            .alert("Switch to Individual Mode?", isPresented: $showSwitchRoleConfirm) {
                 Button("Switch", role: .destructive) {
                     withAnimation {
-                        authManager.role = isIndividual ? "parent" : "individual"
+                        authManager.role = "individual"
                     }
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                if isIndividual {
-                    Text("Family mode enables coins, gifts, family chat, and multi-member task assignment.")
-                } else {
-                    Text("Individual mode hides family features like coins, gifts, and family chat for a simpler experience.")
-                }
+                Text("Individual mode hides family features like coins, gifts, and family chat for a simpler experience. You can switch back anytime.")
+            }
+            .sheet(isPresented: $showFamilySetup) {
+                FamilySetupSheet(theme: parentTheme)
             }
             .modifier(ParentExpandedTaskAlerts(
                 taskToDelete: $taskToDelete,
@@ -6542,6 +6546,252 @@ struct ParentOnboardingView: View {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Family Setup Sheet (Individual → Family)
+
+struct FamilySetupSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    @Query private var allMembers: [FamilyMember]
+    var theme: ChildTheme
+
+    @State private var joinExisting = false
+    @State private var inviteCode = ""
+    @State private var isValidating = false
+    @State private var showInvalidCode = false
+    @State private var showCloudUnavailable = false
+    @State private var showAlreadyHasFamily = false
+    @State private var existingFamilyCode = ""
+    @State private var showFamilyFull = false
+
+    private var isFormValid: Bool {
+        if joinExisting {
+            return inviteCode.trimmingCharacters(in: .whitespaces).count >= 6
+        }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(calmAccent)
+
+                        Text("Switch to Family Mode")
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+
+                        Text("Create a new family or join an existing one. Your tasks will carry over.")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+
+                        VStack(spacing: 12) {
+                            Button {
+                                withAnimation(.snappy) { joinExisting = false }
+                            } label: {
+                                HStack {
+                                    Image(systemName: joinExisting ? "circle" : "checkmark.circle.fill")
+                                        .foregroundStyle(joinExisting ? .white.opacity(0.3) : calmAccent)
+                                    Text("Create New Family")
+                                        .foregroundStyle(.white)
+                                    Spacer()
+                                }
+                                .font(.subheadline)
+                                .padding(12)
+                                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                            }
+
+                            Button {
+                                withAnimation(.snappy) { joinExisting = true }
+                            } label: {
+                                HStack {
+                                    Image(systemName: joinExisting ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(joinExisting ? calmAccent : .white.opacity(0.3))
+                                    Text("Join Existing Family")
+                                        .foregroundStyle(.white)
+                                    Spacer()
+                                }
+                                .font(.subheadline)
+                                .padding(12)
+                                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+
+                        if joinExisting {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Family Invite Code")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.5))
+
+                                TextField("e.g. ABC123", text: $inviteCode)
+                                    .font(.body)
+                                    .foregroundStyle(.white)
+                                    .textInputAutocapitalization(.characters)
+                                    .padding(14)
+                                    .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                        }
+
+                        Button {
+                            switchToFamily()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isValidating {
+                                    ProgressView().tint(.white)
+                                }
+                                Text(joinExisting ? "Join Family" : "Create Family")
+                            }
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                isFormValid && !isValidating
+                                    ? AnyShapeStyle(calmAccent)
+                                    : AnyShapeStyle(.white.opacity(0.1)),
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+                            .foregroundStyle(.white)
+                        }
+                        .disabled(!isFormValid || isValidating)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 32)
+                }
+            }
+            .navigationTitle("Family Setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+            .alert("Invalid Family Code", isPresented: $showInvalidCode) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("No family exists with that invite code. Please check the code and try again.")
+            }
+            .alert("Connection Error", isPresented: $showCloudUnavailable) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(cloudKitManager.lastSyncError ?? "Unable to connect. Please check your internet connection and try again.")
+            }
+            .alert("Family Already Exists", isPresented: $showAlreadyHasFamily) {
+                Button("Use Existing Family") {
+                    completeSwitch(code: existingFamilyCode, isNew: false)
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("You already have a family with code \(existingFamilyCode). Would you like to use it?")
+            }
+            .alert("Family Full", isPresented: $showFamilyFull) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("This family has reached the maximum number of members (\(subscriptionManager.maxMembers)) for the current plan.")
+            }
+        }
+    }
+
+    private func switchToFamily() {
+        if joinExisting {
+            isValidating = true
+            Task {
+                let result = await cloudKitManager.validateFamilyCode(inviteCode.uppercased())
+                switch result {
+                case .valid:
+                    let count = await cloudKitManager.memberCount(familyCode: inviteCode.uppercased())
+                    guard count < subscriptionManager.maxMembers else {
+                        isValidating = false
+                        showFamilyFull = true
+                        return
+                    }
+                    completeSwitch(code: inviteCode.uppercased(), isNew: false)
+                case .invalid:
+                    isValidating = false
+                    showInvalidCode = true
+                case .cloudUnavailable:
+                    isValidating = false
+                    showCloudUnavailable = true
+                }
+            }
+        } else {
+            isValidating = true
+            Task {
+                if let existing = await cloudKitManager.familyAlreadyExists(appleUserID: authManager.appleUserID) {
+                    isValidating = false
+                    existingFamilyCode = existing
+                    showAlreadyHasFamily = true
+                    return
+                }
+                authManager.generateFamilyCode()
+                let code = authManager.familyCode
+                let saved = await cloudKitManager.registerFamily(code: code, createdBy: authManager.userName, appleUserID: authManager.appleUserID)
+                if saved {
+                    completeSwitch(code: code, isNew: true)
+                } else {
+                    isValidating = false
+                    showCloudUnavailable = true
+                }
+            }
+        }
+    }
+
+    private func completeSwitch(code: String, isNew: Bool) {
+        let member = FamilyMember(
+            name: authManager.userName,
+            memberRole: "parent",
+            avatar: authManager.avatar,
+            appleUserID: authManager.appleUserID
+        )
+        modelContext.insert(member)
+
+        Task {
+            let pushed = await cloudKitManager.pushMember(member, familyCode: code)
+            guard pushed else {
+                modelContext.delete(member)
+                isValidating = false
+                showCloudUnavailable = true
+                return
+            }
+
+            if isNew {
+                await cloudKitManager.createFamilyZone(familyCode: code)
+            } else {
+                await cloudKitManager.ensureFamilyZoneAccess(familyCode: code, appleUserID: authManager.appleUserID)
+                await cloudKitManager.syncAll(context: modelContext, familyCode: code)
+            }
+
+            for task in allTasks where task.assignedTo == authManager.userName {
+                await cloudKitManager.pushTask(task, familyCode: code)
+            }
+
+            if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: code) {
+                subscriptionManager.setFamilyTier(familyTier)
+            }
+
+            await cloudKitManager.setupSubscriptions(familyCode: code, appleUserID: authManager.appleUserID, role: "parent")
+
+            authManager.role = "parent"
+            authManager.familyCode = code
+            isValidating = false
+            dismiss()
+        }
     }
 }
 
