@@ -341,6 +341,7 @@ struct ContentView: View {
     @State private var showSwitchRoleConfirm = false
     @State private var showFamilySetup = false
     @State private var isSwitchingToFamily = false
+    @State private var showWeeklyPulse = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -738,6 +739,13 @@ struct ContentView: View {
                                 }
                         }
 
+                        Button {
+                            showWeeklyPulse = true
+                        } label: {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.subheadline)
+                        }
+
                         if !isIndividual {
                             Button {
                                 showingChildren = true
@@ -868,6 +876,15 @@ struct ContentView: View {
             }
             .onAppear {
                 refreshUnreadCount()
+            }
+            .sheet(isPresented: $showWeeklyPulse) {
+                WeeklyPulseView(
+                    allTasks: tasks,
+                    allMembers: allMembers.filter { !$0.isChild || $0.isAccepted },
+                    currentUserName: authManager.userName,
+                    isIndividual: isIndividual,
+                    theme: parentTheme
+                )
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
@@ -6562,6 +6579,383 @@ struct ParentOnboardingView: View {
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Weekly Pulse View
+
+struct WeeklyPulseView: View {
+    @Environment(\.dismiss) private var dismiss
+    let allTasks: [Item]
+    let allMembers: [FamilyMember]
+    let currentUserName: String
+    let isIndividual: Bool
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    private let calendar = Calendar.current
+    private let today = Calendar.current.startOfDay(for: Date())
+
+    private var startOfPastWeek: Date {
+        calendar.date(byAdding: .day, value: -7, to: today)!
+    }
+
+    private var endOfUpcomingWeek: Date {
+        calendar.date(byAdding: .day, value: 7, to: today)!
+    }
+
+    private var pastWeekTasks: [Item] {
+        allTasks.filter {
+            let d = calendar.startOfDay(for: $0.targetDate)
+            return d >= startOfPastWeek && d < today
+        }
+    }
+
+    private var upcomingWeekTasks: [Item] {
+        allTasks.filter {
+            let d = calendar.startOfDay(for: $0.targetDate)
+            return d >= today && d < endOfUpcomingWeek
+        }
+    }
+
+    private var pastCompleted: Int { pastWeekTasks.filter { $0.isApproved }.count }
+    private var pastMissed: Int { pastWeekTasks.filter { $0.isMissed }.count }
+    private var pastCancelled: Int { pastWeekTasks.filter { $0.isCancelled }.count }
+    private var pastTotal: Int { pastWeekTasks.count }
+    private var completionRate: Double {
+        guard pastTotal > 0 else { return 0 }
+        return Double(pastCompleted) / Double(pastTotal)
+    }
+    private var pastCoinsEarned: Int {
+        pastWeekTasks.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+    }
+
+    private var bestDay: (name: String, count: Int)? {
+        let days = (-7 ..< 0).map { calendar.date(byAdding: .day, value: $0, to: today)! }
+        let best = days.map { day -> (String, Int) in
+            let dayStart = calendar.startOfDay(for: day)
+            let count = pastWeekTasks.filter {
+                calendar.startOfDay(for: $0.targetDate) == dayStart && $0.isApproved
+            }.count
+            let name = day.formatted(.dateTime.weekday(.abbreviated))
+            return (name, count)
+        }.max { $0.1 < $1.1 }
+        guard let best, best.1 > 0 else { return nil }
+        return best
+    }
+
+    private var mvp: (name: String, count: Int)? {
+        guard !isIndividual else { return nil }
+        let members = Set(pastWeekTasks.map { $0.assignedTo }).filter { !$0.isEmpty }
+        let scores = members.map { name -> (String, Int) in
+            let count = pastWeekTasks.filter { $0.assignedTo == name && $0.isApproved }.count
+            return (name, count)
+        }
+        guard let top = scores.max(by: { $0.1 < $1.1 }), top.1 > 0 else { return nil }
+        return top
+    }
+
+    private func upcomingDays() -> [(date: Date, label: String, shortLabel: String, tasks: [Item])] {
+        (0..<7).map { offset in
+            let date = calendar.date(byAdding: .day, value: offset, to: today)!
+            let dayStart = calendar.startOfDay(for: date)
+            let dayTasks = upcomingWeekTasks.filter { calendar.startOfDay(for: $0.targetDate) == dayStart }
+            let label = offset == 0 ? "Today" : date.formatted(.dateTime.weekday(.wide))
+            let shortLabel = offset == 0 ? "Today" : date.formatted(.dateTime.weekday(.abbreviated))
+            return (date, label, shortLabel, dayTasks)
+        }
+    }
+
+    private func loadLevel(_ count: Int) -> (label: String, color: Color) {
+        switch count {
+        case 0: return ("Free", .gray)
+        case 1...3: return ("Light", .green)
+        case 4...6: return ("Moderate", .yellow)
+        default: return ("Heavy", .red)
+        }
+    }
+
+    private func generateInsights() -> [(icon: String, text: String, color: Color)] {
+        var insights: [(String, String, Color)] = []
+        let days = upcomingDays()
+
+        for day in days {
+            if day.tasks.count >= 6 {
+                insights.append(("flame.fill", "\(day.label) looks packed — \(day.tasks.count) tasks scheduled.", .red))
+            }
+        }
+
+        for day in days {
+            let sorted = day.tasks.sorted { $0.targetDate < $1.targetDate }
+            for i in 0..<sorted.count {
+                for j in (i+1)..<sorted.count {
+                    let gap = sorted[j].targetDate.timeIntervalSince(sorted[i].targetDate)
+                    if gap >= 0 && gap < 30 * 60 {
+                        insights.append(("clock.badge.exclamationmark.fill",
+                            "\(day.label): \"\(sorted[i].name)\" and \"\(sorted[j].name)\" are within 30 min of each other.",
+                            .orange))
+                        break
+                    }
+                }
+                if insights.count > 6 { break }
+            }
+        }
+
+        if !isIndividual {
+            let members = Set(upcomingWeekTasks.compactMap { $0.assignedTo.isEmpty ? nil : $0.assignedTo })
+            if members.count >= 2 {
+                let counts = members.map { name in (name, upcomingWeekTasks.filter { $0.assignedTo == name }.count) }
+                if let most = counts.max(by: { $0.1 < $1.1 }),
+                   let least = counts.min(by: { $0.1 < $1.1 }),
+                   most.1 > 0 && least.1 >= 0 && most.1 >= least.1 * 2 && most.1 - least.1 >= 4 {
+                    insights.append(("scale.3d", "\(most.0) has \(most.1) tasks vs \(least.0)'s \(least.1) — consider rebalancing.", .blue))
+                }
+            }
+        }
+
+        if !isIndividual {
+            let members = Set(pastWeekTasks.compactMap { $0.assignedTo.isEmpty ? nil : $0.assignedTo })
+            for name in members {
+                let pastMissedCount = pastWeekTasks.filter { $0.assignedTo == name && $0.isMissed }.count
+                let upcomingCount = upcomingWeekTasks.filter { $0.assignedTo == name }.count
+                if pastMissedCount >= 3 && upcomingCount >= 5 {
+                    insights.append(("exclamationmark.triangle.fill",
+                        "\(name) missed \(pastMissedCount) last week and has \(upcomingCount) due ahead — may need support.",
+                        .red))
+                }
+            }
+            for name in members {
+                let pastDone = pastWeekTasks.filter { $0.assignedTo == name && $0.isApproved }.count
+                let pastPersonTotal = pastWeekTasks.filter { $0.assignedTo == name }.count
+                let upcomingCount = upcomingWeekTasks.filter { $0.assignedTo == name }.count
+                if pastPersonTotal >= 3 && pastDone == pastPersonTotal && upcomingCount > 0 {
+                    insights.append(("flame.fill", "\(name) had a perfect week! \(upcomingCount) tasks lined up to keep the streak.", .green))
+                }
+            }
+        } else {
+            if pastTotal >= 3 && pastCompleted == pastTotal {
+                let upcomingCount = upcomingWeekTasks.count
+                if upcomingCount > 0 {
+                    insights.append(("flame.fill", "Perfect week! \(upcomingCount) tasks lined up to keep the streak.", .green))
+                }
+            } else if pastMissed >= 3 {
+                let upcomingCount = upcomingWeekTasks.count
+                if upcomingCount >= 5 {
+                    insights.append(("exclamationmark.triangle.fill",
+                        "You missed \(pastMissed) tasks last week and have \(upcomingCount) ahead — plan carefully.",
+                        .orange))
+                }
+            }
+        }
+
+        let emptyDays = days.filter { $0.tasks.isEmpty && $0.date != today }
+        if !emptyDays.isEmpty && emptyDays.count <= 3 {
+            let names = emptyDays.map { $0.shortLabel }.joined(separator: ", ")
+            insights.append(("sun.max.fill", "\(names) \(emptyDays.count == 1 ? "is" : "are") free — enjoy the break or plan something.", .cyan))
+        }
+
+        let expiringRecurring = upcomingWeekTasks.filter { $0.isRecurring }.map { $0.name }
+        let uniqueExpiring = Set(expiringRecurring)
+        if uniqueExpiring.count > 0 {
+            let lastDates = uniqueExpiring.compactMap { name -> (String, Date)? in
+                let latest = allTasks.filter { $0.name == name && $0.isRecurring }.max(by: { $0.targetDate < $1.targetDate })
+                guard let latest, latest.targetDate < endOfUpcomingWeek else { return nil }
+                return (name, latest.targetDate)
+            }
+            if !lastDates.isEmpty {
+                insights.append(("repeat", "\(lastDates.count) recurring task\(lastDates.count == 1 ? "" : "s") ending this week — extend or let them expire.", .purple))
+            }
+        }
+
+        if insights.isEmpty && upcomingWeekTasks.isEmpty {
+            insights.append(("tray.fill", "No tasks scheduled this week — time to plan ahead!", .gray))
+        } else if insights.isEmpty {
+            insights.append(("checkmark.seal.fill", "Week looks well balanced — you're all set!", .green))
+        }
+
+        return insights
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                ScrollView {
+                    VStack(spacing: 24) {
+                        pastWeekSection
+                        upcomingHeatmap
+                        insightsSection
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                }
+            }
+            .navigationTitle("Weekly Pulse")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+    }
+
+    private var pastWeekSection: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "arrow.counterclockwise")
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Past 7 Days")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+
+            HStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .stroke(.white.opacity(0.1), lineWidth: 8)
+                        .frame(width: 80, height: 80)
+                    Circle()
+                        .trim(from: 0, to: completionRate)
+                        .stroke(completionRate >= 0.8 ? .green : completionRate >= 0.5 ? .yellow : .red, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .frame(width: 80, height: 80)
+                        .rotationEffect(.degrees(-90))
+                    Text("\(Int(completionRate * 100))%")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                .padding(.trailing, 20)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    statRow(icon: "checkmark.circle.fill", label: "Completed", value: "\(pastCompleted)", color: .green)
+                    statRow(icon: "xmark.circle.fill", label: "Missed", value: "\(pastMissed)", color: .red)
+                    statRow(icon: "minus.circle.fill", label: "Cancelled", value: "\(pastCancelled)", color: .gray)
+                    if !isIndividual && pastCoinsEarned > 0 {
+                        statRow(icon: "star.circle.fill", label: "Coins earned", value: "\(pastCoinsEarned)", color: .yellow)
+                    }
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 16) {
+                if let best = bestDay {
+                    infoChip(icon: "trophy.fill", text: "Best: \(best.name) (\(best.count))", color: .yellow)
+                }
+                if let mvp = mvp {
+                    infoChip(icon: "star.fill", text: "MVP: \(mvp.name) (\(mvp.count))", color: .orange)
+                }
+                Spacer()
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private var upcomingHeatmap: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "arrow.forward")
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Week Ahead")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+
+            HStack(spacing: 6) {
+                ForEach(upcomingDays(), id: \.date) { day in
+                    let level = loadLevel(day.tasks.count)
+                    VStack(spacing: 6) {
+                        Text(day.shortLabel)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(level.color.opacity(day.tasks.isEmpty ? 0.15 : 0.35))
+                                .frame(height: 48)
+                            Text("\(day.tasks.count)")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(day.tasks.isEmpty ? .white.opacity(0.3) : .white)
+                        }
+
+                        Text(level.label)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(level.color.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private var insightsSection: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundStyle(.yellow)
+                Text("Insights")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+
+            ForEach(Array(generateInsights().enumerated()), id: \.offset) { _, insight in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: insight.icon)
+                        .font(.system(size: 16))
+                        .foregroundStyle(insight.color)
+                        .frame(width: 24)
+
+                    Text(insight.text)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(insight.color.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(insight.color.opacity(0.2), lineWidth: 1))
+            }
+        }
+        .padding(16)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private func statRow(icon: String, label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func infoChip(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(color)
+            Text(text)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.15), in: Capsule())
     }
 }
 
