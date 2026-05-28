@@ -343,6 +343,7 @@ struct ContentView: View {
     @State private var isSwitchingToFamily = false
     @State private var showWeeklyPulse = false
     @State private var showAIAssistant = false
+    @AppStorage("isAIMode") private var isAIMode = true
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -486,6 +487,46 @@ struct ContentView: View {
     }
 
     var body: some View {
+        if isAIMode {
+            aiModeView
+        } else {
+            normalModeView
+        }
+    }
+
+    private var aiModeView: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: parentTheme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                AIAssistantView(allTasks: tasks, allMembers: allMembers, isIndividual: isIndividual, theme: parentTheme, isInline: true)
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        withAnimation { isAIMode = false }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Tasks")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.15), in: Capsule())
+                    }
+                }
+            }
+            .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, parentTheme.colorScheme)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var normalModeView: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(
@@ -682,7 +723,7 @@ struct ContentView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 Button {
-                    showAIAssistant = true
+                    withAnimation { isAIMode = true }
                 } label: {
                     Image(systemName: "sparkles")
                         .font(.system(size: 22, weight: .semibold))
@@ -907,9 +948,6 @@ struct ContentView: View {
                     isIndividual: isIndividual,
                     theme: parentTheme
                 )
-            }
-            .sheet(isPresented: $showAIAssistant) {
-                AIAssistantView(allTasks: tasks, allMembers: allMembers, isIndividual: isIndividual, theme: parentTheme)
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
@@ -3499,19 +3537,18 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                 }
             }
             .alert(
-                taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task",
+                "Delete Task?",
                 isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } })
             ) {
-                if let task = taskToDelete {
-                    Button("Delete", role: .destructive) {
-                        let taskID = task.id
-                        notificationManager.cancelTaskReminder(taskId: taskID)
-                        withAnimation { modelContext.delete(task) }
-                        try? modelContext.save()
-                        taskToDelete = nil
-                        Task { await cloudKitManager.deleteRemoteTasks([taskID]) }
+                Button("Delete", role: .destructive) {
+                    if let task = taskToDelete {
+                        deleteTask(task)
                     }
-                    Button("Cancel", role: .cancel) { taskToDelete = nil }
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            } message: {
+                if let task = taskToDelete {
+                    Text("Are you sure you want to delete \"\(task.name)\"?")
                 }
             }
             .alert(
@@ -3534,6 +3571,15 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                     }
                 )
             }
+    }
+
+    private func deleteTask(_ task: Item) {
+        let taskID = task.id
+        notificationManager.cancelTaskReminder(taskId: taskID)
+        withAnimation { modelContext.delete(task) }
+        try? modelContext.save()
+        taskToDelete = nil
+        Task { await cloudKitManager.deleteRemoteTask(taskID) }
     }
 
     @ViewBuilder

@@ -853,6 +853,7 @@ struct AIAssistantView: View {
     let allMembers: [FamilyMember]
     let isIndividual: Bool
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var isInline: Bool = false
 
     @State private var messages: [AIChatMessage] = []
     @State private var inputText = ""
@@ -892,9 +893,11 @@ struct AIAssistantView: View {
                             .foregroundStyle(.white.opacity(0.6))
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                if !isInline {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                            .foregroundStyle(.white)
+                    }
                 }
             }
             .onAppear {
@@ -1097,9 +1100,14 @@ struct AIAssistantView: View {
     // MARK: - Send & Process
 
     private func addGreeting() {
-        let greeting = isIndividual
-            ? "Hi \(authManager.userName)! 👋 I'm your task assistant. I can create, reschedule, cancel, or check on your tasks — just tell me what you need!\n\nFor example:\n• \"Add grocery shopping tomorrow 10am\"\n• \"What do I have today?\"\n• \"Move my tasks to Saturday\""
-            : "Hi \(authManager.userName)! 👋 I'm your family task assistant. I can create, reschedule, cancel, or check on tasks for anyone in the family.\n\nFor example:\n• \"Add homework for Arya tomorrow 5pm\"\n• \"What's Arya doing today?\"\n• \"How did the family do last week?\""
+        let greeting: String
+        if isIndividual {
+            greeting = "Hi \(authManager.userName)! 👋 I'm your task assistant. I can create, reschedule, cancel, or check on your tasks — just tell me what you need!\n\nFor example:\n• \"Add grocery shopping tomorrow 10am\"\n• \"What do I have today?\"\n• \"Move my tasks to Saturday\""
+        } else {
+            let childNames = allMembers.filter { $0.isChild }.map { $0.name }
+            let sampleName = childNames.first ?? authManager.userName
+            greeting = "Hi \(authManager.userName)! 👋 I'm your family task assistant. I can create, reschedule, cancel, or check on tasks for anyone in the family.\n\nFor example:\n• \"Add homework for \(sampleName) tomorrow 5pm\"\n• \"What's \(sampleName) doing today?\"\n• \"How did the family do last week?\""
+        }
         messages.append(AIChatMessage(role: .assistant, text: greeting))
         ChatMemory.save(messages)
     }

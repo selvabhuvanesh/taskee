@@ -52,6 +52,7 @@ struct ChildDashboardView: View {
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
     @State private var showAIAssistant = false
+    @AppStorage("isAIMode") private var isAIMode = true
     @State private var showFamilyProjects = false
     @State private var showWishList = false
     @Query private var shoppingItems: [ShoppingItem]
@@ -156,6 +157,46 @@ struct ChildDashboardView: View {
     }
 
     var body: some View {
+        if isAIMode {
+            childAIModeView
+        } else {
+            childNormalModeView
+        }
+    }
+
+    private var childAIModeView: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: childTheme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                AIAssistantView(allTasks: allTasks, allMembers: allMembers, isIndividual: false, theme: childTheme, isInline: true)
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        withAnimation { isAIMode = false }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Tasks")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.15), in: Capsule())
+                    }
+                }
+            }
+            .toolbarColorScheme(childTheme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, childTheme.colorScheme)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var childNormalModeView: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(
@@ -273,7 +314,7 @@ struct ChildDashboardView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 Button {
-                    showAIAssistant = true
+                    withAnimation { isAIMode = true }
                 } label: {
                     Image(systemName: "sparkles")
                         .font(.system(size: 22, weight: .semibold))
@@ -387,9 +428,6 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: childTheme)
-            }
-            .sheet(isPresented: $showAIAssistant) {
-                AIAssistantView(allTasks: allTasks, allMembers: allMembers, isIndividual: false, theme: childTheme)
             }
             .onAppear {
                 if ScreenshotHelper.isScreenshotMode && ScreenshotHelper.shouldOpenChat {
