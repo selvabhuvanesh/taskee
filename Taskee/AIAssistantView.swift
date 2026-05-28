@@ -12,7 +12,8 @@ import AVFoundation
 
 final class ClaudeAPIService: Sendable {
     static let shared = ClaudeAPIService()
-    private let model = "claude-sonnet-4-6"
+    static let sonnetModel = "claude-sonnet-4-6"
+    static let haikuModel = "claude-haiku-4-5-20251001"
     private let proxyURL = URL(string: "https://taskoot-ai-proxy.selvabhuvanesh.workers.dev")!
     private let appToken = "taskoot-app-2026"
 
@@ -43,7 +44,8 @@ final class ClaudeAPIService: Sendable {
         familyMembers: [String],
         currentUser: String,
         isIndividual: Bool,
-        tasksSummary: String
+        tasksSummary: String,
+        model: String = ClaudeAPIService.sonnetModel
     ) async throws -> ClaudeResponse {
         let systemPrompt = buildSystemPrompt(
             familyMembers: familyMembers,
@@ -1309,10 +1311,29 @@ struct AIAssistantView: View {
         }
     }
 
+    private func selectModel(for message: String) -> String {
+        let lower = message.lowercased()
+        let actionKeywords = ["create", "add", "schedule", "reschedule", "cancel", "delete", "remove",
+                              "assign", "update", "change", "move", "set", "mark", "complete", "done",
+                              "pick up", "unassign", "recurring"]
+        if actionKeywords.contains(where: { lower.contains($0) }) {
+            return ClaudeAPIService.sonnetModel
+        }
+        return ClaudeAPIService.haikuModel
+    }
+
     private func sendViaClaude(_ text: String) async {
         defer { isProcessing = false }
 
+        guard subscriptionManager.canSendAIMessage() else {
+            let remaining = subscriptionManager.maxAIMessagesPerMonth
+            messages.append(AIChatMessage(role: .assistant, text: "You've reached your monthly AI message limit (\(remaining) messages). Upgrade your plan for more."))
+            saveChat()
+            return
+        }
+
         let service = ClaudeAPIService.shared
+        let model = selectModel(for: text)
 
         let filtered = messages
             .filter { $0.action == nil || $0.action?.isExecuted == true || $0.action?.isCancelled == true }
@@ -1330,8 +1351,11 @@ struct AIAssistantView: View {
                 familyMembers: memberNames,
                 currentUser: authManager.userName,
                 isIndividual: isIndividual,
-                tasksSummary: tasksSummary
+                tasksSummary: tasksSummary,
+                model: model
             )
+
+            subscriptionManager.recordAIMessage()
 
             if let parsedAction = response.action {
                 let action = buildActionFromClaude(parsedAction)

@@ -100,6 +100,41 @@ final class SubscriptionManager {
         }
     }
 
+    var maxAIMessagesPerMonth: Int {
+        switch tier {
+        case .free:   return isTrialActive ? 30 : 0
+        case .family: return 200
+        case .pro:    return 1000
+        }
+    }
+
+    // MARK: - AI Message Tracking
+
+    private static let aiMessageKeyPrefix = "aiMessages-"
+
+    private func aiMonthKey() -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM"
+        return Self.aiMessageKeyPrefix + df.string(from: Date())
+    }
+
+    func aiMessagesUsedThisMonth() -> Int {
+        UserDefaults.standard.integer(forKey: aiMonthKey())
+    }
+
+    func aiMessagesRemaining() -> Int {
+        max(0, maxAIMessagesPerMonth - aiMessagesUsedThisMonth())
+    }
+
+    func canSendAIMessage() -> Bool {
+        aiMessagesUsedThisMonth() < maxAIMessagesPerMonth
+    }
+
+    func recordAIMessage() {
+        let key = aiMonthKey()
+        UserDefaults.standard.set(aiMessagesUsedThisMonth() + 1, forKey: key)
+    }
+
     // MARK: - Anti-Bot: Rate Limiting
 
     private var lastTaskCreated: Date = .distantPast
