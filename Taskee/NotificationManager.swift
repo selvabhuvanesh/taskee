@@ -112,7 +112,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     var isVoiceEnabled: Bool {
         get {
             if UserDefaults.standard.object(forKey: Self.voiceEnabledKey) == nil {
-                return true
+                return false
             }
             return UserDefaults.standard.bool(forKey: Self.voiceEnabledKey)
         }
@@ -133,6 +133,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func speakReminder(_ text: String) {
+        guard isVoiceEnabled else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.duckOthers])

@@ -8,6 +8,10 @@
 	<string>© 2026 FamiLogic LLC. All rights reserved.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Taskoot uses your photo library to let you choose a custom avatar for your profile.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Taskoot uses speech recognition to let you speak to the AI assistant instead of typing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Taskoot needs microphone access for voice input to the AI assistant.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

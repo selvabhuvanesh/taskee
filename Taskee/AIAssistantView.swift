@@ -5,6 +5,8 @@
 
 import SwiftUI
 import SwiftData
+import Speech
+import AVFoundation
 
 // MARK: - Claude API Service (via proxy)
 
@@ -124,19 +126,23 @@ final class ClaudeAPIService: Sendable {
     }
 
     private func parseResponse(_ text: String) -> ClaudeResponse {
-        var cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleanedText.hasPrefix("```json") {
-            cleanedText = String(cleanedText.dropFirst(7))
-        }
-        if cleanedText.hasPrefix("```") {
-            cleanedText = String(cleanedText.dropFirst(3))
-        }
-        if cleanedText.hasSuffix("```") {
-            cleanedText = String(cleanedText.dropLast(3))
-        }
-        cleanedText = cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var jsonText = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let data = cleanedText.data(using: .utf8),
+        // Strip markdown code blocks anywhere in the response
+        if let codeStart = jsonText.range(of: "```(?:json)?\\s*", options: .regularExpression),
+           let codeEnd = jsonText.range(of: "```", options: .backwards, range: codeStart.upperBound..<jsonText.endIndex) {
+            jsonText = String(jsonText[codeStart.upperBound..<codeEnd.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Find JSON object boundaries if text doesn't start with {
+        if !jsonText.hasPrefix("{"),
+           let start = jsonText.firstIndex(of: "{"),
+           let end = jsonText.lastIndex(of: "}") {
+            jsonText = String(jsonText[start...end])
+        }
+
+        guard let data = jsonText.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = json["message"] as? String else {
             return ClaudeResponse(message: text, action: nil)
@@ -840,6 +846,106 @@ struct TaskCommandParser {
     }
 }
 
+// MARK: - Speech Manager
+
+@Observable
+final class SpeechManager {
+    var isListening = false
+    var transcribedText = ""
+    private(set) var isAuthorized = false
+
+    private var speechRecognizer = SFSpeechRecognizer()
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var audioEngine = AVAudioEngine()
+    private let synthesizer = AVSpeechSynthesizer()
+
+    func startListening() {
+        if !isAuthorized {
+            SFSpeechRecognizer.requestAuthorization { [weak self] status in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.isAuthorized = (status == .authorized)
+                    if status == .authorized {
+                        self.beginRecording()
+                    }
+                }
+            }
+            return
+        }
+        beginRecording()
+    }
+
+    private func beginRecording() {
+        guard let speechRecognizer, speechRecognizer.isAvailable, !isListening else { return }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            return
+        }
+
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        guard let recognitionRequest else { return }
+        recognitionRequest.shouldReportPartialResults = true
+
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let result {
+                    self.transcribedText = result.bestTranscription.formattedString
+                }
+                if error != nil || (result?.isFinal ?? false) {
+                    self.stopListening()
+                }
+            }
+        }
+
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            isListening = true
+        } catch {
+            stopListening()
+        }
+    }
+
+    func stopListening() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        isListening = false
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    func speak(_ text: String) {
+        synthesizer.stopSpeaking(at: .immediate)
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(.playback, mode: .default, options: .duckOthers)
+        try? audioSession.setActive(true)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        synthesizer.speak(utterance)
+    }
+
+    func stopSpeaking() {
+        synthesizer.stopSpeaking(at: .immediate)
+    }
+}
+
 // MARK: - AI Assistant View
 
 struct AIAssistantView: View {
@@ -860,6 +966,8 @@ struct AIAssistantView: View {
     @State private var isProcessing = false
     @State private var pendingContext: PendingContext = .none
     @FocusState private var isInputFocused: Bool
+    @State private var speechManager = SpeechManager()
+    @State private var isVoiceOutputEnabled = false
 
     private var memberNames: [String] {
         var names = [authManager.userName]
@@ -893,6 +1001,18 @@ struct AIAssistantView: View {
                             .foregroundStyle(.white.opacity(0.6))
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isVoiceOutputEnabled.toggle()
+                        if !isVoiceOutputEnabled {
+                            speechManager.stopSpeaking()
+                        }
+                    } label: {
+                        Image(systemName: isVoiceOutputEnabled ? "speaker.wave.2.fill" : "speaker.slash")
+                            .font(.subheadline)
+                            .foregroundStyle(isVoiceOutputEnabled ? calmAccent : .white.opacity(0.6))
+                    }
+                }
                 if !isInline {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { dismiss() }
@@ -908,6 +1028,11 @@ struct AIAssistantView: View {
                     } else {
                         messages = restored
                     }
+                }
+            }
+            .onChange(of: messages.count) { _, _ in
+                if isVoiceOutputEnabled, let last = messages.last, last.role == .assistant {
+                    speechManager.speak(last.text)
                 }
             }
         }
@@ -1082,6 +1207,24 @@ struct AIAssistantView: View {
                 )
                 .focused($isInputFocused)
                 .onSubmit { sendMessage() }
+                .onChange(of: speechManager.transcribedText) { _, newText in
+                    if speechManager.isListening && !newText.isEmpty {
+                        inputText = newText
+                    }
+                }
+                .onChange(of: isInputFocused) { _, focused in
+                    if focused && speechManager.isListening {
+                        speechManager.stopListening()
+                    }
+                }
+
+            Button {
+                toggleListening()
+            } label: {
+                Image(systemName: speechManager.isListening ? "mic.fill" : "mic")
+                    .font(.system(size: 22))
+                    .foregroundStyle(speechManager.isListening ? .red : .white.opacity(0.6))
+            }
 
             Button {
                 sendMessage()
@@ -1116,7 +1259,19 @@ struct AIAssistantView: View {
         ChatMemory.save(messages)
     }
 
+    private func toggleListening() {
+        if speechManager.isListening {
+            speechManager.stopListening()
+        } else {
+            speechManager.transcribedText = ""
+            speechManager.startListening()
+        }
+    }
+
     private func sendMessage() {
+        if speechManager.isListening {
+            speechManager.stopListening()
+        }
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
 
