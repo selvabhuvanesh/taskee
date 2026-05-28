@@ -1,0 +1,6 @@
+name = "taskoot-ai-proxy"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+APP_TOKEN = "taskoot-app-2026"

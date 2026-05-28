@@ -5,53 +5,16 @@
 
 import SwiftUI
 import SwiftData
-import Security
 
-// MARK: - Keychain Helper
-
-private enum KeychainHelper: Sendable {
-    nonisolated static func save(_ value: String, for key: String) {
-        guard let data = value.data(using: .utf8) else { return }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecAttrService as String: "com.taskee.ai",
-            kSecValueData as String: data
-        ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    nonisolated static func load(for key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecAttrService as String: "com.taskee.ai",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-}
-
-// MARK: - Claude API Service
+// MARK: - Claude API Service (via proxy)
 
 final class ClaudeAPIService: Sendable {
     static let shared = ClaudeAPIService()
-    private let keychainKey = "claudeAPIKey"
     private let model = "claude-sonnet-4-6"
-    private let apiURL = URL(string: "https://api.anthropic.com/v1/messages")!
+    private let proxyURL = URL(string: "https://taskoot-ai-proxy.selvabhuvanesh.workers.dev")!
+    private let appToken = "taskoot-app-2026"
 
-    var hasAPIKey: Bool {
-        KeychainHelper.load(for: keychainKey) != nil
-    }
-
-    func storeAPIKey(_ key: String) {
-        KeychainHelper.save(key, for: keychainKey)
-    }
+    var hasAPIKey: Bool { true }
 
     struct ClaudeResponse {
         let message: String
@@ -76,10 +39,6 @@ final class ClaudeAPIService: Sendable {
         isIndividual: Bool,
         tasksSummary: String
     ) async throws -> ClaudeResponse {
-        guard let apiKey = KeychainHelper.load(for: keychainKey) else {
-            throw APIError.noKey
-        }
-
         let systemPrompt = buildSystemPrompt(
             familyMembers: familyMembers,
             currentUser: currentUser,
@@ -100,11 +59,10 @@ final class ClaudeAPIService: Sendable {
             "messages": apiMessages
         ]
 
-        var request = URLRequest(url: apiURL)
+        var request = URLRequest(url: proxyURL)
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "content-type")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 30
 
@@ -202,7 +160,7 @@ final class ClaudeAPIService: Sendable {
     }
 
     enum APIError: Error {
-        case noKey, httpError(Int, String), parseError
+        case httpError(Int, String), parseError
     }
 }
 
@@ -948,9 +906,6 @@ struct AIAssistantView: View {
                         messages = restored
                     }
                 }
-                if !ClaudeAPIService.shared.hasAPIKey {
-                    messages.append(AIChatMessage(role: .assistant, text: "No API key configured. Using offline mode. To enable Claude, go to Settings and add your Anthropic API key."))
-                }
             }
         }
     }
@@ -1172,11 +1127,6 @@ struct AIAssistantView: View {
 
         let service = ClaudeAPIService.shared
 
-        guard service.hasAPIKey else {
-            fallbackToRuleParser(text)
-            return
-        }
-
         let filtered = messages
             .filter { $0.action == nil || $0.action?.isExecuted == true || $0.action?.isCancelled == true }
         let history = filtered
@@ -1205,14 +1155,12 @@ struct AIAssistantView: View {
             saveChat()
         } catch let apiError as ClaudeAPIService.APIError {
             switch apiError {
-            case .noKey:
-                messages.append(AIChatMessage(role: .assistant, text: "API key not found. Please reconfigure."))
             case .httpError(let code, let body):
                 let detail = body.prefix(200)
-                messages.append(AIChatMessage(role: .assistant, text: "Claude API error (\(code)): \(detail)"))
+                messages.append(AIChatMessage(role: .assistant, text: "AI service error (\(code)): \(detail)"))
                 fallbackToRuleParser(text)
             case .parseError:
-                messages.append(AIChatMessage(role: .assistant, text: "Couldn't parse Claude's response. Using offline mode."))
+                messages.append(AIChatMessage(role: .assistant, text: "Couldn't parse response. Using offline mode."))
                 fallbackToRuleParser(text)
             }
             saveChat()
