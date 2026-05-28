@@ -36,6 +36,8 @@ struct TaskeeApp: App {
     @State private var hasCompletedInitialSetup = false
     @State private var showSplash = !ScreenshotHelper.isScreenshotMode
 
+    private static let currentSchemaVersion = 4
+
     var sharedModelContainer: ModelContainer = {
         if ScreenshotHelper.isScreenshotMode {
             return ScreenshotHelper.makeInMemoryContainer()
@@ -60,16 +62,16 @@ struct TaskeeApp: App {
             cloudKitDatabase: .none
         )
 
+        let savedVersion = UserDefaults.standard.integer(forKey: "schemaVersion")
+        if savedVersion != currentSchemaVersion {
+            deleteStoreFiles()
+            UserDefaults.standard.set(currentSchemaVersion, forKey: "schemaVersion")
+        }
+
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            if let appSupport = urls.first {
-                let storeURL = appSupport.appendingPathComponent("default.store")
-                try? FileManager.default.removeItem(at: storeURL)
-                try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
-                try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
-            }
+            deleteStoreFiles()
             do {
                 return try ModelContainer(for: schema, configurations: [modelConfiguration])
             } catch {
@@ -79,40 +81,50 @@ struct TaskeeApp: App {
         }
     }()
 
+    private static func deleteStoreFiles() {
+        let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        guard let appSupport = urls.first else { return }
+        let storeURL = appSupport.appendingPathComponent("default.store")
+        try? FileManager.default.removeItem(at: storeURL)
+        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
+        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
+    }
+
     var body: some Scene {
         WindowGroup {
-            Group {
-                if showSplash {
-                    SplashView()
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                withAnimation(.easeOut(duration: 0.5)) { showSplash = false }
+            ZStack {
+                Group {
+                    if !authManager.isLoggedIn {
+                        LoginView()
+                    } else if isCheckingExistingUser {
+                        ZStack {
+                            AppBackground()
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(1.2)
+                                Text("Loading your profile...")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.6))
                             }
                         }
-                } else if !authManager.isLoggedIn {
-                    LoginView()
-                } else if isCheckingExistingUser {
-                    ZStack {
-                        AppBackground()
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(1.2)
-                            Text("Loading your profile...")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.6))
+                    } else if authManager.role.isEmpty {
+                        RoleSelectionView()
+                    } else if authManager.role == "parent" || authManager.role == "individual" {
+                        ContentView()
+                    } else if authManager.isPendingApproval {
+                        PendingApprovalView(isCheckingAcceptance: $isCheckingAcceptance) {
+                            Task { await checkChildAcceptance() }
                         }
+                    } else {
+                        ChildDashboardView()
                     }
-                } else if authManager.role.isEmpty {
-                    RoleSelectionView()
-                } else if authManager.role == "parent" || authManager.role == "individual" {
-                    ContentView()
-                } else if authManager.isPendingApproval {
-                    PendingApprovalView(isCheckingAcceptance: $isCheckingAcceptance) {
-                        Task { await checkChildAcceptance() }
-                    }
-                } else {
-                    ChildDashboardView()
+                }
+
+                if showSplash {
+                    SplashView()
+                        .ignoresSafeArea()
+                        .zIndex(1)
                 }
             }
             .environment(authManager)
@@ -125,47 +137,48 @@ struct TaskeeApp: App {
                     showSplash = false
                     return
                 }
-                notificationManager.requestPermission()
-                SoundManager.shared.installNotificationSound()
-                notificationManager.cleanupOrphanedVoiceFiles()
-                UNUserNotificationCenter.current().setBadgeCount(0)
-                notificationManager.onPickupAcknowledged = { childName in
-                    acknowledgePickup(childName: childName)
-                }
-                Task {
-                    async let tier: Void = subscriptionManager.refreshTier()
-                    async let products: Void = subscriptionManager.loadProducts()
-                    _ = await (tier, products)
-                    if subscriptionManager.tier != .free && !authManager.familyCode.isEmpty {
-                        await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                guard !ScreenshotHelper.isScreenshotMode else { return }
-                UNUserNotificationCenter.current().setBadgeCount(0)
-                guard !authManager.familyCode.isEmpty, hasCompletedInitialSetup else { return }
-                Task {
-                    await ensureZoneAndSync()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation(.easeOut(duration: 0.5)) { showSplash = false }
                 }
             }
             .task {
                 guard !ScreenshotHelper.isScreenshotMode else { return }
+
+                notificationManager.requestPermission()
+                notificationManager.onPickupAcknowledged = { childName in
+                    acknowledgePickup(childName: childName)
+                }
+
                 subscriptionManager.onTierChanged = { newTier in
                     guard !authManager.familyCode.isEmpty else { return }
                     Task {
                         await cloudKitManager.pushFamilyTier(newTier.rawValue, familyCode: authManager.familyCode)
                     }
                 }
-                await subscriptionManager.listenForTransactions()
-            }
-            .task {
-                guard !ScreenshotHelper.isScreenshotMode else { return }
+                Task { await subscriptionManager.listenForTransactions() }
+
+                await subscriptionManager.refreshTier()
+                await subscriptionManager.loadProducts()
+                if subscriptionManager.tier != .free && !authManager.familyCode.isEmpty {
+                    await cloudKitManager.pushFamilyTier(subscriptionManager.tier.rawValue, familyCode: authManager.familyCode)
+                }
+
                 await cloudKitManager.checkAvailability()
                 await restoreUserIfNeeded()
 
+                SoundManager.shared.installNotificationSound()
+                notificationManager.cleanupOrphanedVoiceFiles()
+
                 guard !authManager.familyCode.isEmpty, !hasCompletedInitialSetup else { return }
                 await performInitialSync(familyCode: authManager.familyCode)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                guard !ScreenshotHelper.isScreenshotMode else { return }
+                guard !showSplash else { return }
+                guard !authManager.familyCode.isEmpty, hasCompletedInitialSetup else { return }
+                Task {
+                    await ensureZoneAndSync()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .cloudKitDataChanged)) { _ in
                 guard !ScreenshotHelper.isScreenshotMode else { return }
@@ -271,15 +284,12 @@ struct TaskeeApp: App {
         let context = sharedModelContainer.mainContext
         await cloudKitManager.syncAll(context: context, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
 
-        async let backfill: Void = cloudKitManager.backfillCreatedBy(context: context, familyCode: familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
-        async let tierFetch = cloudKitManager.fetchFamilyTier(familyCode: familyCode)
-        async let subs: Void = cloudKitManager.setupSubscriptions(familyCode: familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
-        async let acceptance: Void = checkChildAcceptance()
-
-        if let familyTier = await tierFetch {
+        if let familyTier = await cloudKitManager.fetchFamilyTier(familyCode: familyCode) {
             subscriptionManager.setFamilyTier(familyTier)
         }
-        _ = await (backfill, subs, acceptance)
+        await cloudKitManager.backfillCreatedBy(context: context, familyCode: familyCode, userName: authManager.userName, appleUserID: authManager.appleUserID)
+        await cloudKitManager.setupSubscriptions(familyCode: familyCode, appleUserID: authManager.appleUserID, role: authManager.role)
+        await checkChildAcceptance()
         scheduleDailySummary()
         sweepMissedTasks()
     }
@@ -519,31 +529,6 @@ struct SplashView: View {
             .ignoresSafeArea()
 
             if let icon = appIcon {
-                GeometryReader { geo in
-                    let iconSize: CGFloat = 70
-                    let spacing: CGFloat = 10
-                    let step = iconSize + spacing
-                    let cols = Int(geo.size.width / step) + 2
-                    let rows = Int(geo.size.height / step) + 2
-
-                    VStack(spacing: spacing) {
-                        ForEach(0..<rows, id: \.self) { row in
-                            HStack(spacing: spacing) {
-                                ForEach(0..<cols, id: \.self) { _ in
-                                    Image(uiImage: icon)
-                                        .resizable()
-                                        .frame(width: iconSize, height: iconSize)
-                                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                                        .opacity(0.12)
-                                }
-                            }
-                            .offset(x: row.isMultiple(of: 2) ? 0 : step / 2)
-                        }
-                    }
-                    .offset(x: -step / 2, y: -step / 2)
-                }
-                .ignoresSafeArea()
-
                 VStack(spacing: 16) {
                     Image(uiImage: icon)
                         .resizable()
@@ -558,7 +543,6 @@ struct SplashView: View {
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.4))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .opacity(opacity)
             }
         }

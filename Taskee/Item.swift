@@ -353,7 +353,7 @@ final class ChatMessage {
     var text: String
     var reactions: String
     var sentAt: Date
-    @Attribute(.externalStorage, originalName: "photoData") var attachmentData: Data?
+    @Attribute(.externalStorage) var attachmentData: Data?
     var attachmentName: String
     var attachmentType: String
 

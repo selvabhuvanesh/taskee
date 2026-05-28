@@ -51,6 +51,7 @@ struct ChildDashboardView: View {
     @State private var giftTaskToReveal: Item?
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
+    @State private var showAIAssistant = false
     @State private var showFamilyProjects = false
     @State private var showWishList = false
     @Query private var shoppingItems: [ShoppingItem]
@@ -270,6 +271,27 @@ struct ChildDashboardView: View {
                     .background(.black.opacity(0.5))
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    showAIAssistant = true
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Circle()
+                        )
+                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 80)
+            }
             .coordinateSpace(name: "childDashboard")
             .onAppear { scheduleStickyNote(from: childTips) }
             .toolbarColorScheme(childTheme.colorScheme, for: .navigationBar)
@@ -365,6 +387,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showFamilyChat) {
                 FamilyChatView(theme: childTheme)
+            }
+            .sheet(isPresented: $showAIAssistant) {
+                AIAssistantView(allTasks: allTasks, allMembers: allMembers, isIndividual: false, theme: childTheme)
             }
             .onAppear {
                 if ScreenshotHelper.isScreenshotMode && ScreenshotHelper.shouldOpenChat {

@@ -121,7 +121,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    private let voiceSynthesizer = AVSpeechSynthesizer()
+    private var _voiceSynth: AVSpeechSynthesizer?
+    private var voiceSynthesizer: AVSpeechSynthesizer {
+        if _voiceSynth == nil { _voiceSynth = AVSpeechSynthesizer() }
+        return _voiceSynth!
+    }
 
     private static var soundsDirectory: URL {
         FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
@@ -155,7 +159,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let fileURL = dir.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
 
-        let synth = AVSpeechSynthesizer()
+        let synth = voiceSynthesizer
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = 0.5
@@ -240,18 +244,19 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         center.removePendingNotificationRequests(withIdentifiers: allPossibleIDs)
         deleteVoiceFiles(for: taskId)
 
-        for minutes in intervals {
-            let reminderDate = dueDate.addingTimeInterval(-Double(minutes) * 60)
-            guard reminderDate > Date() else { continue }
+        let voiceOn = isVoiceEnabled
 
-            let spokenText = assignedTo.isEmpty
-                ? "\(taskName) \(timeLabel(forMinutes: minutes))"
-                : "\(taskName) for \(assignedTo) \(timeLabel(forMinutes: minutes))"
+        Task {
+            for minutes in intervals {
+                let reminderDate = dueDate.addingTimeInterval(-Double(minutes) * 60)
+                guard reminderDate > Date() else { continue }
 
-            let identifier = "reminder-\(taskId.uuidString)-\(minutes)"
-            let voiceOn = isVoiceEnabled
+                let spokenText = assignedTo.isEmpty
+                    ? "\(taskName) \(timeLabel(forMinutes: minutes))"
+                    : "\(taskName) for \(assignedTo) \(timeLabel(forMinutes: minutes))"
 
-            Task {
+                let identifier = "reminder-\(taskId.uuidString)-\(minutes)"
+
                 var voiceFilename: String?
                 if voiceOn {
                     voiceFilename = await generateVoiceFile(text: spokenText, identifier: identifier)

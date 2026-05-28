@@ -342,6 +342,7 @@ struct ContentView: View {
     @State private var showFamilySetup = false
     @State private var isSwitchingToFamily = false
     @State private var showWeeklyPulse = false
+    @State private var showAIAssistant = false
     @State private var parentTheme = ChildTheme.load(for: "parent")
     @State private var unreadNotifCount = 0
     @State private var showRecurringExtension = false
@@ -679,6 +680,27 @@ struct ContentView: View {
                     .background(.black.opacity(0.5))
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    showAIAssistant = true
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Circle()
+                        )
+                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 80)
+            }
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
@@ -885,6 +907,9 @@ struct ContentView: View {
                     isIndividual: isIndividual,
                     theme: parentTheme
                 )
+            }
+            .sheet(isPresented: $showAIAssistant) {
+                AIAssistantView(allTasks: tasks, allMembers: allMembers, isIndividual: isIndividual, theme: parentTheme)
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
