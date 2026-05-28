@@ -695,7 +695,7 @@ struct ChildDashboardView: View {
     private func deleteAllRecurring(like task: Item) {
         let matching = allTasks.filter {
             $0.name == task.name && $0.assignedTo == task.assignedTo
-            && $0.createdByChild && $0.isOpen && $0.isRecurring && !$0.isArchived
+            && $0.isRecurring && !$0.isArchived
         }
         var taskIDs: [UUID] = []
         for t in matching {

@@ -2324,6 +2324,7 @@ struct ParsedTask {
     var assignedTo: String = ""
     var reward: Int = 0
     var recurrence: RecurrenceType = .none
+    var occurrences: Int = 1
     var hasDate: Bool = false
 }
 

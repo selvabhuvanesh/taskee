@@ -31,6 +31,10 @@ final class ClaudeAPIService: Sendable {
         let reward: Int?
         let matchingTaskNames: [String]?
         let newDate: String?
+        let preserveTime: Bool
+        let rescheduleScope: String?
+        let recurrence: String?
+        let occurrences: Int?
     }
 
     func chat(
@@ -88,10 +92,13 @@ final class ClaudeAPIService: Sendable {
 
     private func buildSystemPrompt(familyMembers: [String], currentUser: String, isIndividual: Bool, tasksSummary: String) -> String {
         let memberList = familyMembers.joined(separator: ", ")
-        let today = Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year())
+        let now = Date()
+        let today = now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year())
+        let currentTime = now.formatted(.dateTime.hour().minute())
+        let timezone = TimeZone.current.identifier
 
         return """
-        You are a helpful family task management assistant in the Taskoot app. Today is \(today).
+        You are a helpful family task management assistant in the Taskoot app. Today is \(today), current time is \(currentTime) (\(timezone)).
         Current user: \(currentUser). \(isIndividual ? "This user manages tasks individually (no family)." : "Family members: \(memberList).")
 
         CURRENT TASKS:
@@ -109,18 +116,29 @@ final class ClaudeAPIService: Sendable {
                 "date": "ISO 8601 datetime or null",
                 "reward": number or null,
                 "matchingTaskNames": ["task names to match"] or null,
-                "newDate": "ISO 8601 datetime for reschedule target"
+                "newDate": "ISO 8601 datetime for reschedule target",
+                "preserveTime": true or false,
+                "rescheduleScope": "instance" or "series",
+                "recurrence": "none|daily|weekly|monthly",
+                "occurrences": number or null
             }
         }
 
         RULES:
         - Set "action" to null for questions, status checks, summaries, clarifications, or when information is missing.
-        - Only set "action" when you have enough information to perform the action AND the user's intent is clear.
-        - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, mention you'll default to today.
-        - For "reschedule": use "matchingTaskNames" with task names to match, and "newDate" for the target date.
-        - For "cancel" and "markDone": use "matchingTaskNames" with the task names to match.
+        - IMPORTANT: For ANY task creation, reschedule, cancel, or markDone — you MUST ALWAYS include the "action" object so the user sees a preview and can confirm before it executes. Never just describe what you would do in text — always provide the action for user confirmation.
+        - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, mention you'll default to today. Always include the action so the user can review and confirm the task details before creation.
+          - To create a recurring task, set "recurrence" to "daily", "weekly", or "monthly" and "occurrences" to the number of instances to create. Defaults: daily=7, weekly=4, monthly=3 if not specified. The "date" is the start date/time; instances are generated from there.
+          - Examples: "Add homework daily for 2 weeks" → recurrence: "daily", occurrences: 14. "Create swimming weekly for a month" → recurrence: "weekly", occurrences: 4.
+        - For "reschedule": use "matchingTaskNames" with task names to match, and "newDate" for the target date and time.
+          - If the user specifies a new TIME (e.g. "move to 3pm", "change to 10am"), include that time in "newDate" and set "preserveTime" to false.
+          - If the user only specifies a new DATE without a time (e.g. "move to tomorrow", "push to Saturday"), set "preserveTime" to true so the original time is kept.
+          - If the matched task is marked [recurring], you MUST ask the user whether to change just this instance or the entire series BEFORE setting the action. Set "action" to null and ask. Once the user answers, set "rescheduleScope" to "instance" or "series".
+        - For "cancel" and "markDone": use "matchingTaskNames" with the task names to match. Always include the action for user confirmation. Include "rescheduleScope" field for cancel too — if the task is [recurring], ask the user whether to cancel/delete just this instance or all recurring instances before setting the action.
+        - After any action is confirmed, provide a clear confirmation summary of exactly what was done (task name, new date/time, who it's assigned to, etc.).
         - Be conversational, friendly, and concise. Ask clarifying questions when the request is ambiguous.
         - When listing tasks or summarizing, use the task data provided above.
+        - ALL dates in the action MUST be ISO 8601 format in the user's LOCAL time WITHOUT timezone suffix. Example: "2026-05-28T19:00:00" (NOT "2026-05-28T19:00:00Z"). Never append "Z" or any timezone offset.
         - ALWAYS respond with valid JSON. Never include markdown, backticks, or text outside the JSON object.
         """
     }
@@ -158,7 +176,11 @@ final class ClaudeAPIService: Sendable {
                 date: actionJson["date"] as? String,
                 reward: actionJson["reward"] as? Int,
                 matchingTaskNames: actionJson["matchingTaskNames"] as? [String],
-                newDate: actionJson["newDate"] as? String
+                newDate: actionJson["newDate"] as? String,
+                preserveTime: actionJson["preserveTime"] as? Bool ?? true,
+                rescheduleScope: actionJson["rescheduleScope"] as? String,
+                recurrence: actionJson["recurrence"] as? String,
+                occurrences: actionJson["occurrences"] as? Int
             )
         }
 
@@ -267,6 +289,8 @@ struct TaskAction: Identifiable {
     var newDate: Date?
     var newAssignee: String?
     var parsedTask: ParsedTask?
+    var preserveTime: Bool = true
+    var rescheduleScope: String = "instance"
 }
 
 // MARK: - Task Intent
@@ -1364,7 +1388,8 @@ struct AIAssistantView: View {
             let date = task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
             let who = task.assignedTo.isEmpty ? "" : " [\(task.assignedTo)]"
             let reward = task.reward > 0 ? " \(Int(task.reward))coins" : ""
-            lines.append("- \(task.name)\(who) | \(date) | \(status)\(reward)")
+            let recurring = task.isRecurring ? " [recurring]" : ""
+            lines.append("- \(task.name)\(who) | \(date) | \(status)\(reward)\(recurring)")
         }
         if relevantTasks.count > 30 {
             lines.append("...and \(relevantTasks.count - 30) more tasks")
@@ -1377,10 +1402,22 @@ struct AIAssistantView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let isoBasic = ISO8601DateFormatter()
         isoBasic.formatOptions = [.withInternetDateTime]
+        let localDF = DateFormatter()
+        localDF.locale = Locale(identifier: "en_US_POSIX")
+        localDF.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        localDF.timeZone = TimeZone.current
 
         func parseDate(_ str: String?) -> Date? {
             guard let str else { return nil }
-            return iso.date(from: str) ?? isoBasic.date(from: str)
+            // Prefer local time for strings without timezone indicator
+            if !str.contains("Z") && !str.contains("+") {
+                if let d = localDF.date(from: str) { return d }
+            }
+            // Fallback to UTC parsers for strings with timezone
+            if let d = iso.date(from: str) { return d }
+            if let d = isoBasic.date(from: str) { return d }
+            // Last resort: try as local time even if other parsers failed
+            return localDF.date(from: str)
         }
 
         switch parsed.intent {
@@ -1390,18 +1427,39 @@ struct AIAssistantView: View {
             let date = parseDate(parsed.date) ?? Date()
             let reward = parsed.reward ?? 0
 
+            let recurrenceStr = (parsed.recurrence ?? "none").lowercased()
+            let recurrenceType: RecurrenceType = switch recurrenceStr {
+                case "daily": .daily
+                case "weekly": .weekly
+                case "monthly": .monthly
+                default: .none
+            }
+            let defaultOccurrences: Int = switch recurrenceType {
+                case .daily: 7
+                case .weekly: 4
+                case .monthly: 3
+                case .none: 1
+            }
+            let occurrences = parsed.occurrences ?? defaultOccurrences
+
             var details = [name]
             details.append("📅 \(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))")
             details.append("👤 \(assignee)")
             if reward > 0 { details.append("⭐ \(reward) coins") }
+            if recurrenceType != .none {
+                details.append("🔄 \(recurrenceType.rawValue) × \(occurrences) instances")
+            }
 
             var parsedTask = ParsedTask()
             parsedTask.name = name
             parsedTask.targetDate = date
             parsedTask.assignedTo = assignee
             parsedTask.reward = reward
+            parsedTask.recurrence = recurrenceType
+            parsedTask.occurrences = occurrences
 
-            var action = TaskAction(intent: .create, summary: "Create new task", details: details)
+            let summary = recurrenceType != .none ? "Create recurring task (\(occurrences)×)" : "Create new task"
+            var action = TaskAction(intent: .create, summary: summary, details: details)
             action.parsedTask = parsedTask
             action.newAssignee = assignee
             return action
@@ -1411,25 +1469,68 @@ struct AIAssistantView: View {
             let newDate = parseDate(parsed.newDate)
             guard let newDate, !matchNames.isEmpty else { return nil }
 
-            let matching = allTasks.filter { task in
+            let scope = parsed.rescheduleScope ?? "instance"
+            let timeComps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+            let hasExplicitTime = (timeComps.hour ?? 0) != 0 || (timeComps.minute ?? 0) != 0
+            let preserveTime = parsed.preserveTime && !hasExplicitTime
+
+            var matching = allTasks.filter { task in
                 task.isOpen && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
             }
+
+            if scope == "series" {
+                let seriesNames = Set(matching.map { $0.name })
+                let seriesAssignees = Set(matching.map { $0.assignedTo })
+                let seriesTasks = allTasks.filter { task in
+                    task.isOpen && task.isRecurring &&
+                    seriesNames.contains(task.name) &&
+                    seriesAssignees.contains(task.assignedTo) &&
+                    !matching.contains(where: { $0.id == task.id })
+                }
+                matching.append(contentsOf: seriesTasks)
+            }
+
             guard !matching.isEmpty else { return nil }
 
-            let details = matching.map { "\($0.emoji) \($0.name) → \(newDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))" }
-            return TaskAction(intent: .reschedule, summary: "Reschedule \(matching.count) task\(matching.count == 1 ? "" : "s")", details: details, tasks: matching, newDate: newDate)
+            let timeFormat = preserveTime
+                ? newDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                : newDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+            let details = matching.map { "\($0.emoji) \($0.name) → \(timeFormat)" }
+            let scopeLabel = scope == "series" ? " (entire series)" : ""
+            var action = TaskAction(intent: .reschedule, summary: "Reschedule \(matching.count) task\(matching.count == 1 ? "" : "s")\(scopeLabel)", details: details, tasks: matching, newDate: newDate)
+            action.preserveTime = preserveTime
+            action.rescheduleScope = scope
+            return action
 
         case "cancel":
             let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
             guard !matchNames.isEmpty else { return nil }
 
-            let matching = allTasks.filter { task in
+            let cancelScope = parsed.rescheduleScope ?? "instance"
+
+            var matching = allTasks.filter { task in
                 task.isOpen && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
             }
+
+            if cancelScope == "series" {
+                let seriesNames = Set(matching.map { $0.name })
+                let seriesAssignees = Set(matching.map { $0.assignedTo })
+                let seriesTasks = allTasks.filter { task in
+                    task.isOpen && task.isRecurring &&
+                    seriesNames.contains(task.name) &&
+                    seriesAssignees.contains(task.assignedTo) &&
+                    !matching.contains(where: { $0.id == task.id })
+                }
+                matching.append(contentsOf: seriesTasks)
+            }
+
             guard !matching.isEmpty else { return nil }
 
+            let scopeLabel = cancelScope == "series" ? " (entire series)" : ""
             let details = matching.map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
-            return TaskAction(intent: .cancel, summary: "Cancel \(matching.count) task\(matching.count == 1 ? "" : "s")", details: details, tasks: matching)
+            var action = TaskAction(intent: .cancel, summary: "Cancel \(matching.count) task\(matching.count == 1 ? "" : "s")\(scopeLabel)", details: details, tasks: matching)
+            action.rescheduleScope = cancelScope
+            return action
 
         case "markDone":
             let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
@@ -1474,17 +1575,30 @@ struct AIAssistantView: View {
         var rescheduled = 0
         var failed = 0
 
+        let calendar = Calendar.current
+        let newTimeComponents = calendar.dateComponents([.hour, .minute], from: newDate)
+
         for task in action.tasks {
             guard task.isOpen else {
                 failed += 1
                 continue
             }
-            let timeComponents = Calendar.current.dateComponents([.hour, .minute], from: task.targetDate)
-            var newDateWithTime = Calendar.current.startOfDay(for: newDate)
-            newDateWithTime = Calendar.current.date(bySettingHour: timeComponents.hour ?? 0, minute: timeComponents.minute ?? 0, second: 0, of: newDateWithTime)!
-            task.targetDate = newDateWithTime
+
+            let finalDate: Date
+            if action.preserveTime {
+                let origTime = calendar.dateComponents([.hour, .minute], from: task.targetDate)
+                var d = calendar.startOfDay(for: newDate)
+                d = calendar.date(bySettingHour: origTime.hour ?? 0, minute: origTime.minute ?? 0, second: 0, of: d)!
+                finalDate = d
+            } else {
+                var d = calendar.startOfDay(for: newDate)
+                d = calendar.date(bySettingHour: newTimeComponents.hour ?? 0, minute: newTimeComponents.minute ?? 0, second: 0, of: d)!
+                finalDate = d
+            }
+
+            task.targetDate = finalDate
             notificationManager.cancelTaskReminder(taskId: task.id)
-            notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: newDateWithTime)
+            notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: finalDate)
             rescheduled += 1
         }
 
@@ -1500,7 +1614,11 @@ struct AIAssistantView: View {
 
         markActionExecuted(messageId: messageId)
 
-        var response = "✅ Done! \(rescheduled) task\(rescheduled == 1 ? "" : "s") rescheduled to \(newDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))."
+        let dateFormat = action.preserveTime
+            ? newDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+            : newDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute())
+        let scopeNote = action.rescheduleScope == "series" ? " (entire series)" : ""
+        var response = "✅ Done! \(rescheduled) task\(rescheduled == 1 ? "" : "s") rescheduled to \(dateFormat)\(scopeNote)."
         if failed > 0 {
             response += " \(failed) task\(failed == 1 ? " was" : "s were") skipped (no longer open)."
         }
@@ -1509,35 +1627,53 @@ struct AIAssistantView: View {
 
     private func executeCancelTasks(_ action: TaskAction, messageId: UUID) {
         var cancelled = 0
+        var deleted = 0
         var skipped = 0
+        let isSeries = action.rescheduleScope == "series"
 
-        for task in action.tasks {
-            guard task.isOpen else {
-                skipped += 1
-                continue
+        if isSeries {
+            var taskIDs: [UUID] = []
+            for task in action.tasks {
+                notificationManager.cancelTaskReminder(taskId: task.id)
+                taskIDs.append(task.id)
+                withAnimation { modelContext.delete(task) }
+                deleted += 1
             }
-            task.status = "cancelled"
-            notificationManager.cancelTaskReminder(taskId: task.id)
-            cancelled += 1
-        }
-
-        try? modelContext.save()
-
-        let familyCode = authManager.familyCode
-        let snapshots = action.tasks.map { CloudKitManager.TaskSnapshot($0) }
-        Task {
-            for snap in snapshots {
-                await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
+            try? modelContext.save()
+            let familyCode = authManager.familyCode
+            Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
+        } else {
+            for task in action.tasks {
+                guard task.isOpen else {
+                    skipped += 1
+                    continue
+                }
+                task.status = "cancelled"
+                notificationManager.cancelTaskReminder(taskId: task.id)
+                cancelled += 1
+            }
+            try? modelContext.save()
+            let familyCode = authManager.familyCode
+            let snapshots = action.tasks.map { CloudKitManager.TaskSnapshot($0) }
+            Task {
+                for snap in snapshots {
+                    await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
+                }
             }
         }
 
         markActionExecuted(messageId: messageId)
 
-        var response = "✅ \(cancelled) task\(cancelled == 1 ? "" : "s") cancelled."
-        if skipped > 0 {
-            response += " \(skipped) task\(skipped == 1 ? " was" : "s were") already completed or cancelled."
+        if isSeries {
+            let response = "✅ \(deleted) recurring task\(deleted == 1 ? "" : "s") deleted (entire series)."
+            messages.append(AIChatMessage(role: .assistant, text: response))
+        } else {
+            var response = "✅ \(cancelled) task\(cancelled == 1 ? "" : "s") cancelled."
+            if skipped > 0 {
+                response += " \(skipped) task\(skipped == 1 ? " was" : "s were") already completed or cancelled."
+            }
+            messages.append(AIChatMessage(role: .assistant, text: response))
         }
-        messages.append(AIChatMessage(role: .assistant, text: response))
     }
 
     private func executeMarkDone(_ action: TaskAction, messageId: UUID) {
@@ -1595,32 +1731,73 @@ struct AIAssistantView: View {
             return
         }
 
-        let task = Item(
-            name: parsed.name,
-            targetDate: parsed.targetDate,
-            assignedTo: assignee,
-            reward: Double(parsed.reward),
-            isRecurring: parsed.recurrence != .none,
-            createdBy: authManager.userName,
-            createdByID: authManager.appleUserID
-        )
-        modelContext.insert(task)
+        let isRecurring = parsed.recurrence != .none
+        let dates = generateRecurringDates(startDate: parsed.targetDate, recurrence: parsed.recurrence, occurrences: parsed.occurrences)
+
+        var createdTasks: [Item] = []
+        for date in dates {
+            let task = Item(
+                name: parsed.name,
+                targetDate: date,
+                assignedTo: assignee,
+                reward: Double(parsed.reward),
+                isRecurring: isRecurring,
+                createdBy: authManager.userName,
+                createdByID: authManager.appleUserID
+            )
+            modelContext.insert(task)
+            createdTasks.append(task)
+            subscriptionManager.recordTaskCreation()
+            notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: assignee, dueDate: date)
+        }
         try? modelContext.save()
 
-        subscriptionManager.recordTaskCreation()
-        notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: assignee, dueDate: parsed.targetDate)
-
         let familyCode = authManager.familyCode
-        Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        Task {
+            for task in createdTasks {
+                await cloudKitManager.pushTask(task, familyCode: familyCode)
+            }
+        }
 
         markActionExecuted(messageId: messageId)
 
-        var response = "✅ \"\(parsed.name)\" has been created!\n\n"
-        response += "📅 \(parsed.targetDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))\n"
-        response += "👤 Assigned to \(assignee)"
-        if parsed.reward > 0 { response += "\n⭐ \(parsed.reward) coins reward" }
-        response += "\n\nThe task is now live and a reminder has been set."
-        messages.append(AIChatMessage(role: .assistant, text: response))
+        if isRecurring {
+            let lastDate = dates.last ?? parsed.targetDate
+            var response = "✅ \(createdTasks.count) \"\(parsed.name)\" tasks created!\n\n"
+            response += "🔄 \(parsed.recurrence.rawValue) from \(parsed.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) to \(lastDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))\n"
+            response += "⏰ \(parsed.targetDate.formatted(.dateTime.hour().minute()))\n"
+            response += "👤 Assigned to \(assignee)"
+            if parsed.reward > 0 { response += "\n⭐ \(parsed.reward) coins each" }
+            response += "\n\nAll \(createdTasks.count) tasks are live with reminders set."
+            messages.append(AIChatMessage(role: .assistant, text: response))
+        } else {
+            var response = "✅ \"\(parsed.name)\" has been created!\n\n"
+            response += "📅 \(parsed.targetDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))\n"
+            response += "👤 Assigned to \(assignee)"
+            if parsed.reward > 0 { response += "\n⭐ \(parsed.reward) coins reward" }
+            response += "\n\nThe task is now live and a reminder has been set."
+            messages.append(AIChatMessage(role: .assistant, text: response))
+        }
+    }
+
+    private func generateRecurringDates(startDate: Date, recurrence: RecurrenceType, occurrences: Int) -> [Date] {
+        let calendar = Calendar.current
+        switch recurrence {
+        case .none:
+            return [startDate]
+        case .daily:
+            return (0..<occurrences).compactMap { i in
+                calendar.date(byAdding: .day, value: i, to: startDate)
+            }
+        case .weekly:
+            return (0..<occurrences).compactMap { i in
+                calendar.date(byAdding: .weekOfYear, value: i, to: startDate)
+            }
+        case .monthly:
+            return (0..<occurrences).compactMap { i in
+                calendar.date(byAdding: .month, value: i, to: startDate)
+            }
+        }
     }
 
     private func cancelAction(messageId: UUID) {

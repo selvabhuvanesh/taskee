@@ -3540,15 +3540,27 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                 "Delete Task?",
                 isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } })
             ) {
-                Button("Delete", role: .destructive) {
-                    if let task = taskToDelete {
+                if let task = taskToDelete, task.isRecurring {
+                    Button("Delete This Task Only", role: .destructive) {
                         deleteTask(task)
                     }
+                    Button("Delete All Recurring", role: .destructive) {
+                        deleteAllRecurringExpanded(like: task)
+                    }
+                    Button("Cancel", role: .cancel) { taskToDelete = nil }
+                } else {
+                    Button("Delete", role: .destructive) {
+                        if let task = taskToDelete {
+                            deleteTask(task)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { taskToDelete = nil }
                 }
-                Button("Cancel", role: .cancel) { taskToDelete = nil }
             } message: {
                 if let task = taskToDelete {
-                    Text("Are you sure you want to delete \"\(task.name)\"?")
+                    Text(task.isRecurring
+                         ? "Do you want to delete only this instance of \"\(task.name)\" or all recurring instances?"
+                         : "Are you sure you want to delete \"\(task.name)\"?")
                 }
             }
             .alert(
@@ -3580,6 +3592,22 @@ struct ParentExpandedTaskAlerts: ViewModifier {
         try? modelContext.save()
         taskToDelete = nil
         Task { await cloudKitManager.deleteRemoteTask(taskID) }
+    }
+
+    private func deleteAllRecurringExpanded(like task: Item) {
+        let matching = tasks.filter {
+            $0.name == task.name && $0.assignedTo == task.assignedTo
+            && $0.isRecurring && !$0.isArchived
+        }
+        var taskIDs: [UUID] = []
+        for t in matching {
+            notificationManager.cancelTaskReminder(taskId: t.id)
+            taskIDs.append(t.id)
+            withAnimation { modelContext.delete(t) }
+        }
+        try? modelContext.save()
+        taskToDelete = nil
+        Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
     @ViewBuilder
