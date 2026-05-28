@@ -647,7 +647,8 @@ struct ChildDashboardView: View {
     private func deleteTask(_ task: Item) {
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskId = task.id
-        modelContext.delete(task)
+        withAnimation { modelContext.delete(task) }
+        try? modelContext.save()
         Task {
             await cloudKitManager.deleteRemoteTask(taskId)
         }
@@ -662,8 +663,9 @@ struct ChildDashboardView: View {
         for t in matching {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
-            modelContext.delete(t)
+            withAnimation { modelContext.delete(t) }
         }
+        try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 

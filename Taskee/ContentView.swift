@@ -2728,6 +2728,7 @@ struct DateTasksView: View {
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
+        try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTask(taskID) }
     }
 
@@ -2752,6 +2753,7 @@ struct DateTasksView: View {
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
         }
+        try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
@@ -3423,6 +3425,7 @@ struct ChildTasksView: View {
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
+        try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTask(taskID) }
     }
 
@@ -3447,6 +3450,7 @@ struct ChildTasksView: View {
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
         }
+        try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
@@ -3500,10 +3504,12 @@ struct ParentExpandedTaskAlerts: ViewModifier {
             ) {
                 if let task = taskToDelete {
                     Button("Delete", role: .destructive) {
-                        Task { await cloudKitManager.deleteRemoteTasks([task.id]) }
-                        notificationManager.cancelTaskReminder(taskId: task.id)
-                        modelContext.delete(task)
+                        let taskID = task.id
+                        notificationManager.cancelTaskReminder(taskId: taskID)
+                        withAnimation { modelContext.delete(task) }
+                        try? modelContext.save()
                         taskToDelete = nil
+                        Task { await cloudKitManager.deleteRemoteTasks([taskID]) }
                     }
                     Button("Cancel", role: .cancel) { taskToDelete = nil }
                 }
