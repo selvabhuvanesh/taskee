@@ -540,12 +540,17 @@ struct ChildDashboardView: View {
                     Text("This task is scheduled for \(task.dueDateLabel). You can complete it when the day arrives!")
                 }
             }
-            .alert("Delete Task?", isPresented: Binding(
-                get: { taskToDelete != nil },
-                set: { if !$0 { taskToDelete = nil } }
-            )) {
+            .alert(
+                taskToDelete.map { $0.isApproved || $0.isInReview } == true ? "Cannot Delete" : "Delete Task?",
+                isPresented: Binding(
+                    get: { taskToDelete != nil },
+                    set: { if !$0 { taskToDelete = nil } }
+                )
+            ) {
                 if let task = taskToDelete {
-                    if task.isRecurring {
+                    if task.isApproved || task.isInReview {
+                        Button("OK", role: .cancel) { taskToDelete = nil }
+                    } else if task.isRecurring {
                         Button("Delete This Task Only", role: .destructive) {
                             deleteTask(task)
                             taskToDelete = nil
@@ -565,12 +570,21 @@ struct ChildDashboardView: View {
                 }
             } message: {
                 if let task = taskToDelete {
-                    if task.isRecurring {
-                        let count = allTasks.filter {
+                    if task.isApproved || task.isInReview {
+                        Text("This task is already \(task.isApproved ? "completed" : "in review") and cannot be deleted. Completed tasks are preserved to protect earned coins.")
+                    } else if task.isRecurring {
+                        let openCount = allTasks.filter {
                             $0.name == task.name && $0.assignedTo == task.assignedTo
-                            && $0.createdByChild && $0.isOpen && $0.isRecurring && !$0.isArchived
+                            && !$0.isApproved && !$0.isInReview && $0.isRecurring && !$0.isArchived
                         }.count
-                        Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+                        let completedCount = allTasks.filter {
+                            $0.name == task.name && $0.assignedTo == task.assignedTo
+                            && ($0.isApproved || $0.isInReview) && $0.isRecurring && !$0.isArchived
+                        }.count
+                        let msg = completedCount > 0
+                            ? "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). \(completedCount) completed instance\(completedCount == 1 ? "" : "s") will be preserved."
+                            : "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). Delete just this one or all of them?"
+                        Text(msg)
                     } else {
                         Text("Are you sure you want to delete \"\(task.name)\"?")
                     }
@@ -683,6 +697,7 @@ struct ChildDashboardView: View {
     }
 
     private func deleteTask(_ task: Item) {
+        guard !task.isApproved && !task.isInReview else { return }
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskId = task.id
         withAnimation { modelContext.delete(task) }
@@ -697,8 +712,10 @@ struct ChildDashboardView: View {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
+        let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
+        guard !toDelete.isEmpty else { return }
         var taskIDs: [UUID] = []
-        for t in matching {
+        for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }

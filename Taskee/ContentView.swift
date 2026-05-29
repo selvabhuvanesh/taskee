@@ -2641,7 +2641,10 @@ struct DateTasksView: View {
     }
 
     private var deleteAlertTitle: String {
-        taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task"
+        if let task = taskToDelete, task.isApproved || task.isInReview {
+            return "Cannot Delete"
+        }
+        return "Delete Task"
     }
 
     private var deleteAlertBinding: Binding<Bool> {
@@ -2654,7 +2657,9 @@ struct DateTasksView: View {
     @ViewBuilder
     private var deleteAlertButtons: some View {
         if let task = taskToDelete {
-            if task.isRecurring {
+            if task.isApproved || task.isInReview {
+                Button("OK", role: .cancel) { taskToDelete = nil }
+            } else if task.isRecurring {
                 Button("Delete This Task Only", role: .destructive) {
                     deleteSingleTask(task)
                     taskToDelete = nil
@@ -2726,43 +2731,28 @@ struct DateTasksView: View {
 
     @ViewBuilder
     private func deleteAlertMessage(for task: Item) -> some View {
-        if task.isApproved && task.reward > 0 {
-            if task.isRecurring {
-                let matching = allTasks.filter {
-                    $0.name == task.name && $0.assignedTo == task.assignedTo
-                    && $0.isRecurring && !$0.isArchived
-                }
-                let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
-                let owner = task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s"
-                let msg = "Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(owner) balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total."
-                Text(msg)
-            } else {
-                let owner = task.assignedTo.isEmpty ? "you" : task.assignedTo
-                let msg = "Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(owner). Deleting it will deduct those coins from the balance."
-                Text(msg)
-            }
+        if task.isApproved || task.isInReview {
+            Text("This task is already \(task.isApproved ? "completed" : "in review") and cannot be deleted. Completed tasks are preserved to protect earned coins.")
         } else if task.isRecurring {
-            let count = allTasks.filter {
+            let openCount = allTasks.filter {
                 $0.name == task.name && $0.assignedTo == task.assignedTo
-                && $0.isOpen && $0.isRecurring && !$0.isArchived
+                && !$0.isApproved && !$0.isInReview && $0.isRecurring && !$0.isArchived
             }.count
-            Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+            let completedCount = allTasks.filter {
+                $0.name == task.name && $0.assignedTo == task.assignedTo
+                && ($0.isApproved || $0.isInReview) && $0.isRecurring && !$0.isArchived
+            }.count
+            let msg = completedCount > 0
+                ? "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). \(completedCount) completed instance\(completedCount == 1 ? "" : "s") will be preserved."
+                : "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). Delete just this one or all of them?"
+            Text(msg)
         } else {
             Text("Are you sure you want to delete \"\(task.name)\"?")
         }
     }
 
-    private func recomputeCoinsAfterDelete(for task: Item) {
-        guard task.isApproved, task.reward > 0, !task.assignedTo.isEmpty else { return }
-        if let child = children.first(where: { $0.name == task.assignedTo }) {
-            child.recomputeEarned(from: allTasks, excluding: task.id)
-            let familyCode = authManager.familyCode
-            Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
-        }
-    }
-
     private func deleteSingleTask(_ task: Item) {
-        recomputeCoinsAfterDelete(for: task)
+        guard !task.isApproved && !task.isInReview else { return }
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
@@ -2775,18 +2765,10 @@ struct DateTasksView: View {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
-        let deletedIDs = Set(matching.map { $0.id })
-        if let assignee = matching.first?.assignedTo, !assignee.isEmpty,
-           matching.contains(where: { $0.isApproved && $0.reward > 0 }),
-           let child = children.first(where: { $0.name == assignee }) {
-            child.totalEarned = allTasks
-                .filter { !deletedIDs.contains($0.id) && $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
-                .reduce(0.0) { $0 + $1.reward }
-            let familyCode = authManager.familyCode
-            Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
-        }
+        let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
+        guard !toDelete.isEmpty else { return }
         var taskIDs: [UUID] = []
-        for t in matching {
+        for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
@@ -3226,7 +3208,10 @@ struct ChildTasksView: View {
     }
 
     private var childDeleteAlertTitle: String {
-        taskToDelete?.isApproved == true ? "Delete Completed Task?" : "Delete Task"
+        if let task = taskToDelete, task.isApproved || task.isInReview {
+            return "Cannot Delete"
+        }
+        return "Delete Task"
     }
 
     private var childDeleteAlertBinding: Binding<Bool> {
@@ -3239,7 +3224,9 @@ struct ChildTasksView: View {
     @ViewBuilder
     private var childDeleteAlertButtons: some View {
         if let task = taskToDelete {
-            if task.isRecurring {
+            if task.isApproved || task.isInReview {
+                Button("OK", role: .cancel) { taskToDelete = nil }
+            } else if task.isRecurring {
                 Button("Delete This Task Only", role: .destructive) {
                     deleteSingleTask(task)
                     taskToDelete = nil
@@ -3389,27 +3376,21 @@ struct ChildTasksView: View {
 
     @ViewBuilder
     private func deleteAlertMessage(for task: Item) -> some View {
-        if task.isApproved && task.reward > 0 {
-            if task.isRecurring {
-                let matching = allTasks.filter {
-                    $0.name == task.name && $0.assignedTo == task.assignedTo
-                    && $0.isRecurring && !$0.isArchived
-                }
-                let approvedCoins = matching.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
-                let owner = task.assignedTo.isEmpty ? "the" : task.assignedTo + "'s"
-                let msg = "Warning: This is a completed task worth \(Int(task.reward)) coins. Deleting it will deduct coins from \(owner) balance.\n\nDeleting all recurring instances would deduct \(approvedCoins) coins total."
-                Text(msg)
-            } else {
-                let owner = task.assignedTo.isEmpty ? "you" : task.assignedTo
-                let msg = "Warning: This task has been completed and \(Int(task.reward)) coins were awarded to \(owner). Deleting it will deduct those coins from the balance."
-                Text(msg)
-            }
+        if task.isApproved || task.isInReview {
+            Text("This task is already \(task.isApproved ? "completed" : "in review") and cannot be deleted. Completed tasks are preserved to protect earned coins.")
         } else if task.isRecurring {
-            let count = allTasks.filter {
+            let openCount = allTasks.filter {
                 $0.name == task.name && $0.assignedTo == task.assignedTo
-                && $0.isOpen && $0.isRecurring && !$0.isArchived
+                && !$0.isApproved && !$0.isInReview && $0.isRecurring && !$0.isArchived
             }.count
-            Text("\"\(task.name)\" is a recurring task with \(count) open instances. Delete just this one or all of them?")
+            let completedCount = allTasks.filter {
+                $0.name == task.name && $0.assignedTo == task.assignedTo
+                && ($0.isApproved || $0.isInReview) && $0.isRecurring && !$0.isArchived
+            }.count
+            let msg = completedCount > 0
+                ? "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). \(completedCount) completed instance\(completedCount == 1 ? "" : "s") will be preserved."
+                : "\"\(task.name)\" is a recurring task with \(openCount) open instance\(openCount == 1 ? "" : "s"). Delete just this one or all of them?"
+            Text(msg)
         } else {
             Text("Are you sure you want to delete \"\(task.name)\"?")
         }
@@ -3449,17 +3430,8 @@ struct ChildTasksView: View {
         }
     }
 
-    private func recomputeCoinsAfterDelete(for task: Item) {
-        guard task.isApproved, task.reward > 0, !task.assignedTo.isEmpty else { return }
-        if let member = allChildren.first(where: { $0.name == task.assignedTo }) {
-            member.recomputeEarned(from: allTasks, excluding: task.id)
-            let familyCode = authManager.familyCode
-            Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
-        }
-    }
-
     private func deleteSingleTask(_ task: Item) {
-        recomputeCoinsAfterDelete(for: task)
+        guard !task.isApproved && !task.isInReview else { return }
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
@@ -3472,18 +3444,10 @@ struct ChildTasksView: View {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
-        let deletedIDs = Set(matching.map { $0.id })
-        if let assignee = matching.first?.assignedTo, !assignee.isEmpty,
-           matching.contains(where: { $0.isApproved && $0.reward > 0 }),
-           let child = allChildren.first(where: { $0.name == assignee }) {
-            child.totalEarned = allTasks
-                .filter { !deletedIDs.contains($0.id) && $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
-                .reduce(0.0) { $0 + $1.reward }
-            let familyCode = authManager.familyCode
-            Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
-        }
+        let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
+        guard !toDelete.isEmpty else { return }
         var taskIDs: [UUID] = []
-        for t in matching {
+        for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }
@@ -3586,6 +3550,10 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     }
 
     private func deleteTask(_ task: Item) {
+        guard !task.isApproved && !task.isInReview else {
+            taskToDelete = nil
+            return
+        }
         let taskID = task.id
         notificationManager.cancelTaskReminder(taskId: taskID)
         withAnimation { modelContext.delete(task) }
@@ -3599,8 +3567,9 @@ struct ParentExpandedTaskAlerts: ViewModifier {
             $0.name == task.name && $0.assignedTo == task.assignedTo
             && $0.isRecurring && !$0.isArchived
         }
+        let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
         var taskIDs: [UUID] = []
-        for t in matching {
+        for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
             withAnimation { modelContext.delete(t) }

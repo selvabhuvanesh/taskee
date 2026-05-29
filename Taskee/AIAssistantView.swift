@@ -1656,13 +1656,15 @@ struct AIAssistantView: View {
         let isSeries = action.rescheduleScope == "series"
 
         if isSeries {
+            let toDelete = action.tasks.filter { !$0.isApproved && !$0.isInReview }
             var taskIDs: [UUID] = []
-            for task in action.tasks {
+            for task in toDelete {
                 notificationManager.cancelTaskReminder(taskId: task.id)
                 taskIDs.append(task.id)
                 withAnimation { modelContext.delete(task) }
                 deleted += 1
             }
+            skipped = action.tasks.count - toDelete.count
             try? modelContext.save()
             let familyCode = authManager.familyCode
             Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
@@ -1689,7 +1691,10 @@ struct AIAssistantView: View {
         markActionExecuted(messageId: messageId)
 
         if isSeries {
-            let response = "✅ \(deleted) recurring task\(deleted == 1 ? "" : "s") deleted (entire series)."
+            var response = "✅ \(deleted) recurring task\(deleted == 1 ? "" : "s") deleted."
+            if skipped > 0 {
+                response += " \(skipped) completed task\(skipped == 1 ? "" : "s") preserved with coins."
+            }
             messages.append(AIChatMessage(role: .assistant, text: response))
         } else {
             var response = "✅ \(cancelled) task\(cancelled == 1 ? "" : "s") cancelled."
