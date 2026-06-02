@@ -36,6 +36,7 @@ final class ClaudeAPIService: Sendable {
         let rescheduleScope: String?
         let recurrence: String?
         let occurrences: Int?
+        let tasks: [[String: Any]]?
     }
 
     func chat(
@@ -113,16 +114,26 @@ final class ClaudeAPIService: Sendable {
             "message": "Your conversational response to the user",
             "action": null or {
                 "intent": "create|reschedule|cancel|markDone",
-                "taskName": "the task name",
-                "assignee": "person name or null",
-                "date": "ISO 8601 datetime or null",
-                "reward": number or null,
+                "taskName": "the task name (for single task create)",
+                "assignee": "person name or null (for single task create)",
+                "date": "ISO 8601 datetime or null (for single task create)",
+                "reward": number or null (for single task create),
                 "matchingTaskNames": ["task names to match"] or null,
                 "newDate": "ISO 8601 datetime for reschedule target",
                 "preserveTime": true or false,
                 "rescheduleScope": "instance" or "series",
-                "recurrence": "none|daily|weekly|monthly",
-                "occurrences": number or null
+                "recurrence": "none|daily|weekly|monthly (for single task create)",
+                "occurrences": number or null (for single task create),
+                "tasks": [
+                    {
+                        "taskName": "task name",
+                        "assignee": "person name",
+                        "date": "ISO 8601 datetime",
+                        "reward": number or null,
+                        "recurrence": "none|daily|weekly|monthly",
+                        "occurrences": number or null
+                    }
+                ] or null
             }
         }
 
@@ -132,6 +143,9 @@ final class ClaudeAPIService: Sendable {
         - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, mention you'll default to today. Always include the action so the user can review and confirm the task details before creation.
           - To create a recurring task, set "recurrence" to "daily", "weekly", or "monthly" and "occurrences" to the number of instances to create. Defaults: daily=7, weekly=4, monthly=3 if not specified. The "date" is the start date/time; instances are generated from there.
           - Examples: "Add homework daily for 2 weeks" → recurrence: "daily", occurrences: 14. "Create swimming weekly for a month" → recurrence: "weekly", occurrences: 4.
+          - MULTI-TASK CREATION: When the user asks to create multiple tasks at once, use the "tasks" array instead of the single task fields. Each entry in the "tasks" array is an independent task with its own name, assignee, date, reward, recurrence, and occurrences. You can mix single tasks and recurring tasks in the same "tasks" array.
+          - Examples: "Add homework at 4pm and swimming at 6pm for Aria" → tasks array with 2 entries. "Create daily reading for Aria and weekly piano for Bhuvi" → tasks array with 2 recurring entries.
+          - For a single task, you may use either the top-level fields OR a "tasks" array with one entry — both work.
         - For "reschedule": use "matchingTaskNames" with task names to match, and "newDate" for the target date and time.
           - If the user specifies a new TIME (e.g. "move to 3pm", "change to 10am"), include that time in "newDate" and set "preserveTime" to false.
           - If the user only specifies a new DATE without a time (e.g. "move to tomorrow", "push to Saturday"), set "preserveTime" to true so the original time is kept.
@@ -182,7 +196,8 @@ final class ClaudeAPIService: Sendable {
                 preserveTime: actionJson["preserveTime"] as? Bool ?? true,
                 rescheduleScope: actionJson["rescheduleScope"] as? String,
                 recurrence: actionJson["recurrence"] as? String,
-                occurrences: actionJson["occurrences"] as? Int
+                occurrences: actionJson["occurrences"] as? Int,
+                tasks: actionJson["tasks"] as? [[String: Any]]
             )
         }
 
@@ -291,6 +306,7 @@ struct TaskAction: Identifiable {
     var newDate: Date?
     var newAssignee: String?
     var parsedTask: ParsedTask?
+    var parsedTasks: [ParsedTask] = []
     var preserveTime: Bool = true
     var rescheduleScope: String = "instance"
 }
@@ -1446,45 +1462,72 @@ struct AIAssistantView: View {
 
         switch parsed.intent {
         case "create":
+            func buildParsedTask(name: String, assignee: String, date: Date, reward: Int, recurrenceStr: String, occurrences: Int?) -> (ParsedTask, [String]) {
+                let recurrenceType: RecurrenceType = switch recurrenceStr {
+                    case "daily": .daily
+                    case "weekly": .weekly
+                    case "monthly": .monthly
+                    default: .none
+                }
+                let defaultOcc: Int = switch recurrenceType {
+                    case .daily: 7
+                    case .weekly: 4
+                    case .monthly: 3
+                    case .none: 1
+                }
+                let occ = occurrences ?? defaultOcc
+                var pt = ParsedTask()
+                pt.name = name
+                pt.targetDate = date
+                pt.assignedTo = assignee
+                pt.reward = reward
+                pt.recurrence = recurrenceType
+                pt.occurrences = occ
+
+                var details = [name]
+                details.append("📅 \(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))")
+                details.append("👤 \(assignee)")
+                if reward > 0 { details.append("⭐ \(reward) coins") }
+                if recurrenceType != .none {
+                    details.append("🔄 \(recurrenceType.rawValue) × \(occ) instances")
+                }
+                return (pt, details)
+            }
+
+            if let tasksArray = parsed.tasks, !tasksArray.isEmpty {
+                var allParsed: [ParsedTask] = []
+                var allDetails: [String] = []
+                for taskDict in tasksArray {
+                    guard let tName = taskDict["taskName"] as? String, !tName.isEmpty else { continue }
+                    let tAssignee = taskDict["assignee"] as? String ?? authManager.userName
+                    let tDate = parseDate(taskDict["date"] as? String) ?? Date()
+                    let tReward = taskDict["reward"] as? Int ?? 0
+                    let tRecurrence = (taskDict["recurrence"] as? String ?? "none").lowercased()
+                    let tOccurrences = taskDict["occurrences"] as? Int
+                    let (pt, details) = buildParsedTask(name: tName, assignee: tAssignee, date: tDate, reward: tReward, recurrenceStr: tRecurrence, occurrences: tOccurrences)
+                    allParsed.append(pt)
+                    if !allDetails.isEmpty { allDetails.append("─────") }
+                    allDetails.append(contentsOf: details)
+                }
+                guard !allParsed.isEmpty else { return nil }
+                let summary = allParsed.count == 1 ? "Create new task" : "Create \(allParsed.count) tasks"
+                var action = TaskAction(intent: .create, summary: summary, details: allDetails)
+                action.parsedTasks = allParsed
+                action.parsedTask = allParsed.first
+                return action
+            }
+
             guard let name = parsed.taskName, !name.isEmpty else { return nil }
             let assignee = parsed.assignee ?? authManager.userName
             let date = parseDate(parsed.date) ?? Date()
             let reward = parsed.reward ?? 0
-
             let recurrenceStr = (parsed.recurrence ?? "none").lowercased()
-            let recurrenceType: RecurrenceType = switch recurrenceStr {
-                case "daily": .daily
-                case "weekly": .weekly
-                case "monthly": .monthly
-                default: .none
-            }
-            let defaultOccurrences: Int = switch recurrenceType {
-                case .daily: 7
-                case .weekly: 4
-                case .monthly: 3
-                case .none: 1
-            }
-            let occurrences = parsed.occurrences ?? defaultOccurrences
+            let (parsedTask, details) = buildParsedTask(name: name, assignee: assignee, date: date, reward: reward, recurrenceStr: recurrenceStr, occurrences: parsed.occurrences)
 
-            var details = [name]
-            details.append("📅 \(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))")
-            details.append("👤 \(assignee)")
-            if reward > 0 { details.append("⭐ \(reward) coins") }
-            if recurrenceType != .none {
-                details.append("🔄 \(recurrenceType.rawValue) × \(occurrences) instances")
-            }
-
-            var parsedTask = ParsedTask()
-            parsedTask.name = name
-            parsedTask.targetDate = date
-            parsedTask.assignedTo = assignee
-            parsedTask.reward = reward
-            parsedTask.recurrence = recurrenceType
-            parsedTask.occurrences = occurrences
-
-            let summary = recurrenceType != .none ? "Create recurring task (\(occurrences)×)" : "Create new task"
+            let summary = parsedTask.recurrence != .none ? "Create recurring task (\(parsedTask.occurrences)×)" : "Create new task"
             var action = TaskAction(intent: .create, summary: summary, details: details)
             action.parsedTask = parsedTask
+            action.parsedTasks = [parsedTask]
             action.newAssignee = assignee
             return action
 
@@ -1741,12 +1784,11 @@ struct AIAssistantView: View {
     }
 
     private func executeCreate(_ action: TaskAction, messageId: UUID) {
-        guard let parsed = action.parsedTask else {
+        let taskList = action.parsedTasks.isEmpty ? [action.parsedTask].compactMap { $0 } : action.parsedTasks
+        guard !taskList.isEmpty else {
             messages.append(AIChatMessage(role: .assistant, text: "Something went wrong — task details were missing. Please try creating the task again."))
             return
         }
-
-        let assignee = action.newAssignee ?? authManager.userName
 
         if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) {
             markActionExecuted(messageId: messageId)
@@ -1760,53 +1802,62 @@ struct AIAssistantView: View {
             return
         }
 
-        let isRecurring = parsed.recurrence != .none
-        let dates = generateRecurringDates(startDate: parsed.targetDate, recurrence: parsed.recurrence, occurrences: parsed.occurrences)
+        var allCreated: [Item] = []
+        var summaryParts: [String] = []
 
-        var createdTasks: [Item] = []
-        for date in dates {
-            let task = Item(
-                name: parsed.name,
-                targetDate: date,
-                assignedTo: assignee,
-                reward: Double(parsed.reward),
-                isRecurring: isRecurring,
-                createdBy: authManager.userName,
-                createdByID: authManager.appleUserID
-            )
-            modelContext.insert(task)
-            createdTasks.append(task)
-            subscriptionManager.recordTaskCreation()
-            notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: assignee, dueDate: date)
+        for parsed in taskList {
+            let assignee = parsed.assignedTo.isEmpty ? (action.newAssignee ?? authManager.userName) : parsed.assignedTo
+            let isRecurring = parsed.recurrence != .none
+            let dates = generateRecurringDates(startDate: parsed.targetDate, recurrence: parsed.recurrence, occurrences: parsed.occurrences)
+
+            var createdForThis: [Item] = []
+            for date in dates {
+                let task = Item(
+                    name: parsed.name,
+                    targetDate: date,
+                    assignedTo: assignee,
+                    reward: Double(parsed.reward),
+                    isRecurring: isRecurring,
+                    createdBy: authManager.userName,
+                    createdByID: authManager.appleUserID
+                )
+                modelContext.insert(task)
+                createdForThis.append(task)
+                subscriptionManager.recordTaskCreation()
+                notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: assignee, dueDate: date)
+            }
+            allCreated.append(contentsOf: createdForThis)
+
+            if isRecurring {
+                let lastDate = dates.last ?? parsed.targetDate
+                var part = "✅ \(createdForThis.count)× \"\(parsed.name)\""
+                part += " (\(parsed.recurrence.rawValue), \(parsed.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) → \(lastDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())))"
+                part += " 👤 \(assignee)"
+                if parsed.reward > 0 { part += " ⭐ \(parsed.reward) coins each" }
+                summaryParts.append(part)
+            } else {
+                var part = "✅ \"\(parsed.name)\""
+                part += " 📅 \(parsed.targetDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))"
+                part += " 👤 \(assignee)"
+                if parsed.reward > 0 { part += " ⭐ \(parsed.reward) coins" }
+                summaryParts.append(part)
+            }
         }
+
         try? modelContext.save()
 
         let familyCode = authManager.familyCode
         Task {
-            for task in createdTasks {
+            for task in allCreated {
                 await cloudKitManager.pushTask(task, familyCode: familyCode)
             }
         }
 
         markActionExecuted(messageId: messageId)
 
-        if isRecurring {
-            let lastDate = dates.last ?? parsed.targetDate
-            var response = "✅ \(createdTasks.count) \"\(parsed.name)\" tasks created!\n\n"
-            response += "🔄 \(parsed.recurrence.rawValue) from \(parsed.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) to \(lastDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))\n"
-            response += "⏰ \(parsed.targetDate.formatted(.dateTime.hour().minute()))\n"
-            response += "👤 Assigned to \(assignee)"
-            if parsed.reward > 0 { response += "\n⭐ \(parsed.reward) coins each" }
-            response += "\n\nAll \(createdTasks.count) tasks are live with reminders set."
-            messages.append(AIChatMessage(role: .assistant, text: response))
-        } else {
-            var response = "✅ \"\(parsed.name)\" has been created!\n\n"
-            response += "📅 \(parsed.targetDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))\n"
-            response += "👤 Assigned to \(assignee)"
-            if parsed.reward > 0 { response += "\n⭐ \(parsed.reward) coins reward" }
-            response += "\n\nThe task is now live and a reminder has been set."
-            messages.append(AIChatMessage(role: .assistant, text: response))
-        }
+        var response = summaryParts.joined(separator: "\n")
+        response += "\n\n\(allCreated.count) task\(allCreated.count == 1 ? "" : "s") created with reminders set."
+        messages.append(AIChatMessage(role: .assistant, text: response))
     }
 
     private func generateRecurringDates(startDate: Date, recurrence: RecurrenceType, occurrences: Int) -> [Date] {
