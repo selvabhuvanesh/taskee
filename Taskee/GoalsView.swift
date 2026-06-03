@@ -9,6 +9,7 @@ import SwiftData
 // MARK: - Goals Tab Content (inline on home page)
 
 struct GoalsTabContent: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Goal.createdAt) private var goals: [Goal]
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
 
@@ -22,6 +23,7 @@ struct GoalsTabContent: View {
     private var completedGoals: [Goal] { myGoals.filter { $0.isCompleted } }
 
     @State private var selectedGoal: Goal?
+    @State private var goalToDelete: Goal?
 
     var body: some View {
         ScrollView {
@@ -68,9 +70,17 @@ struct GoalsTabContent: View {
                         }
 
                         ForEach(activeGoals) { goal in
-                            Button { selectedGoal = goal } label: {
-                                GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
-                            }
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
 
@@ -81,9 +91,17 @@ struct GoalsTabContent: View {
                             .padding(.top, 8)
 
                         ForEach(completedGoals) { goal in
-                            Button { selectedGoal = goal } label: {
-                                GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
-                            }
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
 
@@ -108,6 +126,26 @@ struct GoalsTabContent: View {
         }
         .sheet(item: $selectedGoal) { goal in
             GoalDetailView(goal: goal, theme: theme)
+        }
+        .alert("Delete Goal?", isPresented: Binding(
+            get: { goalToDelete != nil },
+            set: { if !$0 { goalToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let goal = goalToDelete {
+                    let openTasks = allTasks.filter { $0.goalId == goal.id.uuidString && $0.isOpen }
+                    for task in openTasks { modelContext.delete(task) }
+                    modelContext.delete(goal)
+                    try? modelContext.save()
+                }
+                goalToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { goalToDelete = nil }
+        } message: {
+            if let goal = goalToDelete {
+                let openCount = allTasks.filter { $0.goalId == goal.id.uuidString && $0.isOpen }.count
+                Text("This will delete \"\(goal.name)\" and its \(openCount) open task\(openCount == 1 ? "" : "s"). Completed tasks are kept.")
+            }
         }
     }
 }
@@ -181,22 +219,14 @@ struct GoalProgressCard: View {
     private var total: Int { goal.totalTasks(from: tasks) }
     private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
 
-    private var dialColor: Color { progress >= 1.0 ? .green : category.color }
+    private var dialColor: Color { progress >= 1.0 ? .green : .teal }
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .stroke(dialColor.opacity(0.18), lineWidth: 5)
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(dialColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                Image(systemName: goal.icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(dialColor)
-            }
-            .frame(width: 46, height: 46)
+            Image(systemName: goal.icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(dialColor)
+                .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(goal.name)
@@ -209,9 +239,18 @@ struct GoalProgressCard: View {
 
             Spacer()
 
-            Text("\(Int(progress * 100))%")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(dialColor)
+            ZStack {
+                Circle()
+                    .stroke(dialColor.opacity(0.18), lineWidth: 7)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(dialColor, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(dialColor)
+            }
+            .frame(width: 46, height: 46)
         }
         .padding(12)
         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
@@ -811,6 +850,7 @@ struct GoalsListView: View {
 
     @State private var showGoalPicker = false
     @State private var selectedGoal: Goal?
+    @State private var goalToDelete: Goal?
 
     private var myGoals: [Goal] {
         goals.filter { $0.assignedTo == userName }
@@ -860,9 +900,17 @@ struct GoalsListView: View {
                             .padding(.horizontal, 4)
 
                         ForEach(activeGoals) { goal in
-                            Button { selectedGoal = goal } label: {
-                                GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
-                            }
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
 
@@ -874,9 +922,17 @@ struct GoalsListView: View {
                             .padding(.top, 8)
 
                         ForEach(completedGoals) { goal in
-                            Button { selectedGoal = goal } label: {
-                                GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
-                            }
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
                 }
@@ -897,7 +953,35 @@ struct GoalsListView: View {
         .sheet(item: $selectedGoal) { goal in
             GoalDetailView(goal: goal, theme: theme)
         }
+        .alert("Delete Goal?", isPresented: Binding(
+            get: { goalToDelete != nil },
+            set: { if !$0 { goalToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let goal = goalToDelete {
+                    let openTasks = allTasks.filter { $0.goalId == goal.id.uuidString && $0.isOpen }
+                    for task in openTasks { modelContext.delete(task) }
+                    modelContext.delete(goal)
+                    try? modelContext.save()
+                }
+                goalToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { goalToDelete = nil }
+        } message: {
+            if let goal = goalToDelete {
+                let openCount = allTasks.filter { $0.goalId == goal.id.uuidString && $0.isOpen }.count
+                Text("This will delete \"\(goal.name)\" and its \(openCount) open task\(openCount == 1 ? "" : "s"). Completed tasks are kept.")
+            }
+        }
     }
+}
+
+// MARK: - Task Edit Draft
+
+struct TaskEditDraft {
+    var name: String
+    var targetDate: Date
+    var reward: Double
 }
 
 // MARK: - Goal Detail View
@@ -910,6 +994,15 @@ struct GoalDetailView: View {
     let goal: Goal
     let theme: ChildTheme
 
+    @State private var isEditing = false
+    @State private var editName: String = ""
+    @State private var editCategory: GoalCategory = .lifestyle
+    @State private var editTargetDate: Date = Date()
+    @State private var showDeleteConfirm = false
+    @State private var taskToDelete: Item?
+    @State private var isEditingTasks = false
+    @State private var taskEdits: [UUID: TaskEditDraft] = [:]
+
     private var goalTasks: [Item] {
         allTasks.filter { $0.goalId == goal.id.uuidString }
     }
@@ -919,7 +1012,7 @@ struct GoalDetailView: View {
     }
 
     private var openTasks: [Item] {
-        goalTasks.filter { $0.isOpen }
+        goalTasks.filter { $0.isOpen || $0.isInReview }
     }
 
     private var progress: Double { goal.progress(from: allTasks) }
@@ -940,14 +1033,28 @@ struct GoalDetailView: View {
                             .frame(width: 52, height: 52)
                             .background(category.color.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(goal.name)
-                                .font(.title3.weight(.bold))
+                            if isEditing {
+                                TextField("Goal name", text: $editName)
+                                    .font(.title3.weight(.bold))
+                                    .textFieldStyle(.roundedBorder)
+                            } else {
+                                Text(goal.name)
+                                    .font(.title3.weight(.bold))
+                            }
                             Text("\(goal.assignedTo) \u{00B7} \(category.rawValue)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
                         Menu {
+                            Button {
+                                editName = goal.name
+                                editCategory = GoalCategory(rawValue: goal.category) ?? .lifestyle
+                                editTargetDate = goal.targetDate
+                                withAnimation { isEditing = true }
+                            } label: {
+                                Label("Edit Goal", systemImage: "pencil")
+                            }
                             if goal.isActive {
                                 Button { goal.status = "paused"; try? modelContext.save() } label: {
                                     Label("Pause", systemImage: "pause.circle")
@@ -961,9 +1068,7 @@ struct GoalDetailView: View {
                                 }
                             }
                             Button(role: .destructive) {
-                                modelContext.delete(goal)
-                                try? modelContext.save()
-                                dismiss()
+                                showDeleteConfirm = true
                             } label: {
                                 Label("Delete Goal", systemImage: "trash")
                             }
@@ -972,6 +1077,69 @@ struct GoalDetailView: View {
                                 .font(.title3)
                                 .foregroundStyle(.secondary)
                         }
+                    }
+
+                    if isEditing {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Category")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 6) {
+                                ForEach(GoalCategory.allCases) { cat in
+                                    Button {
+                                        editCategory = cat
+                                    } label: {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: cat.icon)
+                                                .font(.caption2)
+                                            Text(cat.rawValue)
+                                                .font(.caption2)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .frame(maxWidth: .infinity)
+                                        .background(editCategory == cat ? cat.color.opacity(0.2) : Color.primary.opacity(0.05), in: Capsule())
+                                        .overlay(Capsule().strokeBorder(editCategory == cat ? cat.color : .clear, lineWidth: 1.5))
+                                        .foregroundStyle(editCategory == cat ? cat.color : .primary.opacity(0.6))
+                                    }
+                                }
+                            }
+
+                            Text("Target Date")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            DatePicker("", selection: $editTargetDate, displayedComponents: .date)
+                                .labelsHidden()
+
+                            HStack(spacing: 12) {
+                                Button {
+                                    goal.name = editName
+                                    goal.category = editCategory.rawValue
+                                    goal.icon = editCategory.icon
+                                    goal.targetDate = editTargetDate
+                                    try? modelContext.save()
+                                    withAnimation { isEditing = false }
+                                } label: {
+                                    Text("Save")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 8)
+                                        .background(.teal, in: Capsule())
+                                }
+                                .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                                Button {
+                                    withAnimation { isEditing = false }
+                                } label: {
+                                    Text("Cancel")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
                     }
 
                     // Progress
@@ -995,31 +1163,52 @@ struct GoalDetailView: View {
 
                     // Open tasks
                     if !openTasks.isEmpty {
-                        Text("Upcoming (\(openTasks.count))")
-                            .font(.subheadline.weight(.bold))
-                        ForEach(openTasks.prefix(20)) { task in
-                            HStack(spacing: 8) {
-                                Text(task.emoji)
-                                    .font(.system(size: 14))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(task.name)
-                                        .font(.subheadline)
-                                    Text(task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                                        .font(.caption2)
+                        HStack {
+                            Text("Upcoming (\(openTasks.count))")
+                                .font(.subheadline.weight(.bold))
+                            Spacer()
+                            if isEditingTasks {
+                                Button {
+                                    saveAllTaskEdits()
+                                    withAnimation { isEditingTasks = false }
+                                } label: {
+                                    Text("Save All")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 5)
+                                        .background(.teal, in: Capsule())
+                                }
+                                Button {
+                                    taskEdits.removeAll()
+                                    withAnimation { isEditingTasks = false }
+                                } label: {
+                                    Text("Cancel")
+                                        .font(.caption.weight(.medium))
                                         .foregroundStyle(.secondary)
                                 }
-                                Spacer()
-                                if task.reward > 0 {
-                                    HStack(spacing: 2) {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: 9))
-                                            .foregroundStyle(.orange)
-                                        Text("\(Int(task.reward))")
-                                            .font(.caption2.weight(.semibold))
+                            } else {
+                                Button {
+                                    beginEditingAllTasks()
+                                    withAnimation { isEditingTasks = true }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "pencil")
+                                            .font(.caption2)
+                                        Text("Edit All")
+                                            .font(.caption.weight(.semibold))
                                     }
+                                    .foregroundStyle(category.color)
                                 }
                             }
-                            .padding(.vertical, 4)
+                        }
+
+                        ForEach(openTasks.prefix(20)) { task in
+                            if isEditingTasks {
+                                editableTaskRow(task: task)
+                            } else {
+                                goalTaskRow(task: task, completed: false)
+                            }
                         }
                     }
 
@@ -1030,17 +1219,7 @@ struct GoalDetailView: View {
                             .foregroundStyle(.secondary)
                             .padding(.top, 4)
                         ForEach(doneTasks.prefix(10)) { task in
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.green)
-                                Text(task.name)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .strikethrough()
-                                Spacer()
-                            }
-                            .padding(.vertical, 2)
+                            goalTaskRow(task: task, completed: true)
                         }
                     }
                 }
@@ -1054,6 +1233,136 @@ struct GoalDetailView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert("Delete Goal?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) {
+                    for task in goalTasks where task.isOpen {
+                        modelContext.delete(task)
+                    }
+                    modelContext.delete(goal)
+                    try? modelContext.save()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will delete \"\(goal.name)\" and its \(openTasks.count) open task\(openTasks.count == 1 ? "" : "s"). Completed tasks are kept.")
+            }
+            .alert("Delete Task?", isPresented: Binding(
+                get: { taskToDelete != nil },
+                set: { if !$0 { taskToDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let task = taskToDelete {
+                        modelContext.delete(task)
+                        try? modelContext.save()
+                    }
+                    taskToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { taskToDelete = nil }
+            } message: {
+                if let task = taskToDelete {
+                    Text("Are you sure you want to delete \"\(task.name)\"?")
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func goalTaskRow(task: Item, completed: Bool) -> some View {
+        HStack(spacing: 8) {
+            if completed {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.green)
+                Text(task.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .strikethrough()
+            } else {
+                Text(task.emoji)
+                    .font(.system(size: 14))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(task.name)
+                        .font(.subheadline)
+                    Text(task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if !completed && task.reward > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                    Text("\(Int(task.reward))")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            if task.isOpen {
+                Button(role: .destructive) {
+                    taskToDelete = task
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption2)
+                        .foregroundStyle(.red.opacity(0.5))
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func editableTaskRow(task: Item) -> some View {
+        let draft = Binding<TaskEditDraft>(
+            get: { taskEdits[task.id] ?? TaskEditDraft(name: task.name, targetDate: task.targetDate, reward: task.reward) },
+            set: { taskEdits[task.id] = $0 }
+        )
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("Task name", text: draft.name)
+                    .font(.subheadline)
+                    .textFieldStyle(.roundedBorder)
+                Button(role: .destructive) { taskToDelete = task } label: {
+                    Image(systemName: "trash")
+                        .font(.caption2)
+                        .foregroundStyle(.red.opacity(0.5))
+                }
+            }
+            HStack(spacing: 10) {
+                DatePicker("", selection: draft.targetDate)
+                    .labelsHidden()
+                    .font(.caption)
+                Spacer()
+                HStack(spacing: 3) {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    TextField("", value: draft.reward, format: .number)
+                        .font(.caption)
+                        .frame(width: 40)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func beginEditingAllTasks() {
+        taskEdits.removeAll()
+        for task in openTasks {
+            taskEdits[task.id] = TaskEditDraft(name: task.name, targetDate: task.targetDate, reward: task.reward)
+        }
+    }
+
+    private func saveAllTaskEdits() {
+        for task in openTasks {
+            guard let draft = taskEdits[task.id] else { continue }
+            task.name = draft.name
+            task.targetDate = draft.targetDate
+            task.reward = draft.reward
+        }
+        try? modelContext.save()
+        taskEdits.removeAll()
     }
 }
