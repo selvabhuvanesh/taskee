@@ -2834,6 +2834,164 @@ struct QuestProgressBar: View {
     }
 }
 
+// MARK: - Radial Dock Menu
+
+struct RadialDockItem: Identifiable {
+    let id = UUID()
+    let icon: String
+    let label: String
+    let color: Color
+    let badge: Int
+    let action: () -> Void
+
+    init(icon: String, label: String, color: Color, badge: Int = 0, action: @escaping () -> Void) {
+        self.icon = icon
+        self.label = label
+        self.color = color
+        self.badge = badge
+        self.action = action
+    }
+}
+
+struct RadialDock: View {
+    let items: [RadialDockItem]
+
+    @State private var rotationAngle: Double = 0
+    @State private var dragAngle: Double = 0
+
+    private let radius: CGFloat = 130
+    private let itemSize: CGFloat = 44
+    private let anchorOffset: CGFloat = 30
+
+    private var focusedIndex: Int {
+        guard !items.isEmpty else { return 0 }
+        let totalAngle = rotationAngle + dragAngle
+        let step = .pi / Double(max(items.count, 2))
+        let raw = Int(round(-totalAngle / step))
+        return max(0, min(items.count - 1, raw))
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let anchorX = geo.size.width - anchorOffset
+            let anchorY = geo.size.height - geo.safeAreaInsets.bottom - anchorOffset
+            let hitRadius = radius + itemSize / 2 + 20
+
+            ZStack {
+                Circle()
+                    .fill(.black.opacity(0.12))
+                    .frame(width: hitRadius * 2, height: hitRadius * 2)
+                    .position(x: anchorX, y: anchorY)
+                    .allowsHitTesting(false)
+
+                ForEach(0..<max(0, items.count - 1), id: \.self) { index in
+                    let angle1 = angleFor(index: index) + rotationAngle + dragAngle
+                    let angle2 = angleFor(index: index + 1) + rotationAngle + dragAngle
+                    let midAngle = (angle1 + angle2) / 2
+                    let innerR = radius - itemSize / 2 - 4
+                    let outerR = radius + itemSize / 2 + 4
+                    Path { path in
+                        path.move(to: CGPoint(
+                            x: anchorX + cos(midAngle) * innerR,
+                            y: anchorY + sin(midAngle) * innerR
+                        ))
+                        path.addLine(to: CGPoint(
+                            x: anchorX + cos(midAngle) * outerR,
+                            y: anchorY + sin(midAngle) * outerR
+                        ))
+                    }
+                    .stroke(.white.opacity(0.5), lineWidth: 2)
+                    .allowsHitTesting(false)
+                }
+
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    let baseAngle = angleFor(index: index)
+                    let angle = baseAngle + rotationAngle + dragAngle
+                    let x = anchorX + cos(angle) * radius
+                    let y = anchorY + sin(angle) * radius
+                    let isFocused = index == focusedIndex
+
+                    Button {
+                        item.action()
+                    } label: {
+                        VStack(spacing: 4) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: item.icon)
+                                    .font(.system(size: isFocused ? 20 : 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: isFocused ? 52 : itemSize, height: isFocused ? 52 : itemSize)
+                                    .background(item.color, in: Circle())
+                                    .shadow(color: item.color.opacity(isFocused ? 0.6 : 0.3), radius: isFocused ? 10 : 4, y: 3)
+                                if item.badge > 0 {
+                                    Text("\(item.badge)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(minWidth: 16, minHeight: 16)
+                                        .background(.red, in: Circle())
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
+                            if isFocused {
+                                Text(item.label)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(.black.opacity(0.6), in: Capsule())
+                                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.2), value: isFocused)
+                    }
+                    .position(x: x, y: y)
+                }
+
+                Circle()
+                    .fill(.clear)
+                    .frame(width: hitRadius * 2, height: hitRadius * 2)
+                    .contentShape(Circle())
+                    .position(x: anchorX, y: anchorY)
+                    .gesture(
+                        DragGesture(minimumDistance: 5)
+                            .onChanged { value in
+                                let center = CGPoint(x: anchorX, y: anchorY)
+                                let startAngle = atan2(value.startLocation.y - center.y, value.startLocation.x - center.x)
+                                let currentAngle = atan2(value.location.y - center.y, value.location.x - center.x)
+                                var delta = currentAngle - startAngle
+                                if delta > .pi { delta -= 2 * .pi }
+                                if delta < -.pi { delta += 2 * .pi }
+                                dragAngle = delta
+                            }
+                            .onEnded { _ in
+                                rotationAngle += dragAngle
+                                dragAngle = 0
+                                snapToNearest()
+                            }
+                    )
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func angleFor(index: Int) -> Double {
+        let count = max(items.count, 2)
+        let totalArc = .pi * 0.8
+        let startAngle = .pi + (.pi - totalArc) / 2
+        let step = totalArc / Double(count - 1)
+        return startAngle + step * Double(index)
+    }
+
+    private func snapToNearest() {
+        let step = .pi / Double(max(items.count, 2))
+        let snapped = round(rotationAngle / step) * step
+        let maxRotation = 0.0
+        let minRotation = -step * Double(items.count - 1)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            rotationAngle = max(minRotation, min(maxRotation, snapped))
+        }
+    }
+}
+
 // MARK: - Goal Model
 
 @Model

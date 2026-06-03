@@ -269,40 +269,15 @@ struct ChildDashboardView: View {
                         }
                         .transition(.scale.combined(with: .opacity))
                     }
-
-                    HStack(spacing: 14) {
-                        pickupButton
-                        familyChatButton
-                        shoppingBagButton
-                        familyProjectsButton
-                        wishListButton
-                        addTaskButton
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.5))
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                Button {
-                    withAnimation { isAIMode = true }
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            in: Circle()
-                        )
-                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
-                }
-                .padding(.trailing, 20)
-                .padding(.bottom, 80)
+            .overlay(alignment: .bottomLeading) {
+                addTaskButton
+                    .padding(.leading, 20)
+                    .padding(.bottom, 16)
+            }
+            .overlay {
+                RadialDock(items: childDockItems)
             }
             .coordinateSpace(name: "childDashboard")
             .onAppear { scheduleStickyNote(from: childTips) }
@@ -972,6 +947,34 @@ struct ChildDashboardView: View {
             .padding(.vertical, 5)
             .background(childTheme.cardBackground, in: Capsule())
         }
+    }
+
+    private var childDockItems: [RadialDockItem] {
+        let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
+        let chatUnread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
+        let unboughtCount = shoppingItems.filter { !$0.isBought }.count
+        let projectCount = allProjects.filter { !$0.isCompleted }.count
+        return [
+            RadialDockItem(icon: "car.fill", label: "Pickup", color: calmAccent) { [self] in
+                guard subscriptionManager.canSendPickup() else {
+                    showPickupLimit = true
+                    return
+                }
+                subscriptionManager.recordPickup()
+                Task {
+                    if let member = allMembers.first(where: { $0.name == authManager.userName }) {
+                        member.lastPickupAt = Date()
+                        await cloudKitManager.pushMember(member, familyCode: authManager.familyCode)
+                    }
+                }
+                showPickupSent = true
+            },
+            RadialDockItem(icon: "bubble.left.and.bubble.right.fill", label: "Chat", color: Color(red: 0.4, green: 0.8, blue: 0.2), badge: chatUnread) { showFamilyChat = true },
+            RadialDockItem(icon: "bag.fill", label: "Shopping", color: .orange, badge: unboughtCount) { showShoppingBag = true },
+            RadialDockItem(icon: "paperplane.fill", label: "Projects", color: .indigo, badge: projectCount) { showFamilyProjects = true },
+            RadialDockItem(icon: "wand.and.stars", label: "Wish List", color: .purple.opacity(0.85)) { showWishList = true },
+            RadialDockItem(icon: "sparkles", label: "AI Assistant", color: .purple) { withAnimation { isAIMode = true } },
+        ]
     }
 
     private var earningsCard: some View {
