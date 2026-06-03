@@ -356,6 +356,8 @@ struct ContentView: View {
     @State private var showWishList = false
     @State private var isSearching = false
     @State private var searchText = ""
+    @State private var showGoalsTab = false
+    @State private var showStatsPopup = false
     @Query(sort: \ChatMessage.sentAt) private var chatMessages: [ChatMessage]
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @State private var editRequest: TaskEditRequest?
@@ -370,6 +372,8 @@ struct ContentView: View {
     @Query private var allGifts: [SurpriseGift]
     @State private var showParentRedeem = false
     @State private var showParentGifts = false
+    @State private var showGoalPicker = false
+    @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
     @State private var giftTaskToReveal: Item?
 
     private var pendingRedemptions: [RewardRedemption] {
@@ -381,7 +385,7 @@ struct ContentView: View {
     }
 
     private var parentInReviewCoins: Int {
-        activeTasks
+        tasks
             .filter { $0.assignedTo == authManager.userName && $0.isInReview && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
     }
@@ -399,7 +403,7 @@ struct ContentView: View {
     }
 
     private var parentTotalEarned: Int {
-        activeTasks
+        tasks
             .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
     }
@@ -490,7 +494,7 @@ struct ContentView: View {
         if isAIMode {
             aiModeView
         } else {
-            normalModeView
+            AnyView(normalModeView)
         }
     }
 
@@ -537,152 +541,17 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        Text("My Tasks")
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(parentTheme.textColor)
-                        QuestProgressBar(
-                            quest: MonthlyQuest.compute(tasks: tasks, userName: authManager.userName),
-                            theme: parentTheme
+                    parentTasksGoalsToggle
+
+                    if showGoalsTab {
+                        GoalsTabContent(
+                            userName: authManager.userName,
+                            audience: isIndividual ? .individual : .parent,
+                            theme: parentTheme,
+                            showGoalPicker: $showGoalPicker
                         )
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-
-                    if !isIndividual && (parentTotalEarned > 0 || parentAwaitingCoins > 0) {
-                        parentEarningsCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                    }
-
-                    if !isIndividual && (!children.isEmpty || otherParent != nil) {
-                        familyStrip
-                            .padding(.top, 6)
-                    }
-
-                    if !upcomingReminders.isEmpty {
-                        Button { showAnnualReminders = true } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "calendar.badge.clock")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.orange)
-                                let overdueCount = annualReminders.filter { $0.isOverdue }.count
-                                if overdueCount > 0 {
-                                    Text("\(overdueCount) overdue, \(upcomingReminders.count - overdueCount) upcoming reminder\(upcomingReminders.count - overdueCount == 1 ? "" : "s")")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.primary.opacity(0.7))
-                                } else {
-                                    Text("\(upcomingReminders.count) reminder\(upcomingReminders.count == 1 ? "" : "s") due within 30 days")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.primary.opacity(0.7))
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.primary.opacity(0.4))
-                            }
-                            .padding(10)
-                            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
-                    }
-
-                    if isSearching {
-                        HStack(spacing: 8) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.secondary)
-                                TextField("Search tasks...", text: $searchText)
-                                    .font(.subheadline)
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                                if !searchText.isEmpty {
-                                    Button {
-                                        searchText = ""
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .padding(8)
-                            .background(parentTheme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
-
-                            Button("Cancel") {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    searchText = ""
-                                    isSearching = false
-                                }
-                            }
-                            .font(.subheadline)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                    }
-
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            if showCalendarView {
-                                VStack(spacing: 0) {
-                                    viewModeToggle
-                                    WeekCalendarStrip(
-                                        selectedDate: $selectedCalendarDate,
-                                        tasks: filteredTasks,
-                                        theme: parentTheme
-                                    )
-                                    if calendarDayTasks.isEmpty {
-                                        calendarEmptyState
-                                    } else {
-                                        calendarTaskList
-                                    }
-                                }
-                            } else if filteredTasks.isEmpty {
-                                VStack(spacing: 0) {
-                                    viewModeToggle
-                                    emptyState
-                                }
-                            } else {
-                                VStack(spacing: 0) {
-                                    viewModeToggle
-                                    if isExpanded || isSearching {
-                                        expandedListContent
-                                    } else {
-                                        groupListContent
-                                    }
-                                }
-                            }
-                        }
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                withAnimation { proxy.scrollTo("Today", anchor: .top) }
-                            }
-                        }
-                        .onChange(of: showOpenOnly) {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                proxy.scrollTo("Today", anchor: .top)
-                            }
-                        }
-                    }
-                    .refreshable {
-                        guard !authManager.familyCode.isEmpty else { return }
-                        await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode) { tasks in
-                            for task in tasks {
-                                notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
-                            }
-                        }
-                        refreshUnreadCount()
-                    }
-                    .safeAreaInset(edge: .bottom) {
-                        Color.clear.frame(height: 60)
+                    } else {
+                        parentTasksContent
                     }
                 }
 
@@ -931,6 +800,13 @@ struct ContentView: View {
             .sheet(isPresented: $showWishList) {
                 WishListView(theme: parentTheme)
             }
+            .sheet(isPresented: $showGoalPicker) {
+                GoalPickerView(
+                    audience: isIndividual ? .individual : .parent,
+                    assignee: authManager.userName,
+                    theme: parentTheme
+                )
+            }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
                     UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastNotifReadTime")
@@ -987,6 +863,37 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showPrivacyPolicy) {
                 PrivacyPolicyView()
+            }
+            .sheet(isPresented: $showStatsPopup) {
+                NavigationStack {
+                    ZStack {
+                        LinearGradient(
+                            colors: parentTheme.gradientColors,
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            parentEarningsCard
+                            QuestProgressBar(
+                                quest: MonthlyQuest.compute(tasks: tasks, userName: authManager.userName),
+                                theme: parentTheme
+                            )
+                        }
+                        .padding(16)
+                    }
+                    .navigationTitle("My Stats")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showStatsPopup = false }
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showPendingApprovals) {
                 PendingApprovalsView(theme: parentTheme) { reward in
@@ -1265,6 +1172,14 @@ struct ContentView: View {
                                 .background(.indigo, in: Circle())
                         }
 
+                        if task.belongsToGoal {
+                            Image(systemName: "target")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(.teal, in: Circle())
+                        }
+
                         if task.needsTransport {
                             Image(systemName: task.transportIcon)
                                 .font(.system(size: 11, weight: .semibold))
@@ -1537,6 +1452,189 @@ struct ContentView: View {
 
         reminderSentChildName = child.name
         showReminderSent = true
+    }
+
+    private var parentTasksGoalsToggle: some View {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Tasks")
+                        .font(.subheadline.weight(.bold))
+                }
+                .foregroundStyle(showGoalsTab ? parentTheme.secondaryTextColor : parentTheme.textColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(showGoalsTab ? Color.clear : parentTheme.cardBackground, in: Capsule())
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "target")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Goals")
+                        .font(.subheadline.weight(.bold))
+                    let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                    if activeCount > 0 {
+                        Text("\(activeCount)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(.teal, in: Circle())
+                    }
+                }
+                .foregroundStyle(showGoalsTab ? parentTheme.textColor : parentTheme.secondaryTextColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(showGoalsTab ? parentTheme.cardBackground : Color.clear, in: Capsule())
+            }
+
+            Spacer()
+
+            if !showGoalsTab && !isIndividual && (parentTotalEarned > 0 || parentAwaitingCoins > 0) {
+                parentStatsIconPill
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private var parentTasksContent: some View {
+        if !isIndividual && (!children.isEmpty || otherParent != nil) {
+            familyStrip
+                .padding(.top, 6)
+        }
+
+        if !upcomingReminders.isEmpty {
+            Button { showAnnualReminders = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    let overdueCount = annualReminders.filter { $0.isOverdue }.count
+                    if overdueCount > 0 {
+                        Text("\(overdueCount) overdue, \(upcomingReminders.count - overdueCount) upcoming reminder\(upcomingReminders.count - overdueCount == 1 ? "" : "s")")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary.opacity(0.7))
+                    } else {
+                        Text("\(upcomingReminders.count) reminder\(upcomingReminders.count == 1 ? "" : "s") due within 30 days")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary.opacity(0.7))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.4))
+                }
+                .padding(10)
+                .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+
+        if isSearching {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                    TextField("Search tasks...", text: $searchText)
+                        .font(.subheadline)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(parentTheme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        searchText = ""
+                        isSearching = false
+                    }
+                }
+                .font(.subheadline)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+
+        ScrollViewReader { proxy in
+            ScrollView {
+                if showCalendarView {
+                    VStack(spacing: 0) {
+                        viewModeToggle
+                        WeekCalendarStrip(
+                            selectedDate: $selectedCalendarDate,
+                            tasks: filteredTasks,
+                            theme: parentTheme
+                        )
+                        if calendarDayTasks.isEmpty {
+                            calendarEmptyState
+                        } else {
+                            calendarTaskList
+                        }
+                    }
+                } else if filteredTasks.isEmpty {
+                    VStack(spacing: 0) {
+                        viewModeToggle
+                        emptyState
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        viewModeToggle
+                        if isExpanded || isSearching {
+                            expandedListContent
+                        } else {
+                            groupListContent
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo("Today", anchor: .top) }
+                }
+            }
+            .onChange(of: showOpenOnly) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    proxy.scrollTo("Today", anchor: .top)
+                }
+            }
+        }
+        .refreshable {
+            guard !authManager.familyCode.isEmpty else { return }
+            await cloudKitManager.syncAll(context: modelContext, familyCode: authManager.familyCode) { tasks in
+                for task in tasks {
+                    notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
+                }
+            }
+            refreshUnreadCount()
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 60)
+        }
     }
 
     private var filterToggle: some View {
@@ -1997,6 +2095,57 @@ struct ContentView: View {
                 .background(.purple.opacity(0.85), in: Circle())
         }
         .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var goalsButton: some View {
+        NavigationLink {
+            GoalsListView(
+                userName: authManager.userName,
+                audience: isIndividual ? .individual : .parent,
+                theme: parentTheme
+            )
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "target")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.teal, in: Circle())
+
+                let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var parentStatsIconPill: some View {
+        Button { showStatsPopup = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "star.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.green)
+                Text("\(parentCollectableCoins)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.green)
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                Text("\(parentAwaitingCoins)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(parentTheme.cardBackground, in: Capsule())
+        }
     }
 
     private var parentEarningsCard: some View {
@@ -3479,6 +3628,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
+    @Query(sort: \Item.targetDate) private var allTasksQuery: [Item]
 
     @Binding var taskToDelete: Item?
     @Binding var taskToApprove: Item?
@@ -3588,7 +3738,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                 Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 if task.reward > 0, !task.assignedTo.isEmpty {
                     if let member = allMembers.first(where: { $0.name == task.assignedTo }) {
-                        member.recomputeEarned(from: tasks)
+                        member.recomputeEarned(from: allTasksQuery)
                         Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
                     }
                 }
@@ -3759,6 +3909,14 @@ struct TaskRow: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
                                     .background(.indigo, in: Circle())
+                            }
+
+                            if task.belongsToGoal {
+                                Image(systemName: "target")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 18, height: 18)
+                                    .background(.teal, in: Circle())
                             }
 
                             if task.needsTransport {

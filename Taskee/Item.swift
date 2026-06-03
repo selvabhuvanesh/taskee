@@ -30,8 +30,11 @@ final class Item {
     var lastRemindedAt: Date?
     var transportType: String = "none"
     var projectId: String = ""
+    var goalId: String = ""
 
-    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "", transportType: String = "none", projectId: String = "") {
+    var belongsToGoal: Bool { !goalId.isEmpty }
+
+    init(id: UUID = UUID(), name: String, targetDate: Date, assignedTo: String = "", reward: Double = 0, status: String = "open", createdByChild: Bool = false, isRecurring: Bool = false, giftText: String = "", createdBy: String = "", createdByID: String = "", transportType: String = "none", projectId: String = "", goalId: String = "") {
         self.id = id
         self.name = name
         self.targetDate = targetDate
@@ -48,6 +51,7 @@ final class Item {
         self.lastRemindedAt = nil
         self.transportType = transportType
         self.projectId = projectId
+        self.goalId = goalId
     }
 
     var hasGift: Bool { !giftText.isEmpty }
@@ -2827,5 +2831,236 @@ struct QuestProgressBar: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(quest.rank.color.opacity(0.4), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Goal Model
+
+@Model
+final class Goal {
+    var id: UUID
+    var name: String
+    var category: String
+    var icon: String
+    var assignedTo: String
+    var createdBy: String
+    var status: String
+    var targetDate: Date
+    var createdAt: Date
+    var isCustom: Bool
+    var templateId: String
+
+    init(id: UUID = UUID(), name: String, category: String, icon: String, assignedTo: String, createdBy: String, targetDate: Date = Date(), isCustom: Bool = false, templateId: String = "") {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.icon = icon
+        self.assignedTo = assignedTo
+        self.createdBy = createdBy
+        self.status = "active"
+        self.targetDate = targetDate
+        self.createdAt = Date()
+        self.isCustom = isCustom
+        self.templateId = templateId
+    }
+
+    var isActive: Bool { status == "active" }
+    var isCompleted: Bool { status == "completed" }
+    var isPaused: Bool { status == "paused" }
+
+    func progress(from tasks: [Item]) -> Double {
+        let goalTasks = tasks.filter { $0.goalId == id.uuidString }
+        guard !goalTasks.isEmpty else { return 0 }
+        let done = goalTasks.filter { $0.isApproved }.count
+        return Double(done) / Double(goalTasks.count)
+    }
+
+    func tasksDone(from tasks: [Item]) -> Int {
+        tasks.filter { $0.goalId == id.uuidString && $0.isApproved }.count
+    }
+
+    func totalTasks(from tasks: [Item]) -> Int {
+        tasks.filter { $0.goalId == id.uuidString }.count
+    }
+}
+
+// MARK: - Goal Templates
+
+struct SuggestedTask {
+    let name: String
+    let frequency: RecurrenceType
+    let occurrences: Int
+    let reward: Int
+    let hour: Int
+    let minute: Int
+}
+
+struct GoalTemplate: Identifiable {
+    let id: String
+    let name: String
+    let category: GoalCategory
+    let icon: String
+    let audience: Set<GoalAudience>
+    let durationDays: Int
+    let suggestedTasks: [SuggestedTask]
+}
+
+enum GoalAudience: String, CaseIterable {
+    case child, parent, individual
+}
+
+enum GoalCategory: String, CaseIterable, Identifiable {
+    case education = "Education"
+    case wellbeing = "Well-being"
+    case lifestyle = "Lifestyle"
+    case finance = "Finance"
+    case skills = "Skills"
+    case fitness = "Fitness"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .education: return "book.fill"
+        case .wellbeing: return "heart.fill"
+        case .lifestyle: return "house.fill"
+        case .finance: return "banknote.fill"
+        case .skills: return "star.fill"
+        case .fitness: return "figure.run"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .education: return .blue
+        case .wellbeing: return .pink
+        case .lifestyle: return .orange
+        case .finance: return .green
+        case .skills: return .purple
+        case .fitness: return .red
+        }
+    }
+}
+
+struct GoalTemplateCatalog {
+    static let all: [GoalTemplate] = [
+        // EDUCATION
+        GoalTemplate(id: "ace_exams", name: "Ace My Exams", category: .education, icon: "graduationcap.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Study session", frequency: .daily, occurrences: 30, reward: 3, hour: 16, minute: 0),
+            SuggestedTask(name: "Practice problems", frequency: .daily, occurrences: 30, reward: 2, hour: 17, minute: 0),
+            SuggestedTask(name: "Review notes", frequency: .daily, occurrences: 30, reward: 2, hour: 18, minute: 0),
+        ]),
+        GoalTemplate(id: "read_books", name: "Read 10 Books", category: .education, icon: "books.vertical.fill", audience: [.child, .parent, .individual], durationDays: 60, suggestedTasks: [
+            SuggestedTask(name: "Read for 30 minutes", frequency: .daily, occurrences: 60, reward: 2, hour: 20, minute: 0),
+            SuggestedTask(name: "Write book summary", frequency: .weekly, occurrences: 8, reward: 5, hour: 18, minute: 0),
+        ]),
+        GoalTemplate(id: "homework_routine", name: "Homework Routine", category: .education, icon: "pencil.and.ruler.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Complete homework", frequency: .daily, occurrences: 20, reward: 3, hour: 16, minute: 0),
+            SuggestedTask(name: "Pack school bag", frequency: .daily, occurrences: 20, reward: 1, hour: 20, minute: 0),
+        ]),
+        GoalTemplate(id: "learn_multiplication", name: "Learn Multiplication", category: .education, icon: "number.circle.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Math drills", frequency: .daily, occurrences: 30, reward: 2, hour: 16, minute: 30),
+            SuggestedTask(name: "Times table quiz", frequency: .weekly, occurrences: 4, reward: 5, hour: 17, minute: 0),
+        ]),
+
+        // WELL-BEING
+        GoalTemplate(id: "weight_loss", name: "Weight Loss", category: .wellbeing, icon: "scalemass.fill", audience: [.parent, .individual], durationDays: 60, suggestedTasks: [
+            SuggestedTask(name: "Exercise 30 min", frequency: .daily, occurrences: 60, reward: 3, hour: 7, minute: 0),
+            SuggestedTask(name: "Drink 8 glasses of water", frequency: .daily, occurrences: 60, reward: 1, hour: 9, minute: 0),
+            SuggestedTask(name: "Meal prep healthy food", frequency: .weekly, occurrences: 8, reward: 5, hour: 10, minute: 0),
+            SuggestedTask(name: "Log weight", frequency: .weekly, occurrences: 8, reward: 2, hour: 8, minute: 0),
+        ]),
+        GoalTemplate(id: "morning_routine", name: "Morning Routine", category: .wellbeing, icon: "sunrise.fill", audience: [.child, .parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Wake up on time", frequency: .daily, occurrences: 30, reward: 2, hour: 7, minute: 0),
+            SuggestedTask(name: "Make bed", frequency: .daily, occurrences: 30, reward: 1, hour: 7, minute: 15),
+            SuggestedTask(name: "Eat breakfast", frequency: .daily, occurrences: 30, reward: 1, hour: 7, minute: 30),
+        ]),
+        GoalTemplate(id: "meditate_daily", name: "Meditate Daily", category: .wellbeing, icon: "brain.head.profile.fill", audience: [.parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Meditate 10 minutes", frequency: .daily, occurrences: 30, reward: 3, hour: 7, minute: 0),
+            SuggestedTask(name: "Gratitude journaling", frequency: .daily, occurrences: 30, reward: 2, hour: 21, minute: 0),
+        ]),
+        GoalTemplate(id: "sleep_routine", name: "Sleep by 9pm", category: .wellbeing, icon: "moon.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Brush teeth", frequency: .daily, occurrences: 30, reward: 1, hour: 20, minute: 30),
+            SuggestedTask(name: "Lights out by 9pm", frequency: .daily, occurrences: 30, reward: 2, hour: 21, minute: 0),
+        ]),
+        GoalTemplate(id: "drink_water", name: "Drink More Water", category: .wellbeing, icon: "drop.fill", audience: [.child, .parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Drink 8 glasses of water", frequency: .daily, occurrences: 30, reward: 2, hour: 12, minute: 0),
+        ]),
+
+        // LIFESTYLE
+        GoalTemplate(id: "clean_home", name: "Clean Home", category: .lifestyle, icon: "sparkles", audience: [.parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Vacuum/sweep floors", frequency: .weekly, occurrences: 4, reward: 5, hour: 10, minute: 0),
+            SuggestedTask(name: "Wipe kitchen counters", frequency: .daily, occurrences: 30, reward: 1, hour: 20, minute: 0),
+            SuggestedTask(name: "Clean bathrooms", frequency: .weekly, occurrences: 4, reward: 5, hour: 11, minute: 0),
+            SuggestedTask(name: "Do laundry", frequency: .weekly, occurrences: 4, reward: 3, hour: 9, minute: 0),
+        ]),
+        GoalTemplate(id: "keep_room_clean", name: "Keep Room Clean", category: .lifestyle, icon: "bed.double.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Make bed", frequency: .daily, occurrences: 30, reward: 1, hour: 7, minute: 30),
+            SuggestedTask(name: "Tidy room", frequency: .daily, occurrences: 30, reward: 2, hour: 19, minute: 0),
+            SuggestedTask(name: "Organize desk", frequency: .weekly, occurrences: 4, reward: 3, hour: 17, minute: 0),
+        ]),
+        GoalTemplate(id: "meal_prep", name: "Meal Prep Weekly", category: .lifestyle, icon: "fork.knife.circle.fill", audience: [.parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Plan weekly meals", frequency: .weekly, occurrences: 4, reward: 3, hour: 10, minute: 0),
+            SuggestedTask(name: "Grocery shopping", frequency: .weekly, occurrences: 4, reward: 3, hour: 11, minute: 0),
+            SuggestedTask(name: "Prep meals for the week", frequency: .weekly, occurrences: 4, reward: 5, hour: 14, minute: 0),
+        ]),
+
+        // FINANCE
+        GoalTemplate(id: "save_money", name: "Save Money", category: .finance, icon: "dollarsign.circle.fill", audience: [.parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Track daily spending", frequency: .daily, occurrences: 30, reward: 2, hour: 21, minute: 0),
+            SuggestedTask(name: "Review weekly budget", frequency: .weekly, occurrences: 4, reward: 5, hour: 19, minute: 0),
+            SuggestedTask(name: "No unnecessary purchases today", frequency: .daily, occurrences: 30, reward: 3, hour: 20, minute: 0),
+        ]),
+        GoalTemplate(id: "save_pocket_money", name: "Save Pocket Money", category: .finance, icon: "piggy.bank.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Save coins (no spending today)", frequency: .daily, occurrences: 30, reward: 2, hour: 18, minute: 0),
+            SuggestedTask(name: "Count savings", frequency: .weekly, occurrences: 4, reward: 3, hour: 17, minute: 0),
+        ]),
+
+        // SKILLS
+        GoalTemplate(id: "learn_cooking", name: "Learn to Cook", category: .skills, icon: "frying.pan.fill", audience: [.child, .parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Cook a new recipe", frequency: .weekly, occurrences: 4, reward: 5, hour: 17, minute: 0),
+            SuggestedTask(name: "Help with dinner prep", frequency: .daily, occurrences: 20, reward: 2, hour: 17, minute: 30),
+        ]),
+        GoalTemplate(id: "practice_piano", name: "Practice Piano", category: .skills, icon: "pianokeys", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Piano practice 20 min", frequency: .daily, occurrences: 30, reward: 3, hour: 16, minute: 0),
+            SuggestedTask(name: "Learn a new song", frequency: .weekly, occurrences: 4, reward: 5, hour: 16, minute: 30),
+        ]),
+        GoalTemplate(id: "learn_coding", name: "Learn Coding", category: .skills, icon: "chevron.left.forwardslash.chevron.right", audience: [.child, .parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Coding practice 30 min", frequency: .daily, occurrences: 30, reward: 3, hour: 17, minute: 0),
+            SuggestedTask(name: "Complete a coding challenge", frequency: .weekly, occurrences: 4, reward: 5, hour: 18, minute: 0),
+        ]),
+        GoalTemplate(id: "learn_language", name: "Learn a Language", category: .skills, icon: "globe", audience: [.child, .parent, .individual], durationDays: 60, suggestedTasks: [
+            SuggestedTask(name: "Language app lesson", frequency: .daily, occurrences: 60, reward: 2, hour: 18, minute: 0),
+            SuggestedTask(name: "Practice vocabulary", frequency: .daily, occurrences: 60, reward: 1, hour: 19, minute: 0),
+        ]),
+
+        // FITNESS
+        GoalTemplate(id: "run_5k", name: "Run a 5K", category: .fitness, icon: "figure.run", audience: [.parent, .individual], durationDays: 60, suggestedTasks: [
+            SuggestedTask(name: "Running session", frequency: .daily, occurrences: 40, reward: 3, hour: 6, minute: 30),
+            SuggestedTask(name: "Stretching routine", frequency: .daily, occurrences: 60, reward: 1, hour: 6, minute: 0),
+            SuggestedTask(name: "Rest day (no running)", frequency: .weekly, occurrences: 8, reward: 2, hour: 8, minute: 0),
+        ]),
+        GoalTemplate(id: "gym_3x", name: "Gym 3x/Week", category: .fitness, icon: "dumbbell.fill", audience: [.parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Gym workout", frequency: .weekly, occurrences: 12, reward: 5, hour: 7, minute: 0),
+        ]),
+        GoalTemplate(id: "walk_steps", name: "Walk 5000 Steps", category: .fitness, icon: "figure.walk", audience: [.child, .parent, .individual], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Walk 5000 steps", frequency: .daily, occurrences: 30, reward: 2, hour: 17, minute: 0),
+        ]),
+        GoalTemplate(id: "join_sport", name: "Join a Sport", category: .fitness, icon: "sportscourt.fill", audience: [.child], durationDays: 30, suggestedTasks: [
+            SuggestedTask(name: "Sports practice", frequency: .weekly, occurrences: 8, reward: 5, hour: 16, minute: 0),
+            SuggestedTask(name: "Exercise at home", frequency: .daily, occurrences: 20, reward: 2, hour: 17, minute: 0),
+        ]),
+    ]
+
+    static func templates(for audience: GoalAudience) -> [GoalTemplate] {
+        all.filter { $0.audience.contains(audience) }
+    }
+
+    static func grouped(for audience: GoalAudience) -> [(category: GoalCategory, templates: [GoalTemplate])] {
+        let filtered = templates(for: audience)
+        return GoalCategory.allCases.compactMap { cat in
+            let templates = filtered.filter { $0.category == cat }
+            return templates.isEmpty ? nil : (category: cat, templates: templates)
+        }
     }
 }

@@ -66,6 +66,10 @@ struct ChildDashboardView: View {
     @State private var showRecurringExtension = false
     @State private var recurringGroups: [RecurringTaskGroup] = []
     @Query private var allRedemptions: [RewardRedemption]
+    @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
+    @State private var showGoalPicker = false
+    @State private var showGoalsTab = false
+    @State private var showStatsPopup = false
 
     private var myMember: FamilyMember? {
         allMembers.first { $0.appleUserID == authManager.appleUserID }
@@ -160,7 +164,7 @@ struct ChildDashboardView: View {
         if isAIMode {
             childAIModeView
         } else {
-            childNormalModeView
+            AnyView(childNormalModeView)
         }
     }
 
@@ -210,9 +214,7 @@ struct ChildDashboardView: View {
                     UserAvatarHeader(name: authManager.userName, avatar: authManager.avatar)
                         .padding(.top, 4)
 
-                    earningsCard
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
+                    tasksGoalsToggle
                         .background(
                             GeometryReader { geo in
                                 Color.clear.preference(
@@ -226,46 +228,15 @@ struct ChildDashboardView: View {
                         )
                         .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
 
-                    QuestProgressBar(
-                        quest: MonthlyQuest.compute(tasks: allTasks, userName: authManager.userName),
-                        theme: childTheme
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-
-                    if showCalendarView {
-                        dashboardViewModeToggle
-                        WeekCalendarStrip(
-                            selectedDate: $selectedCalendarDate,
-                            tasks: myTasks,
-                            theme: childTheme
+                    if showGoalsTab {
+                        GoalsTabContent(
+                            userName: authManager.userName,
+                            audience: .child,
+                            theme: childTheme,
+                            showGoalPicker: $showGoalPicker
                         )
-                        if childCalendarDayTasks.isEmpty {
-                            VStack(spacing: 10) {
-                                Image(systemName: "calendar.badge.checkmark")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(.primary.opacity(0.3))
-                                Text("No tasks on this day")
-                                    .font(.headline)
-                                    .foregroundStyle(.primary.opacity(0.5))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
-                        } else {
-                            LazyVStack(spacing: 10) {
-                                ForEach(childCalendarDayTasks) { task in
-                                    childTaskRow(task: task)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                        }
-                    } else if myTasks.isEmpty {
-                        dashboardViewModeToggle
-                        emptyState
                     } else {
-                        dashboardViewModeToggle
-                        taskList
+                        childTasksContent
                     }
 
                 }
@@ -420,6 +391,37 @@ struct ChildDashboardView: View {
             .sheet(isPresented: $showPrivacyPolicy) {
                 PrivacyPolicyView()
             }
+            .sheet(isPresented: $showStatsPopup) {
+                NavigationStack {
+                    ZStack {
+                        LinearGradient(
+                            colors: childTheme.gradientColors,
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            earningsCard
+                            QuestProgressBar(
+                                quest: MonthlyQuest.compute(tasks: allTasks, userName: authManager.userName),
+                                theme: childTheme
+                            )
+                        }
+                        .padding(16)
+                    }
+                    .navigationTitle("My Stats")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showStatsPopup = false }
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $showNotificationCenter) {
                 NotificationCenterView(theme: childTheme)
             }
@@ -441,6 +443,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showWishList) {
                 WishListView(theme: childTheme)
+            }
+            .sheet(isPresented: $showGoalPicker) {
+                GoalPickerView(audience: .child, assignee: authManager.userName, theme: childTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -946,6 +951,29 @@ struct ChildDashboardView: View {
         .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
     }
 
+
+    private var statsIconPill: some View {
+        Button { showStatsPopup = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "star.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.green)
+                Text("\(collectableCoins)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.green)
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                Text("\(awaitingApprovalCoins)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(childTheme.cardBackground, in: Capsule())
+        }
+    }
+
     private var earningsCard: some View {
         VStack(spacing: 12) {
             HStack(spacing: 0) {
@@ -1092,6 +1120,94 @@ struct ChildDashboardView: View {
                     notificationManager.scheduleTaskReminder(taskId: task.id, taskName: task.name, assignedTo: task.assignedTo, dueDate: task.targetDate)
                 }
             }
+        }
+    }
+
+    private var tasksGoalsToggle: some View {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Tasks")
+                        .font(.subheadline.weight(.bold))
+                }
+                .foregroundStyle(showGoalsTab ? childTheme.secondaryTextColor : childTheme.textColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(showGoalsTab ? Color.clear : childTheme.cardBackground, in: Capsule())
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "target")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Goals")
+                        .font(.subheadline.weight(.bold))
+                    let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                    if activeCount > 0 {
+                        Text("\(activeCount)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(.teal, in: Circle())
+                    }
+                }
+                .foregroundStyle(showGoalsTab ? childTheme.textColor : childTheme.secondaryTextColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(showGoalsTab ? childTheme.cardBackground : Color.clear, in: Capsule())
+            }
+
+            Spacer()
+
+            if !showGoalsTab {
+                statsIconPill
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
+    @ViewBuilder
+    private var childTasksContent: some View {
+        if showCalendarView {
+            dashboardViewModeToggle
+            WeekCalendarStrip(
+                selectedDate: $selectedCalendarDate,
+                tasks: myTasks,
+                theme: childTheme
+            )
+            if childCalendarDayTasks.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.checkmark")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.primary.opacity(0.3))
+                    Text("No tasks on this day")
+                        .font(.headline)
+                        .foregroundStyle(.primary.opacity(0.5))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(childCalendarDayTasks) { task in
+                        childTaskRow(task: task)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+            }
+        } else if myTasks.isEmpty {
+            dashboardViewModeToggle
+            emptyState
+        } else {
+            dashboardViewModeToggle
+            taskList
         }
     }
 
@@ -1348,6 +1464,14 @@ struct ChildDashboardView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
                                     .background(.indigo, in: Circle())
+                            }
+
+                            if task.belongsToGoal {
+                                Image(systemName: "target")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 18, height: 18)
+                                    .background(.teal, in: Circle())
                             }
 
                             if task.hasGift {

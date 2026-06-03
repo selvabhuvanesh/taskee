@@ -37,7 +37,7 @@ struct TaskeeApp: App {
     @State private var hasCompletedInitialSetup = false
     @State private var showSplash = !ScreenshotHelper.isScreenshotMode
 
-    private static let currentSchemaVersion = 4
+    private static let currentSchemaVersion = 6
 
     var sharedModelContainer: ModelContainer = {
         if ScreenshotHelper.isScreenshotMode {
@@ -56,6 +56,7 @@ struct TaskeeApp: App {
             ProjectIdea.self,
             ProjectVote.self,
             WishListItem.self,
+            Goal.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

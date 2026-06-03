@@ -171,6 +171,7 @@ enum ScreenshotHelper {
             ProjectIdea.self,
             ProjectVote.self,
             WishListItem.self,
+            Goal.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try! ModelContainer(for: schema, configurations: [config])
