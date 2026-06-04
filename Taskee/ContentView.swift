@@ -575,17 +575,41 @@ struct ContentView: View {
                         }
                         .transition(.scale.combined(with: .opacity))
                     }
+
+                    HStack(spacing: 14) {
+                        if !isIndividual {
+                            familyChatButton
+                            shoppingBagButton
+                            familyProjectsButton
+                            wishListButton
+                        }
+                        addTaskButton
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.5))
                 }
             }
-            .overlay(alignment: .bottomLeading) {
-                addTaskButton
-                    .padding(.leading, 20)
-                    .padding(.bottom, 16)
-            }
-            .overlay {
-                if !isIndividual {
-                    RadialDock(items: parentDockItems)
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    withAnimation { isAIMode = true }
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Circle()
+                        )
+                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
                 }
+                .padding(.trailing, 20)
+                .padding(.bottom, 80)
             }
             .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
@@ -1930,9 +1954,9 @@ struct ContentView: View {
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(calmAccent, in: Circle())
+                .background(metalGradient, in: Circle())
         }
-        .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var dayPreviewButton: some View {
@@ -1988,7 +2012,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(Color(red: 0.4, green: 0.8, blue: 0.2), in: Circle())
+                    .background(metalGradient, in: Circle())
 
                 let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
                 let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
@@ -2002,7 +2026,7 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: Color(red: 0.4, green: 0.8, blue: 0.2).opacity(0.3), radius: 8, y: 4)
+        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
         .accessibilityIdentifier("familyChatButton")
     }
 
@@ -2017,7 +2041,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.orange, in: Circle())
+                    .background(metalGradient, in: Circle())
 
                 let unboughtCount = shoppingItems.filter { !$0.isBought }.count
                 if unboughtCount > 0 {
@@ -2030,7 +2054,7 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: .orange.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     @Query private var allProjects: [FamilyProject]
@@ -2044,7 +2068,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.indigo, in: Circle())
+                    .background(metalGradient, in: Circle())
 
                 let activeCount = allProjects.filter { !$0.isCompleted }.count
                 if activeCount > 0 {
@@ -2057,7 +2081,7 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: .indigo.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var wishListButton: some View {
@@ -2068,23 +2092,9 @@ struct ContentView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(.purple.opacity(0.85), in: Circle())
+                .background(metalGradient, in: Circle())
         }
-        .shadow(color: .purple.opacity(0.3), radius: 8, y: 4)
-    }
-
-    private var parentDockItems: [RadialDockItem] {
-        let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
-        let chatUnread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
-        let unboughtCount = shoppingItems.filter { !$0.isBought }.count
-        let projectCount = allProjects.filter { !$0.isCompleted }.count
-        return [
-            RadialDockItem(icon: "bubble.left.and.bubble.right.fill", label: "Chat", color: Color(red: 0.4, green: 0.8, blue: 0.2), badge: chatUnread) { showFamilyChat = true },
-            RadialDockItem(icon: "bag.fill", label: "Shopping", color: .orange, badge: unboughtCount) { showShoppingBag = true },
-            RadialDockItem(icon: "paperplane.fill", label: "Projects", color: .indigo, badge: projectCount) { showFamilyProjects = true },
-            RadialDockItem(icon: "wand.and.stars", label: "Wish List", color: .purple.opacity(0.85)) { showWishList = true },
-            RadialDockItem(icon: "sparkles", label: "AI Assistant", color: .purple) { withAnimation { isAIMode = true } },
-        ]
+        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var goalsButton: some View {
