@@ -762,8 +762,13 @@ struct ChildDashboardView: View {
         let wasLastToday = todayOpenCount == 1
             && Calendar.current.isDateInToday(task.targetDate)
 
-        if task.createdByChild {
+        if task.createdByChild || task.reward <= 0 {
             task.status = "approved"
+            if task.reward > 0, let me = allMembers.first(where: { $0.appleUserID == authManager.appleUserID }) {
+                me.addReward(task.reward)
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushMember(me, familyCode: familyCode) }
+            }
             celebrationTitle = "Task Complete!"
             celebrationSubtitle = ""
         } else {
