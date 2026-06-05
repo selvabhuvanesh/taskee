@@ -236,10 +236,8 @@ final class FamilyMember {
     var isParent: Bool { memberRole == "parent" }
     var isChild: Bool { memberRole == "child" }
 
-    func recomputeEarned(from tasks: [Item], excluding taskID: UUID? = nil) {
-        totalEarned = tasks
-            .filter { $0.id != taskID && $0.assignedTo == name && $0.isApproved && $0.reward > 0 }
-            .reduce(0.0) { $0 + $1.reward }
+    func addReward(_ amount: Double) {
+        totalEarned += amount
     }
 }
 
@@ -1795,6 +1793,15 @@ struct AvatarView: View {
     let size: CGFloat
 
     var body: some View {
+        avatarContent
+            .overlay(
+                Circle()
+                    .strokeBorder(.white.opacity(0.5), lineWidth: size > 40 ? 2 : 1.5)
+            )
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
         if avatarId.hasPrefix("photo_") {
             let photoID = String(avatarId.dropFirst(6))
             if let image = loadAvatarPhoto(photoID: photoID) {

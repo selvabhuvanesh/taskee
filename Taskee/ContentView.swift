@@ -342,6 +342,9 @@ struct ContentView: View {
     @State private var showFamilySetup = false
     @State private var isSwitchingToFamily = false
     @State private var showWeeklyPulse = false
+    @State private var showInsights = false
+    @State private var insightsTab: InsightsTab = .today
+    private enum InsightsTab: String, CaseIterable { case today = "Today", weekly = "Weekly Pulse" }
     @State private var showAIAssistant = false
     @AppStorage("isAIMode") private var isAIMode = true
     @State private var parentTheme = ChildTheme.load(for: "parent")
@@ -399,17 +402,33 @@ struct ContentView: View {
     }
 
     private var parentRedeemedCoins: Int {
-        myRedemptions.filter { $0.isApproved || $0.isFulfilled || $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+        var seen = Set<String>()
+        var total = 0
+        for r in myRedemptions where r.isApproved || r.isFulfilled || r.isPending {
+            if seen.insert(r.id.uuidString).inserted { total += r.coinAmount }
+        }
+        return total
     }
 
     private var parentTotalEarned: Int {
-        tasks
+        let localSum = tasks
             .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
+        let stored = Int(allMembers.first(where: { $0.appleUserID == authManager.appleUserID })?.totalEarned ?? 0)
+        return max(localSum, stored)
     }
 
     private var parentCollectableCoins: Int {
         max(0, parentTotalEarned - parentRedeemedCoins)
+    }
+
+    private func deduplicatedRedeemed(for name: String) -> Int {
+        var seen = Set<String>()
+        var total = 0
+        for r in allRedemptions where r.childName == name && (r.isApproved || r.isFulfilled || r.isPending) {
+            if seen.insert(r.id.uuidString).inserted { total += r.coinAmount }
+        }
+        return total
     }
 
     private var parentUnredeemedGifts: Int {
@@ -527,6 +546,12 @@ struct ContentView: View {
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 60)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            bottomPillBar
         }
     }
 
@@ -562,56 +587,11 @@ struct ContentView: View {
                     rewardAmount: celebrationReward
                 )
 
-                if showDayPreview {
-                    dayPreviewOverlay
-                }
-
             }
-            .overlay(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    if let note = stickyNote {
-                        StickyNoteView(message: note.message, color: note.color) {
-                            withAnimation { stickyNote = nil }
-                        }
-                        .transition(.scale.combined(with: .opacity))
-                    }
-
-                    HStack(spacing: 14) {
-                        if !isIndividual {
-                            familyChatButton
-                            shoppingBagButton
-                            familyProjectsButton
-                            wishListButton
-                        }
-                        addTaskButton
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.5))
-                }
+            .onAppear {
+                scheduleStickyNote(from: parentTips)
+                deduplicateRedemptions()
             }
-            .overlay(alignment: .bottomTrailing) {
-                Button {
-                    withAnimation { isAIMode = true }
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            in: Circle()
-                        )
-                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
-                }
-                .padding(.trailing, 20)
-                .padding(.bottom, 80)
-            }
-            .onAppear { scheduleStickyNote(from: parentTips) }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
             .navigationBarTitleDisplayMode(.inline)
@@ -669,13 +649,6 @@ struct ContentView: View {
                                             .offset(x: 6, y: -6)
                                     }
                                 }
-                        }
-
-                        Button {
-                            showWeeklyPulse = true
-                        } label: {
-                            Image(systemName: "chart.bar.fill")
-                                .font(.subheadline)
                         }
 
                         if !isIndividual {
@@ -816,14 +789,8 @@ struct ContentView: View {
             .onAppear {
                 refreshUnreadCount()
             }
-            .sheet(isPresented: $showWeeklyPulse) {
-                WeeklyPulseView(
-                    allTasks: tasks,
-                    allMembers: allMembers.filter { !$0.isChild || $0.isAccepted },
-                    currentUserName: authManager.userName,
-                    isIndividual: isIndividual,
-                    theme: parentTheme
-                )
+            .sheet(isPresented: $showInsights) {
+                insightsSheet
             }
             .sheet(isPresented: $showEditProfile) {
                 EditProfileView(theme: parentTheme)
@@ -982,6 +949,64 @@ struct ContentView: View {
                 )
             }
         }
+        .overlay(alignment: .bottom) {
+            bottomPillBar
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                withAnimation { isAIMode = true }
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        LinearGradient(
+                            colors: [.purple, .blue],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+                    .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 80)
+        }
+    }
+
+    private var bottomPillBar: some View {
+        VStack(spacing: 0) {
+            if let note = stickyNote {
+                StickyNoteView(message: note.message, color: note.color) {
+                    withAnimation { stickyNote = nil }
+                }
+                .transition(.scale.combined(with: .opacity))
+            }
+
+            HStack(spacing: 14) {
+                if !isIndividual {
+                    familyChatButton
+                    shoppingBagButton
+                    familyProjectsButton
+                    wishListButton
+                }
+                addTaskButton
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(parentTheme.gradientColors.last?.opacity(0.85) ?? Color.black.opacity(0.5))
+                    .overlay(
+                        Capsule()
+                            .fill(.white.opacity(parentTheme.isLight ? 0.3 : 0.08))
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+        }
     }
 
     private func checkRecurringExtension() {
@@ -1047,6 +1072,113 @@ struct ContentView: View {
         guard !authManager.familyCode.isEmpty else { return }
         Task {
             await cloudKitManager.archiveOldTasks(context: modelContext, familyCode: authManager.familyCode)
+        }
+    }
+
+    private var insightsSheet: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+
+                VStack(spacing: 0) {
+                    Picker("", selection: $insightsTab) {
+                        ForEach(InsightsTab.allCases, id: \.self) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+
+                    if insightsTab == .today {
+                        todayPreviewContent
+                    } else {
+                        weeklyPulseInlineContent
+                    }
+                }
+            }
+            .navigationTitle("Insights")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showInsights = false }
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+    }
+
+    private var weeklyPulseInlineContent: some View {
+        WeeklyPulseView(
+            allTasks: tasks,
+            allMembers: allMembers.filter { !$0.isChild || $0.isAccepted },
+            currentUserName: authManager.userName,
+            isIndividual: isIndividual,
+            theme: parentTheme,
+            embedded: true
+        )
+    }
+
+    private var todayPreviewContent: some View {
+        let calendar = Calendar.current
+        let todayTasks = activeTasks.filter { calendar.isDateInToday($0.targetDate) }
+        let allNames: [String] = {
+            var names = [authManager.userName]
+            if let parent = otherParent { names.append(parent.name) }
+            names.append(contentsOf: children.map { $0.name })
+            return names
+        }()
+        let grouped: [(name: String, tasks: [Item])] = allNames.map { name in
+            (name: name, tasks: todayTasks.filter { $0.assignedTo == name }.sorted { $0.targetDate < $1.targetDate })
+        }
+        let totalCount = todayTasks.count
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.teal)
+                Text("Today's Preview")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(parentTheme.textColor)
+                Spacer()
+                Text("\(totalCount) task\(totalCount == 1 ? "" : "s")")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(parentTheme.secondaryTextColor)
+                Button {
+                    showSharePreviewConfirm = true
+                } label: {
+                    Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.teal)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+
+            Divider().overlay(parentTheme.secondaryTextColor.opacity(0.2))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(grouped, id: \.name) { group in
+                        dayPreviewMemberSection(name: group.name, tasks: group.tasks)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            }
+        }
+        .alert("Share to Family Chat", isPresented: $showSharePreviewConfirm) {
+            Button("Share") {
+                shareDayPreviewToChat(grouped: grouped, totalCount: totalCount)
+                showInsights = false
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will post today's task preview as an image in the family chat.")
         }
     }
 
@@ -1297,7 +1429,7 @@ struct ContentView: View {
     private var familyStrip: some View {
         HStack {
             HStack(spacing: 10) {
-                dayPreviewButton
+                insightsCalendarButton
                 searchButton
             }
             .padding(.leading, 16)
@@ -1337,6 +1469,22 @@ struct ContentView: View {
                                     .foregroundStyle(parentTheme.secondaryTextColor)
                                     .lineLimit(1)
                             }
+                        }
+
+                        let pLocalEarned = tasks
+                            .filter { $0.assignedTo == parent.name && $0.isApproved && $0.reward > 0 }
+                            .reduce(0) { $0 + Int($1.reward) }
+                        let pEarned = max(pLocalEarned, Int(parent.totalEarned))
+                        let pRedeemed = deduplicatedRedeemed(for: parent.name)
+                        let pAvail = max(0, pEarned - pRedeemed)
+
+                        HStack(spacing: 2) {
+                            Image(systemName: "star.circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.yellow)
+                            Text("\(pAvail)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.yellow.opacity(0.85))
                         }
 
                         let parentTodayCount = activeTasks.filter {
@@ -1391,6 +1539,22 @@ struct ContentView: View {
                                     .foregroundStyle(parentTheme.secondaryTextColor)
                                     .lineLimit(1)
                             }
+                        }
+
+                        let childLocalEarned = tasks
+                            .filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
+                            .reduce(0) { $0 + Int($1.reward) }
+                        let childEarned = max(childLocalEarned, Int(child.totalEarned))
+                        let childRedeemed = deduplicatedRedeemed(for: child.name)
+                        let childAvail = max(0, childEarned - childRedeemed)
+
+                        HStack(spacing: 2) {
+                            Image(systemName: "star.circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.yellow)
+                            Text("\(childAvail)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.yellow.opacity(0.85))
                         }
 
                         let todayTaskCount = activeTasks.filter {
@@ -1477,6 +1641,7 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "target")
                         .font(.system(size: 12, weight: .semibold))
+                        .symbolEffect(.pulse, isActive: !showGoalsTab)
                     Text("Goals")
                         .font(.subheadline.weight(.bold))
                     let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
@@ -1485,13 +1650,22 @@ struct ContentView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 18, height: 18)
-                            .background(.teal, in: Circle())
+                            .background(
+                                LinearGradient(colors: [.orange, .pink], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: Circle()
+                            )
                     }
                 }
-                .foregroundStyle(showGoalsTab ? parentTheme.textColor : parentTheme.secondaryTextColor)
+                .foregroundStyle(showGoalsTab ? .white : parentTheme.secondaryTextColor)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(showGoalsTab ? parentTheme.cardBackground : Color.clear, in: Capsule())
+                .background(
+                    showGoalsTab
+                        ? AnyShapeStyle(LinearGradient(colors: [.orange, .pink], startPoint: .leading, endPoint: .trailing))
+                        : AnyShapeStyle(Color.clear),
+                    in: Capsule()
+                )
+                .shadow(color: showGoalsTab ? .orange.opacity(0.4) : .clear, radius: 6, y: 2)
             }
 
             Spacer()
@@ -1647,6 +1821,18 @@ struct ContentView: View {
                 Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 Text(showOpenOnly ? "Open Tasks" : "All Tasks")
                     .font(.subheadline)
+            }
+        }
+    }
+
+    private func deduplicateRedemptions() {
+        var seen = Set<String>()
+        for r in allRedemptions {
+            let key = r.id.uuidString
+            if seen.contains(key) {
+                modelContext.delete(r)
+            } else {
+                seen.insert(key)
             }
         }
     }
@@ -1954,15 +2140,42 @@ struct ContentView: View {
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(metalGradient, in: Circle())
+                .background(.teal, in: Circle())
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var dayPreviewButton: some View {
         let dayNumber = Calendar.current.component(.day, from: Date())
         return Button {
             withAnimation(.spring(duration: 0.3)) { showDayPreview = true }
+        } label: {
+            ZStack {
+                VStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.red)
+                        .frame(width: 28, height: 9)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(.white)
+                        .frame(width: 28, height: 19)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                .frame(width: 52, height: 52)
+                .background(.teal, in: Circle())
+
+                Text("\(dayNumber)")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(.black.opacity(0.8))
+                    .offset(y: 4)
+            }
+        }
+        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+    }
+
+    private var insightsCalendarButton: some View {
+        let dayNumber = Calendar.current.component(.day, from: Date())
+        return Button {
+            showInsights = true
         } label: {
             ZStack {
                 VStack(spacing: 0) {
@@ -2012,7 +2225,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.blue.opacity(0.5), in: Circle())
 
                 let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
                 let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
@@ -2026,7 +2239,6 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
         .accessibilityIdentifier("familyChatButton")
     }
 
@@ -2041,7 +2253,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.orange.opacity(0.5), in: Circle())
 
                 let unboughtCount = shoppingItems.filter { !$0.isBought }.count
                 if unboughtCount > 0 {
@@ -2054,7 +2266,6 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     @Query private var allProjects: [FamilyProject]
@@ -2068,7 +2279,7 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.teal.opacity(0.5), in: Circle())
 
                 let activeCount = allProjects.filter { !$0.isCompleted }.count
                 if activeCount > 0 {
@@ -2081,7 +2292,6 @@ struct ContentView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var wishListButton: some View {
@@ -2092,9 +2302,8 @@ struct ContentView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(metalGradient, in: Circle())
+                .background(.purple.opacity(0.5), in: Circle())
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var goalsButton: some View {
@@ -2361,15 +2570,21 @@ struct DateTasksView: View {
     @State private var selectedCalendarDate = Date()
 
     private var memberTotalEarned: Int {
-        allTasks
+        let localSum = allTasks
             .filter { $0.assignedTo == memberName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
+        let allFamilyMembers = children + [otherParent].compactMap { $0 }
+        let stored = Int(allFamilyMembers.first(where: { $0.name == memberName })?.totalEarned ?? 0)
+        return max(localSum, stored)
     }
 
     private var memberRedeemedCoins: Int {
-        allRedemptions
-            .filter { $0.childName == memberName && ($0.isApproved || $0.isFulfilled || $0.isPending) }
-            .reduce(0) { $0 + $1.coinAmount }
+        var seen = Set<String>()
+        var total = 0
+        for r in allRedemptions where r.childName == memberName && (r.isApproved || r.isFulfilled || r.isPending) {
+            if seen.insert(r.id.uuidString).inserted { total += r.coinAmount }
+        }
+        return total
     }
 
     private var memberAvailableCoins: Int {
@@ -2693,18 +2908,7 @@ struct DateTasksView: View {
                     taskListContent
                 }
 
-                Button {
-                    showingAddTask = true
-                } label: {
-                    Label("Add Task", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                        .background(.primary.opacity(0.2), in: Capsule())
-                        .foregroundStyle(theme.textColor)
-                }
-                .shadow(color: calmAccent.opacity(0.3), radius: 8, y: 4)
-                .padding(.bottom, 16)
+                Color.clear.frame(height: 70)
             }
         }
         .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
@@ -2932,11 +3136,12 @@ struct DateTasksView: View {
         if task.reward > 0 && !task.assignedTo.isEmpty {
             let allFamilyMembers = children + [otherParent].compactMap { $0 }
             if let member = allFamilyMembers.first(where: { $0.name == task.assignedTo }) {
-                member.recomputeEarned(from: allTasks)
+                member.addReward(task.reward)
                 let familyCode = authManager.familyCode
                 Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
             }
         }
+        try? modelContext.save()
         if !task.assignedTo.isEmpty {
             notificationManager.sendTaskApprovedNotification(
                 taskName: task.name,
@@ -3020,15 +3225,19 @@ struct ChildTasksView: View {
     }
 
     private var childTotalEarned: Int {
-        allTasks
+        let localSum = allTasks
             .filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
+        return max(localSum, Int(child.totalEarned))
     }
 
     private var childRedeemedCoins: Int {
-        allRedemptions
-            .filter { $0.childName == child.name && ($0.isApproved || $0.isFulfilled || $0.isPending) }
-            .reduce(0) { $0 + $1.coinAmount }
+        var seen = Set<String>()
+        var total = 0
+        for r in allRedemptions where r.childName == child.name && (r.isApproved || r.isFulfilled || r.isPending) {
+            if seen.insert(r.id.uuidString).inserted { total += r.coinAmount }
+        }
+        return total
     }
 
     private var childAvailableCoins: Int {
@@ -3262,19 +3471,7 @@ struct ChildTasksView: View {
                     childTaskListContent
                 }
 
-                Button {
-                    showingAddTask = true
-                } label: {
-                    Label("Add Task", systemImage: "plus.circle.fill")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(calmAccent, in: RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: calmAccent.opacity(0.4), radius: 8, y: 4)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                Color.clear.frame(height: 70)
             }
 
         }
@@ -3549,8 +3746,9 @@ struct ChildTasksView: View {
         task.status = "approved"
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 {
-            child.recomputeEarned(from: allTasks)
+            child.addReward(task.reward)
         }
+        try? modelContext.save()
         notificationManager.sendTaskApprovedNotification(
             taskName: task.name,
             childName: child.name,
@@ -3738,10 +3936,11 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                 Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 if task.reward > 0, !task.assignedTo.isEmpty {
                     if let member = allMembers.first(where: { $0.name == task.assignedTo }) {
-                        member.recomputeEarned(from: allTasksQuery)
+                        member.addReward(task.reward)
                         Task { await cloudKitManager.pushMember(member, familyCode: familyCode) }
                     }
                 }
+                try? modelContext.save()
                 taskToApprove = nil
             }
         }
@@ -6508,14 +6707,15 @@ struct PendingApprovalsView: View {
                     if let task = taskToApprove {
                         task.status = "approved"
                         let snapshot = CloudKitManager.TaskSnapshot(task)
-                        withAnimation(.snappy) {
-                            if task.reward > 0 && !task.assignedTo.isEmpty {
-                                if let child = children.first(where: { $0.name == task.assignedTo }) {
-                                    child.recomputeEarned(from: allTasks)
-                                    let familyCode = authManager.familyCode
-                                    Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
-                                }
+                        if task.reward > 0 && !task.assignedTo.isEmpty {
+                            if let child = children.first(where: { $0.name == task.assignedTo }) {
+                                child.addReward(task.reward)
+                                let familyCode = authManager.familyCode
+                                try? modelContext.save()
+                                Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                             }
+                        }
+                        withAnimation(.snappy) {
                             onApproved?(task.reward)
                         }
                         let familyCode = authManager.familyCode
@@ -6544,30 +6744,35 @@ struct PendingApprovalsView: View {
     private func approvalRow(task: Item) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Image(systemName: "clock.fill")
-                    .font(.title3)
-                    .foregroundStyle(.orange)
+                if let member = children.first(where: { $0.name == task.assignedTo }) {
+                    AvatarView(avatarId: member.avatar, size: 40)
+                } else {
+                    Image(systemName: "clock.fill")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                        .frame(width: 40, height: 40)
+                }
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(task.name)
                         .font(.body.weight(.medium))
                         .lineLimit(1)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
 
                     HStack(spacing: 6) {
                         if !task.assignedTo.isEmpty {
-                            Label(task.assignedTo, systemImage: "person.fill")
-                                .font(.caption)
-                                .foregroundStyle(calmAccent.opacity(0.8))
+                            Text(task.assignedTo)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.85))
                         }
 
                         Text(task.dueDateLabel)
                             .font(.caption)
-                            .foregroundStyle(.primary.opacity(0.45))
+                            .foregroundStyle(.white.opacity(0.5))
 
                         if task.reward > 0 {
                             Text("•")
-                                .foregroundStyle(.primary.opacity(0.3))
+                                .foregroundStyle(.white.opacity(0.3))
                             Label("\(Int(task.reward)) coins", systemImage: "star.circle.fill")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.yellow.opacity(0.85))
@@ -6823,6 +7028,7 @@ struct WeeklyPulseView: View {
     let currentUserName: String
     let isIndividual: Bool
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+    var embedded: Bool = false
 
     private let calendar = Calendar.current
     private let today = Calendar.current.startOfDay(for: Date())
@@ -7008,28 +7214,36 @@ struct WeeklyPulseView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                AppBackground()
-                ScrollView {
-                    VStack(spacing: 24) {
-                        pastWeekSection
-                        upcomingHeatmap
-                        insightsSection
+        if embedded {
+            pulseScrollContent
+        } else {
+            NavigationStack {
+                ZStack {
+                    AppBackground()
+                    pulseScrollContent
+                }
+                .navigationTitle("Weekly Pulse")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                            .foregroundStyle(.white)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
                 }
             }
-            .navigationTitle("Weekly Pulse")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
-                }
+        }
+    }
+
+    private var pulseScrollContent: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                pastWeekSection
+                upcomingHeatmap
+                insightsSection
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
     }
 
@@ -9714,7 +9928,7 @@ struct FamilyChatView: View {
         task.giftText = message.id.uuidString
         modelContext.insert(task)
 
-        child.recomputeEarned(from: allTasks + [task])
+        child.addReward(task.reward)
 
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
@@ -9731,7 +9945,6 @@ struct FamilyChatView: View {
         if let bonusTask = allTasks.first(where: { $0.giftText == msgID && $0.assignedTo == child.name && $0.name.hasPrefix("Chat Bonus") }) {
             let taskID = bonusTask.id
             modelContext.delete(bonusTask)
-            child.recomputeEarned(from: allTasks, excluding: taskID)
             Task { await cloudKitManager.deleteRemoteTasks([taskID]) }
         }
     }

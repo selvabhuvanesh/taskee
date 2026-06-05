@@ -931,7 +931,8 @@ final class CloudKitManager {
                 local.name = record["name"] as? String ?? local.name
                 local.memberRole = record["memberRole"] as? String ?? local.memberRole
                 local.avatar = remoteAvatar
-                local.totalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? local.totalEarned
+                let remoteTotalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0
+                local.totalEarned = max(local.totalEarned, remoteTotalEarned)
                 local.appleUserID = record["appleUserID"] as? String ?? local.appleUserID
                 local.isAccepted = remoteAccepted
                 if let rp = remotePickupAt { local.lastPickupAt = rp }
@@ -2311,9 +2312,11 @@ final class CloudKitManager {
 
         let descriptor = FetchDescriptor<RewardRedemption>()
         let all = (try? context.fetch(descriptor)) ?? []
+        let matches = all.filter { $0.id == uuid }
+        for dup in matches.dropFirst() { context.delete(dup) }
         var changes: [SyncChange] = []
 
-        if let existing = all.first(where: { $0.id == uuid }) {
+        if let existing = matches.first {
             let oldStatus = existing.status
             let newStatus = record["status"] as? String ?? existing.status
             let childName = record["childName"] as? String ?? existing.childName

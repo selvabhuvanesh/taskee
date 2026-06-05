@@ -98,13 +98,20 @@ struct ChildDashboardView: View {
     }
 
     private var redeemedCoins: Int {
-        myRedemptions.filter { $0.isApproved || $0.isFulfilled || $0.isPending }.reduce(0) { $0 + $1.coinAmount }
+        var seen = Set<String>()
+        var total = 0
+        for r in myRedemptions where r.isApproved || r.isFulfilled || r.isPending {
+            if seen.insert(r.id.uuidString).inserted { total += r.coinAmount }
+        }
+        return total
     }
 
     private var totalEarnedCoins: Int {
-        allTasks
+        let localSum = allTasks
             .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
+        let stored = Int(allMembers.first(where: { $0.appleUserID == authManager.appleUserID })?.totalEarned ?? 0)
+        return max(localSum, stored)
     }
 
     private var collectableCoins: Int {
@@ -278,9 +285,19 @@ struct ChildDashboardView: View {
                         wishListButton
                         addTaskButton
                     }
-                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(.black.opacity(0.5))
+                    .background(
+                        Capsule()
+                            .fill(childTheme.gradientColors.last?.opacity(0.85) ?? Color.black.opacity(0.5))
+                            .overlay(
+                                Capsule()
+                                    .fill(.white.opacity(childTheme.isLight ? 0.3 : 0.08))
+                            )
+                            .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -305,7 +322,9 @@ struct ChildDashboardView: View {
                 .padding(.bottom, 80)
             }
             .coordinateSpace(name: "childDashboard")
-            .onAppear { scheduleStickyNote(from: childTips) }
+            .onAppear {
+                scheduleStickyNote(from: childTips)
+            }
             .toolbarColorScheme(childTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, childTheme.colorScheme)
             .navigationTitle("\(authManager.userName)'s Tasks")
@@ -843,9 +862,8 @@ struct ChildDashboardView: View {
                     .offset(x: 10, y: 8)
             }
             .frame(width: 44, height: 44)
-            .background(metalGradient, in: Circle())
+            .background(.cyan.opacity(0.5), in: Circle())
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var addTaskButton: some View {
@@ -856,9 +874,8 @@ struct ChildDashboardView: View {
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(metalGradient, in: Circle())
+                .background(.teal, in: Circle())
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var familyChatButton: some View {
@@ -870,7 +887,7 @@ struct ChildDashboardView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.blue.opacity(0.5), in: Circle())
 
                 let lastRead = UserDefaults.standard.double(forKey: "lastChatReadTime")
                 let unread = chatMessages.filter { $0.sentAt.timeIntervalSince1970 > lastRead && $0.senderAppleUserID != authManager.appleUserID }.count
@@ -884,7 +901,6 @@ struct ChildDashboardView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
         .accessibilityIdentifier("familyChatButton")
     }
 
@@ -897,7 +913,7 @@ struct ChildDashboardView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.orange.opacity(0.5), in: Circle())
 
                 let unboughtCount = shoppingItems.filter { !$0.isBought }.count
                 if unboughtCount > 0 {
@@ -910,7 +926,6 @@ struct ChildDashboardView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var familyProjectsButton: some View {
@@ -922,7 +937,7 @@ struct ChildDashboardView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(metalGradient, in: Circle())
+                    .background(.teal.opacity(0.5), in: Circle())
 
                 let activeCount = allProjects.filter { !$0.isCompleted }.count
                 if activeCount > 0 {
@@ -935,7 +950,6 @@ struct ChildDashboardView: View {
                 }
             }
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
     private var wishListButton: some View {
@@ -946,9 +960,8 @@ struct ChildDashboardView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(metalGradient, in: Circle())
+                .background(.purple.opacity(0.5), in: Circle())
         }
-        .shadow(color: metalShadowColor.opacity(0.4), radius: 8, y: 4)
     }
 
 
