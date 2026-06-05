@@ -1436,7 +1436,7 @@ struct ContentView: View {
             .padding(.leading, 16)
 
             Spacer()
-            HStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
                 if let parent = otherParent {
                     VStack(spacing: 4) {
                         NavigationLink(destination: DateTasksView(
