@@ -17,6 +17,7 @@ struct GoalsTabContent: View {
     let audience: GoalAudience
     let theme: ChildTheme
     @Binding var showGoalPicker: Bool
+    var onDone: (() -> Void)? = nil
 
     private var myGoals: [Goal] { goals.filter { $0.assignedTo == userName } }
     private var activeGoals: [Goal] { myGoals.filter { $0.isActive } }
@@ -28,6 +29,17 @@ struct GoalsTabContent: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if let onDone {
+                    HStack {
+                        Spacer()
+                        Button(action: onDone) {
+                            Text("Done")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.teal)
+                        }
+                    }
+                }
+
                 if myGoals.isEmpty {
                     VStack(spacing: 14) {
                         Image(systemName: "target")

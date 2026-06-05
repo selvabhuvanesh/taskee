@@ -240,7 +240,8 @@ struct ChildDashboardView: View {
                             userName: authManager.userName,
                             audience: .child,
                             theme: childTheme,
-                            showGoalPicker: $showGoalPicker
+                            showGoalPicker: $showGoalPicker,
+                            onDone: { withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false } }
                         )
                     } else {
                         childTasksContent
