@@ -622,7 +622,7 @@ struct GoalTaskPreviewView: View {
             }
 
             if task.wrappedValue.isEnabled {
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     Picker("", selection: task.frequency) {
                         ForEach(RecurrenceType.allCases, id: \.self) { freq in
                             Text(freq.rawValue).tag(freq)
@@ -630,26 +630,29 @@ struct GoalTaskPreviewView: View {
                     }
                     .pickerStyle(.menu)
                     .font(.caption)
+                    .fixedSize()
 
-                    HStack(spacing: 4) {
+                    HStack(spacing: 2) {
                         Text("x")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         TextField("", value: task.occurrences, format: .number)
                             .font(.caption)
-                            .frame(width: 40)
+                            .frame(width: 34)
                             .textFieldStyle(.roundedBorder)
                     }
+                    .fixedSize()
 
-                    HStack(spacing: 4) {
+                    HStack(spacing: 2) {
                         Image(systemName: "star.fill")
                             .font(.caption2)
                             .foregroundStyle(.orange)
                         TextField("", value: task.reward, format: .number)
                             .font(.caption)
-                            .frame(width: 35)
+                            .frame(width: 30)
                             .textFieldStyle(.roundedBorder)
                     }
+                    .fixedSize()
 
                     DatePicker("", selection: Binding(
                         get: {
@@ -663,6 +666,7 @@ struct GoalTaskPreviewView: View {
                     ), displayedComponents: .hourAndMinute)
                     .labelsHidden()
                     .font(.caption)
+                    .fixedSize()
                 }
                 .padding(.leading, 36)
             }
@@ -762,7 +766,7 @@ struct CustomGoalView: View {
                             TextField("Task name", text: $task.name)
                                 .font(.subheadline)
                                 .textFieldStyle(.roundedBorder)
-                            HStack(spacing: 12) {
+                            HStack(spacing: 8) {
                                 Picker("", selection: $task.frequency) {
                                     ForEach(RecurrenceType.allCases, id: \.self) { freq in
                                         Text(freq.rawValue).tag(freq)
@@ -770,26 +774,29 @@ struct CustomGoalView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .font(.caption)
+                                .fixedSize()
 
-                                HStack(spacing: 4) {
+                                HStack(spacing: 2) {
                                     Text("x")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                     TextField("", value: $task.occurrences, format: .number)
                                         .font(.caption)
-                                        .frame(width: 40)
+                                        .frame(width: 34)
                                         .textFieldStyle(.roundedBorder)
                                 }
+                                .fixedSize()
 
-                                HStack(spacing: 4) {
+                                HStack(spacing: 2) {
                                     Image(systemName: "star.fill")
                                         .font(.caption2)
                                         .foregroundStyle(.orange)
                                     TextField("", value: $task.reward, format: .number)
                                         .font(.caption)
-                                        .frame(width: 35)
+                                        .frame(width: 30)
                                         .textFieldStyle(.roundedBorder)
                                 }
+                                .fixedSize()
 
                                 Button(role: .destructive) {
                                     tasks.removeAll { $0.id == task.id }
