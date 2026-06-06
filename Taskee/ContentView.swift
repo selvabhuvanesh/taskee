@@ -509,11 +509,12 @@ struct ContentView: View {
         return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
     }
 
+    @ViewBuilder
     var body: some View {
         if isAIMode {
             aiModeView
         } else {
-            AnyView(normalModeView)
+            normalModeView
         }
     }
 
@@ -1640,7 +1641,7 @@ struct ContentView: View {
                 withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "target")
+                    Image(systemName: "gauge.open.with.lines.needle.33percent.and.arrowtriangle")
                         .font(.system(size: 12, weight: .semibold))
                         .symbolEffect(.pulse, isActive: !showGoalsTab)
                     Text("Goals")
@@ -1652,21 +1653,38 @@ struct ContentView: View {
                             .foregroundStyle(.white)
                             .frame(width: 18, height: 18)
                             .background(
-                                LinearGradient(colors: [.orange, .pink], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                LinearGradient(colors: [Color(red: 0.18, green: 0.55, blue: 0.34), Color(red: 0.10, green: 0.40, blue: 0.22)], startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: Circle()
                             )
                     }
                 }
-                .foregroundStyle(showGoalsTab ? .white : parentTheme.secondaryTextColor)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background(
-                    showGoalsTab
-                        ? AnyShapeStyle(LinearGradient(colors: [.orange, .pink], startPoint: .leading, endPoint: .trailing))
-                        : AnyShapeStyle(Color.clear),
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.18, green: 0.55, blue: 0.34),
+                            Color(red: 0.13, green: 0.45, blue: 0.27),
+                            Color(red: 0.22, green: 0.60, blue: 0.35),
+                            Color(red: 0.10, green: 0.40, blue: 0.22)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
                     in: Capsule()
                 )
-                .shadow(color: showGoalsTab ? .orange.opacity(0.4) : .clear, radius: 6, y: 2)
+                .overlay(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.15), .clear, .white.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                )
+                .shadow(color: Color(red: 0.1, green: 0.4, blue: 0.2).opacity(0.5), radius: 6, y: 2)
             }
 
             Spacer()

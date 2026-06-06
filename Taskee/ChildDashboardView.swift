@@ -1143,49 +1143,52 @@ struct ChildDashboardView: View {
     }
 
     private var tasksGoalsToggle: some View {
-        HStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "checklist")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Tasks")
-                        .font(.subheadline.weight(.bold))
-                }
-                .foregroundStyle(showGoalsTab ? childTheme.secondaryTextColor : childTheme.textColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(showGoalsTab ? Color.clear : childTheme.cardBackground, in: Capsule())
-            }
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "target")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Goals")
-                        .font(.subheadline.weight(.bold))
-                    let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
-                    if activeCount > 0 {
-                        Text("\(activeCount)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 18, height: 18)
-                            .background(.teal, in: Circle())
+        VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Tasks")
+                            .font(.subheadline.weight(.bold))
                     }
+                    .foregroundStyle(showGoalsTab ? childTheme.secondaryTextColor : childTheme.textColor)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(showGoalsTab ? Color.clear : childTheme.cardBackground, in: Capsule())
                 }
-                .foregroundStyle(showGoalsTab ? childTheme.textColor : childTheme.secondaryTextColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(showGoalsTab ? childTheme.cardBackground : Color.clear, in: Capsule())
-            }
 
-            Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "target")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Goals")
+                            .font(.subheadline.weight(.bold))
+                        let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                        if activeCount > 0 {
+                            Text("\(activeCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 18, height: 18)
+                                .background(.teal, in: Circle())
+                        }
+                    }
+                    .foregroundStyle(showGoalsTab ? childTheme.textColor : childTheme.secondaryTextColor)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(showGoalsTab ? childTheme.cardBackground : Color.clear, in: Capsule())
+                }
+
+                Spacer()
+            }
 
             if !showGoalsTab {
-                statsIconPill
+                earningsCard
+                    .padding(.horizontal, 0)
             }
         }
         .padding(.horizontal, 16)

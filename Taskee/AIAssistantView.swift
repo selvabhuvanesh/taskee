@@ -1018,64 +1018,72 @@ struct AIAssistantView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                AppBackground()
+        if isInline {
+            aiContent
+        } else {
+            NavigationStack {
+                aiContent
+            }
+        }
+    }
 
-                VStack(spacing: 0) {
-                    messageList
-                    inputBar
+    private var aiContent: some View {
+        ZStack {
+            AppBackground()
+
+            VStack(spacing: 0) {
+                messageList
+                inputBar
+            }
+        }
+        .navigationTitle("AI Assistant")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    messages = []
+                    pendingContext = .none
+                    ChatMemory.clear()
+                    addGreeting()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
                 }
             }
-            .navigationTitle("AI Assistant")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        messages = []
-                        pendingContext = .none
-                        ChatMemory.clear()
-                        addGreeting()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isVoiceOutputEnabled.toggle()
+                    if !isVoiceOutputEnabled {
+                        speechManager.stopSpeaking()
                     }
+                } label: {
+                    Image(systemName: isVoiceOutputEnabled ? "speaker.wave.2.fill" : "speaker.slash")
+                        .font(.subheadline)
+                        .foregroundStyle(isVoiceOutputEnabled ? calmAccent : .white.opacity(0.6))
                 }
+            }
+            if !isInline {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isVoiceOutputEnabled.toggle()
-                        if !isVoiceOutputEnabled {
-                            speechManager.stopSpeaking()
-                        }
-                    } label: {
-                        Image(systemName: isVoiceOutputEnabled ? "speaker.wave.2.fill" : "speaker.slash")
-                            .font(.subheadline)
-                            .foregroundStyle(isVoiceOutputEnabled ? calmAccent : .white.opacity(0.6))
-                    }
-                }
-                if !isInline {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { dismiss() }
-                            .foregroundStyle(.white)
-                    }
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.white)
                 }
             }
-            .onAppear {
-                if messages.isEmpty {
-                    let restored = ChatMemory.load()
-                    if restored.isEmpty {
-                        addGreeting()
-                    } else {
-                        messages = restored
-                    }
+        }
+        .onAppear {
+            if messages.isEmpty {
+                let restored = ChatMemory.load()
+                if restored.isEmpty {
+                    addGreeting()
+                } else {
+                    messages = restored
                 }
             }
-            .onChange(of: messages.count) { _, _ in
-                if isVoiceOutputEnabled, let last = messages.last, last.role == .assistant {
-                    speechManager.speak(last.text)
-                }
+        }
+        .onChange(of: messages.count) { _, _ in
+            if isVoiceOutputEnabled, let last = messages.last, last.role == .assistant {
+                speechManager.speak(last.text)
             }
         }
     }
