@@ -411,11 +411,9 @@ struct ContentView: View {
     }
 
     private var parentTotalEarned: Int {
-        let localSum = tasks
+        tasks
             .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
-        let stored = Int(allMembers.first(where: { $0.appleUserID == authManager.appleUserID })?.totalEarned ?? 0)
-        return max(localSum, stored)
     }
 
     private var parentCollectableCoins: Int {
@@ -1473,10 +1471,9 @@ struct ContentView: View {
                             }
                         }
 
-                        let pLocalEarned = tasks
+                        let pEarned = tasks
                             .filter { $0.assignedTo == parent.name && $0.isApproved && $0.reward > 0 }
                             .reduce(0) { $0 + Int($1.reward) }
-                        let pEarned = max(pLocalEarned, Int(parent.totalEarned))
                         let pRedeemed = deduplicatedRedeemed(for: parent.name)
                         let pAvail = max(0, pEarned - pRedeemed)
 
@@ -1543,10 +1540,9 @@ struct ContentView: View {
                             }
                         }
 
-                        let childLocalEarned = tasks
+                        let childEarned = tasks
                             .filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
                             .reduce(0) { $0 + Int($1.reward) }
-                        let childEarned = max(childLocalEarned, Int(child.totalEarned))
                         let childRedeemed = deduplicatedRedeemed(for: child.name)
                         let childAvail = max(0, childEarned - childRedeemed)
 
@@ -2589,12 +2585,9 @@ struct DateTasksView: View {
     @State private var selectedCalendarDate = Date()
 
     private var memberTotalEarned: Int {
-        let localSum = allTasks
+        allTasks
             .filter { $0.assignedTo == memberName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
-        let allFamilyMembers = children + [otherParent].compactMap { $0 }
-        let stored = Int(allFamilyMembers.first(where: { $0.name == memberName })?.totalEarned ?? 0)
-        return max(localSum, stored)
     }
 
     private var memberRedeemedCoins: Int {
@@ -3244,10 +3237,9 @@ struct ChildTasksView: View {
     }
 
     private var childTotalEarned: Int {
-        let localSum = allTasks
+        allTasks
             .filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
-        return max(localSum, Int(child.totalEarned))
     }
 
     private var childRedeemedCoins: Int {

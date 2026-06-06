@@ -107,11 +107,9 @@ struct ChildDashboardView: View {
     }
 
     private var totalEarnedCoins: Int {
-        let localSum = allTasks
+        allTasks
             .filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }
             .reduce(0) { $0 + Int($1.reward) }
-        let stored = Int(allMembers.first(where: { $0.appleUserID == authManager.appleUserID })?.totalEarned ?? 0)
-        return max(localSum, stored)
     }
 
     private var collectableCoins: Int {

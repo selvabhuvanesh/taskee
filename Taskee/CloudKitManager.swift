@@ -500,23 +500,28 @@ final class CloudKitManager {
         guard !familyCode.isEmpty else { return false }
 
         let id = member.id.uuidString
-        let name = member.name
-        let role = member.memberRole
-        let avatar = member.avatar
-        let earned = member.totalEarned
-        let appleID = member.appleUserID
-
         let recordID = CKRecord.ID(recordName: id)
-        let record = CKRecord(recordType: "MemberRecord", recordID: recordID)
-        let accepted = member.isAccepted
+
+        var record: CKRecord
+        do {
+            record = try await database.record(for: recordID)
+        } catch {
+            record = CKRecord(recordType: "MemberRecord", recordID: recordID)
+        }
+
+        let remoteTotalEarned = (record["totalEarned"] as? NSNumber)?.doubleValue ?? 0
+        let safeTotalEarned = max(member.totalEarned, remoteTotalEarned)
+        if safeTotalEarned > member.totalEarned {
+            member.totalEarned = safeTotalEarned
+        }
 
         record["familyCode"] = familyCode
-        record["name"] = name
-        record["memberRole"] = role
-        record["avatar"] = avatar
-        record["totalEarned"] = NSNumber(value: earned)
-        record["appleUserID"] = appleID
-        record["isAccepted"] = NSNumber(value: accepted ? 1 : 0)
+        record["name"] = member.name
+        record["memberRole"] = member.memberRole
+        record["avatar"] = member.avatar
+        record["totalEarned"] = NSNumber(value: safeTotalEarned)
+        record["appleUserID"] = member.appleUserID
+        record["isAccepted"] = NSNumber(value: member.isAccepted ? 1 : 0)
         if let pickup = member.lastPickupAt {
             record["lastPickupAt"] = pickup as NSDate
         }
@@ -527,8 +532,8 @@ final class CloudKitManager {
             record["lastPickupAckBy"] = member.lastPickupAckBy
         }
 
-        if avatar.hasPrefix("photo_") {
-            let photoID = String(avatar.dropFirst(6))
+        if member.avatar.hasPrefix("photo_") {
+            let photoID = String(member.avatar.dropFirst(6))
             let url = avatarPhotoURL(photoID: photoID)
             if FileManager.default.fileExists(atPath: url.path) {
                 record["avatarPhoto"] = CKAsset(fileURL: url)
@@ -655,6 +660,17 @@ final class CloudKitManager {
         let toArchive = localTasks.filter { ($0.isApproved || $0.isMissed) && $0.targetDate < cutoff }
         guard !toArchive.isEmpty else { return }
 
+        let members = (try? context.fetch(FetchDescriptor<FamilyMember>())) ?? []
+        let allApprovedByName = Dictionary(grouping: localTasks.filter { $0.isApproved && $0.reward > 0 }) { $0.assignedTo }
+        var membersToUpdate: [FamilyMember] = []
+        for member in members {
+            let taskSum = (allApprovedByName[member.name] ?? []).reduce(0.0) { $0 + $1.reward }
+            if taskSum > member.totalEarned {
+                member.totalEarned = taskSum
+                membersToUpdate.append(member)
+            }
+        }
+
         var savedRecords: [CKRecord] = []
         var deleteIDs: [CKRecord.ID] = []
 
@@ -687,8 +703,12 @@ final class CloudKitManager {
                 _ = try await db.modifyRecords(saving: saveBatch, deleting: deleteBatch)
             }
 
+            for member in membersToUpdate {
+                await pushMember(member, familyCode: familyCode)
+            }
+
             for task in toArchive {
-                context.delete(task)
+                task.isArchived = true
             }
             try? context.save()
         } catch {
@@ -792,10 +812,72 @@ final class CloudKitManager {
         result.changes.append(contentsOf: memberChanges)
         try? context.save()
 
+        await restoreArchivedTasks(context: context, familyCode: familyCode)
+        await repairTotalEarned(context: context, familyCode: familyCode)
+
         if !result.newTasks.isEmpty {
             onNewTasks?(result.newTasks)
         }
         return result
+    }
+
+    private func repairTotalEarned(context: ModelContext, familyCode: String) async {
+        let tasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        let members = (try? context.fetch(FetchDescriptor<FamilyMember>())) ?? []
+        guard !members.isEmpty else { return }
+
+        let approvedByName = Dictionary(grouping: tasks.filter { $0.isApproved && $0.reward > 0 }) { $0.assignedTo }
+
+        var changed = false
+        for member in members {
+            let taskSum = (approvedByName[member.name] ?? []).reduce(0.0) { $0 + $1.reward }
+            if taskSum > member.totalEarned {
+                member.totalEarned = taskSum
+                changed = true
+                await pushMember(member, familyCode: familyCode)
+            }
+        }
+        if changed {
+            try? context.save()
+        }
+    }
+
+    private func restoreArchivedTasks(context: ModelContext, familyCode: String) async {
+        let localTasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        let localIDs = Set(localTasks.map { $0.id.uuidString })
+
+        let records = await fetchAllRecords(type: "ArchivedTaskRecord", familyCode: familyCode)
+        guard !records.isEmpty else { return }
+
+        var inserted = 0
+        for record in records {
+            let idStr = record.recordID.recordName.replacingOccurrences(of: "arch-", with: "")
+            guard let uuid = UUID(uuidString: idStr), !localIDs.contains(idStr) else { continue }
+
+            let status = record["status"] as? String ?? "approved"
+            let task = Item(
+                id: uuid,
+                name: record["name"] as? String ?? "",
+                targetDate: record["targetDate"] as? Date ?? Date(),
+                assignedTo: record["assignedTo"] as? String ?? "",
+                reward: (record["reward"] as? NSNumber)?.doubleValue ?? 0,
+                status: status,
+                createdByChild: ((record["createdByChild"] as? NSNumber)?.intValue ?? 0) == 1,
+                isRecurring: ((record["isRecurring"] as? NSNumber)?.intValue ?? 0) == 1,
+                giftText: record["giftText"] as? String ?? "",
+                createdBy: record["createdBy"] as? String ?? "",
+                createdByID: record["createdByID"] as? String ?? ""
+            )
+            task.isArchived = true
+            task.giftRevealed = ((record["giftRevealed"] as? NSNumber)?.intValue ?? 0) == 1
+            context.insert(task)
+            inserted += 1
+        }
+
+        if inserted > 0 {
+            try? context.save()
+            print("[CloudKit] Restored \(inserted) archived tasks for coin history")
+        }
     }
 
     private func fetchAllRecords(type: String, familyCode: String, from targetDB: CKDatabase? = nil, inZone zoneID: CKRecordZone.ID? = nil) async -> [CKRecord] {
@@ -896,7 +978,7 @@ final class CloudKitManager {
         }
 
         if !remoteRecords.isEmpty {
-            for task in localTasks where !remoteIDs.contains(task.id.uuidString) {
+            for task in localTasks where !remoteIDs.contains(task.id.uuidString) && !task.isArchived {
                 context.delete(task)
             }
         }
@@ -2408,7 +2490,7 @@ final class CloudKitManager {
         case "TaskRecord":
             let d = FetchDescriptor<Item>()
             if let task = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
-                context.delete(task)
+                task.isArchived = true
             }
         case "ShoppingRecord":
             let d = FetchDescriptor<ShoppingItem>()
@@ -2452,7 +2534,7 @@ final class CloudKitManager {
 
     private func cleanupOrphans(context: ModelContext, taskIDs: Set<String>, redemptionIDs: Set<String>, shoppingIDs: Set<String>) {
         let tasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
-        for task in tasks where !taskIDs.contains(task.id.uuidString) {
+        for task in tasks where !taskIDs.contains(task.id.uuidString) && !task.isArchived {
             context.delete(task)
         }
         let redemptions = (try? context.fetch(FetchDescriptor<RewardRedemption>())) ?? []
