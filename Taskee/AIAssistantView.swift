@@ -8,6 +8,49 @@ import SwiftData
 import Speech
 import AVFoundation
 
+// MARK: - Tiled Logo Background
+
+struct TiledLogoBackground: View {
+    let tileSize: CGFloat = 36
+    let spacing: CGFloat = 30
+
+    private var appIcon: UIImage? {
+        if let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let files = primary["CFBundleIconFiles"] as? [String],
+           let name = files.last {
+            return UIImage(named: name)
+        }
+        return UIImage(named: "AppIcon")
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            if let icon = appIcon {
+                let step = tileSize + spacing
+                let cols = Int(geo.size.width / step) + 2
+                let rows = Int(geo.size.height / step) + 2
+
+                ForEach(0..<rows, id: \.self) { row in
+                    ForEach(0..<cols, id: \.self) { col in
+                        let offset = row.isMultiple(of: 2) ? 0 : step / 2
+                        Image(uiImage: icon)
+                            .resizable()
+                            .frame(width: tileSize, height: tileSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .opacity(0.2)
+                            .rotationEffect(.degrees(-15))
+                            .position(
+                                x: CGFloat(col) * step + offset,
+                                y: CGFloat(row) * step
+                            )
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Claude API Service (via proxy)
 
 final class ClaudeAPIService: Sendable {
@@ -1046,6 +1089,10 @@ struct AIAssistantView: View {
             LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
+            TiledLogoBackground()
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 messageList
                 inputBar
@@ -1169,7 +1216,7 @@ struct AIAssistantView: View {
                     .foregroundStyle(.white)
                     .padding(12)
                     .background(
-                        isUser ? calmAccent.opacity(0.6) : .white.opacity(0.12),
+                        isUser ? calmAccent : Color(white: 0.2),
                         in: RoundedRectangle(cornerRadius: 16)
                     )
 
@@ -1251,10 +1298,10 @@ struct AIAssistantView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(colorForIntent(action.intent).opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(white: 0.15), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(colorForIntent(action.intent).opacity(0.3), lineWidth: 1)
+                .strokeBorder(colorForIntent(action.intent).opacity(0.5), lineWidth: 1)
         )
     }
 
