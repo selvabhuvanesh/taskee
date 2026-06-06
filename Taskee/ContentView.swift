@@ -997,10 +997,10 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(
                 Capsule()
-                    .fill(parentTheme.gradientColors.last?.opacity(0.85) ?? Color.black.opacity(0.5))
+                    .fill(parentTheme.pillBarBackground.opacity(0.85))
                     .overlay(
                         Capsule()
-                            .fill(.white.opacity(parentTheme.isLight ? 0.3 : 0.08))
+                            .fill(.white.opacity(parentTheme.pillBarIsLight ? 0.3 : 0.08))
                     )
                     .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
             )
@@ -1769,11 +1769,12 @@ struct ContentView: View {
             .padding(.vertical, 6)
         }
 
+        viewModeToggle
+
         ScrollViewReader { proxy in
             ScrollView {
                 if showCalendarView {
                     VStack(spacing: 0) {
-                        viewModeToggle
                         WeekCalendarStrip(
                             selectedDate: $selectedCalendarDate,
                             tasks: filteredTasks,
@@ -1786,13 +1787,9 @@ struct ContentView: View {
                         }
                     }
                 } else if filteredTasks.isEmpty {
-                    VStack(spacing: 0) {
-                        viewModeToggle
-                        emptyState
-                    }
+                    emptyState
                 } else {
                     VStack(spacing: 0) {
-                        viewModeToggle
                         if isExpanded || isSearching {
                             expandedListContent
                         } else {

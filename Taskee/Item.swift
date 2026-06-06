@@ -2247,13 +2247,20 @@ let fontStylePresets: [FontStylePreset] = [
 struct ChildTheme {
     var themeId: String
     var fontId: String
+    var backgroundHue: Double = 0.5
+    var accentHue: Double = 0.48
+    var cardHue: Double = 0.55
+    var useCustomColors: Bool = false
+    var customIsLight: Bool = false
 
     var gradientColors: [Color] {
-        (themePresets.first { $0.id == themeId } ?? themePresets[0]).gradientColors
+        if useCustomColors { return customGradient(from: backgroundHue) }
+        return (themePresets.first { $0.id == themeId } ?? themePresets[0]).gradientColors
     }
 
     var isLight: Bool {
-        (themePresets.first { $0.id == themeId } ?? themePresets[0]).isLight
+        if useCustomColors { return customIsLight }
+        return (themePresets.first { $0.id == themeId } ?? themePresets[0]).isLight
     }
 
     var colorScheme: ColorScheme {
@@ -2273,11 +2280,53 @@ struct ChildTheme {
     }
 
     var cardBackground: Color {
-        isLight ? .black.opacity(0.08) : .white.opacity(0.12)
+        if useCustomColors {
+            let (h, s, b) = Self.resolveSlider(cardHue)
+            if s < 0.1 { return Color(white: b).opacity(0.2) }
+            return Color(hue: h, saturation: 0.3, brightness: 0.55).opacity(0.4)
+        }
+        return isLight ? .black.opacity(0.08) : .white.opacity(0.12)
     }
 
     var cardBackgroundLight: Color {
-        isLight ? .black.opacity(0.05) : .white.opacity(0.08)
+        if useCustomColors {
+            let (h, s, b) = Self.resolveSlider(cardHue)
+            if s < 0.1 { return Color(white: b).opacity(0.12) }
+            return Color(hue: h, saturation: 0.2, brightness: 0.5).opacity(0.25)
+        }
+        return isLight ? .black.opacity(0.05) : .white.opacity(0.08)
+    }
+
+    var accentColor: Color {
+        if useCustomColors {
+            let (h, s, _) = Self.resolveSlider(accentHue)
+            if s < 0.1 { return isLight ? Color(white: 0.4) : Color(white: 0.7) }
+            return Color(hue: h, saturation: isLight ? 0.65 : 0.7, brightness: isLight ? 0.75 : 0.9)
+        }
+        return .teal
+    }
+
+    var pillBarBackground: Color {
+        (themePresets.first { $0.id == themeId } ?? themePresets[0]).gradientColors.last ?? Color.black.opacity(0.5)
+    }
+
+    var pillBarIsLight: Bool {
+        (themePresets.first { $0.id == themeId } ?? themePresets[0]).isLight
+    }
+
+    static func resolveSlider(_ value: Double) -> (hue: Double, saturation: Double, brightness: Double) {
+        if value < 0.05 {
+            return (0, 0, value / 0.05 * 0.2)
+        } else if value > 0.95 {
+            return (0, 0, 0.8 + (value - 0.95) / 0.05 * 0.2)
+        } else {
+            return ((value - 0.05) / 0.9, 0.7, 0.85)
+        }
+    }
+
+    static func sliderColor(_ value: Double) -> Color {
+        let (h, s, b) = resolveSlider(value)
+        return Color(hue: h, saturation: s, brightness: b)
     }
 
     var fontName: String? {
@@ -2301,19 +2350,59 @@ struct ChildTheme {
         }
     }
 
+    private func customGradient(from sliderValue: Double) -> [Color] {
+        let (h, s, b) = Self.resolveSlider(sliderValue)
+        if s < 0.1 {
+            if customIsLight {
+                let w = 0.85 + b * 0.1
+                return [Color(white: min(1, w + 0.05)), Color(white: w), Color(white: w - 0.05), Color(white: w - 0.1)]
+            } else {
+                let w = 0.05 + b * 0.15
+                return [Color(white: w + 0.15), Color(white: w + 0.08), Color(white: w + 0.03), Color(white: w)]
+            }
+        }
+        if customIsLight {
+            return [
+                Color(hue: h, saturation: 0.15, brightness: 0.98),
+                Color(hue: h, saturation: 0.22, brightness: 0.94),
+                Color(hue: h, saturation: 0.28, brightness: 0.88),
+                Color(hue: h, saturation: 0.35, brightness: 0.82)
+            ]
+        } else {
+            return [
+                Color(hue: h, saturation: 0.55, brightness: 0.50),
+                Color(hue: h, saturation: 0.60, brightness: 0.35),
+                Color(hue: h, saturation: 0.65, brightness: 0.25),
+                Color(hue: h, saturation: 0.70, brightness: 0.18)
+            ]
+        }
+    }
+
     var keyPrefix: String = "child"
 
     static func load(for role: String = "child") -> ChildTheme {
-        ChildTheme(
-            themeId: UserDefaults.standard.string(forKey: "\(role)ThemeId") ?? "default",
-            fontId: UserDefaults.standard.string(forKey: "\(role)FontId") ?? "default",
+        let ud = UserDefaults.standard
+        return ChildTheme(
+            themeId: ud.string(forKey: "\(role)ThemeId") ?? "default",
+            fontId: ud.string(forKey: "\(role)FontId") ?? "default",
+            backgroundHue: ud.object(forKey: "\(role)BGHue") != nil ? ud.double(forKey: "\(role)BGHue") : 0.5,
+            accentHue: ud.object(forKey: "\(role)AccHue") != nil ? ud.double(forKey: "\(role)AccHue") : 0.48,
+            cardHue: ud.object(forKey: "\(role)CardHue") != nil ? ud.double(forKey: "\(role)CardHue") : 0.55,
+            useCustomColors: ud.bool(forKey: "\(role)UseCustom"),
+            customIsLight: ud.bool(forKey: "\(role)CustomLight"),
             keyPrefix: role
         )
     }
 
     func save() {
-        UserDefaults.standard.set(themeId, forKey: "\(keyPrefix)ThemeId")
-        UserDefaults.standard.set(fontId, forKey: "\(keyPrefix)FontId")
+        let ud = UserDefaults.standard
+        ud.set(themeId, forKey: "\(keyPrefix)ThemeId")
+        ud.set(fontId, forKey: "\(keyPrefix)FontId")
+        ud.set(backgroundHue, forKey: "\(keyPrefix)BGHue")
+        ud.set(accentHue, forKey: "\(keyPrefix)AccHue")
+        ud.set(cardHue, forKey: "\(keyPrefix)CardHue")
+        ud.set(useCustomColors, forKey: "\(keyPrefix)UseCustom")
+        ud.set(customIsLight, forKey: "\(keyPrefix)CustomLight")
     }
 }
 

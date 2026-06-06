@@ -35,7 +35,10 @@ struct GoalsTabContent: View {
                         Button(action: onDone) {
                             Text("Done")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.teal)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 7)
+                                .background(.teal, in: Capsule())
                         }
                     }
                 }
@@ -66,20 +69,9 @@ struct GoalsTabContent: View {
                     .padding(.vertical, 40)
                 } else {
                     if !activeGoals.isEmpty {
-                        HStack {
-                            Text("Active")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(theme.textColor)
-                            Spacer()
-                            Button { showGoalPicker = true } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("Add Goal")
-                                }
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(theme.textColor.opacity(0.7))
-                            }
-                        }
+                        Text("Active")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(theme.textColor)
 
                         ForEach(activeGoals) { goal in
                             GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
@@ -117,24 +109,26 @@ struct GoalsTabContent: View {
                         }
                     }
 
-                    if activeGoals.isEmpty {
-                        Button { showGoalPicker = true } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add a new goal")
-                            }
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.teal)
-                        }
-                        .padding(.top, 8)
-                    }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 60)
+            Button { showGoalPicker = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Goal")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(.teal, in: Capsule())
+                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 100)
         }
         .sheet(item: $selectedGoal) { goal in
             GoalDetailView(goal: goal, theme: theme)
@@ -611,7 +605,7 @@ struct GoalTaskPreviewView: View {
 
     @ViewBuilder
     private func taskEditRow(task: Binding<EditableSuggestedTask>) -> some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Toggle("", isOn: task.isEnabled)
                     .labelsHidden()
@@ -619,6 +613,8 @@ struct GoalTaskPreviewView: View {
 
                 TextField("Task name", text: task.name)
                     .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .disabled(!task.wrappedValue.isEnabled)
                     .opacity(task.wrappedValue.isEnabled ? 1 : 0.4)
 
@@ -644,13 +640,15 @@ struct GoalTaskPreviewView: View {
                     .font(.caption)
                     .fixedSize()
 
+                    Spacer()
+
                     HStack(spacing: 2) {
                         Text("x")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         TextField("", value: task.occurrences, format: .number)
                             .font(.caption)
-                            .frame(width: 34)
+                            .frame(width: 30)
                             .textFieldStyle(.roundedBorder)
                     }
                     .fixedSize()
@@ -786,7 +784,8 @@ struct CustomGoalView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .font(.caption)
-                                .fixedSize()
+
+                                Spacer()
 
                                 HStack(spacing: 2) {
                                     Text("x")

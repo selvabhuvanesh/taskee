@@ -3016,6 +3016,56 @@ struct MyGiftsView: View {
     }
 }
 
+// MARK: - Hue Slider
+
+struct HueSlider: View {
+    @Binding var hue: Double
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(label)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary.opacity(0.7))
+                Spacer()
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(ChildTheme.sliderColor(hue))
+                    .frame(width: 28, height: 28)
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.primary.opacity(0.3), lineWidth: 1))
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(
+                            LinearGradient(
+                                colors: [.black] + (0...10).map { Color(hue: Double($0) / 10.0, saturation: 0.8, brightness: 0.85) } + [.white],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 28)
+
+                    Circle()
+                        .fill(.white)
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                        .frame(width: 30, height: 30)
+                        .offset(x: hue * (geo.size.width - 30))
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            hue = max(0, min(1, value.location.x / geo.size.width))
+                        }
+                )
+            }
+            .frame(height: 30)
+        }
+    }
+}
+
 // MARK: - Theme Picker
 
 struct ChildThemePickerView: View {
@@ -3033,55 +3083,81 @@ struct ChildThemePickerView: View {
                 .ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 28) {
-                        Spacer().frame(height: 8)
+                    VStack(spacing: 20) {
+                        themePreviewScreen
+                            .scaleEffect(0.85)
+                            .frame(height: 220)
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Background")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.primary.opacity(0.7))
-
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                                ForEach(themePresets) { preset in
-                                    Button {
-                                        withAnimation(.easeInOut(duration: 0.4)) {
-                                            theme.themeId = preset.id
-                                            theme.save()
-                                        }
-                                    } label: {
-                                        VStack(spacing: 6) {
-                                            ZStack {
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .fill(
-                                                        LinearGradient(
-                                                            colors: preset.gradientColors,
-                                                            startPoint: .top,
-                                                            endPoint: .bottom
-                                                        )
-                                                    )
-                                                    .frame(height: 56)
-
-                                                Text(preset.emoji)
-                                                    .font(.title2)
-                                            }
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .strokeBorder(
-                                                        Color.primary.opacity(theme.themeId == preset.id ? 1 : 0.15),
-                                                        lineWidth: theme.themeId == preset.id ? 2.5 : 1
-                                                    )
-                                            )
-
-                                            Text(preset.name)
-                                                .font(.caption2.weight(.medium))
-                                                .foregroundStyle(Color.primary.opacity(theme.themeId == preset.id ? 1 : 0.6))
-                                        }
-                                    }
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                Text("Custom Colors")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.primary.opacity(0.7))
+                                Spacer()
+                                if theme.useCustomColors {
+                                    Text("Active")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.green)
                                 }
+                            }
+
+                            HueSlider(hue: Binding(
+                                get: { theme.backgroundHue },
+                                set: { newValue in
+                                    if !theme.useCustomColors {
+                                        withAnimation(.easeInOut(duration: 0.3)) { theme.useCustomColors = true }
+                                    }
+                                    theme.backgroundHue = newValue
+                                    theme.save()
+                                }
+                            ), label: "Background")
+
+                            HueSlider(hue: Binding(
+                                get: { theme.accentHue },
+                                set: { newValue in
+                                    if !theme.useCustomColors {
+                                        withAnimation(.easeInOut(duration: 0.3)) { theme.useCustomColors = true }
+                                    }
+                                    theme.accentHue = newValue
+                                    theme.save()
+                                }
+                            ), label: "Accent")
+
+                            HueSlider(hue: Binding(
+                                get: { theme.cardHue },
+                                set: { newValue in
+                                    if !theme.useCustomColors {
+                                        withAnimation(.easeInOut(duration: 0.3)) { theme.useCustomColors = true }
+                                    }
+                                    theme.cardHue = newValue
+                                    theme.save()
+                                }
+                            ), label: "Cards")
+
+                            HStack {
+                                Text("Mode")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.primary.opacity(0.7))
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { theme.customIsLight },
+                                    set: { newValue in
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            theme.customIsLight = newValue
+                                            theme.useCustomColors = true
+                                        }
+                                        theme.save()
+                                    }
+                                )) {
+                                    Text("Dark").tag(false)
+                                    Text("Light").tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 140)
                             }
                         }
 
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text("Font Style")
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(.primary.opacity(0.7))
@@ -3094,28 +3170,28 @@ struct ChildThemePickerView: View {
                                     }
                                 } label: {
                                     let isActive = theme.fontId == preset.id
-                                    HStack(spacing: 14) {
+                                    HStack(spacing: 12) {
                                         Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
                                             .foregroundStyle(isActive ? Color.green : Color.primary.opacity(0.3))
-                                            .font(.title3)
+                                            .font(.body)
 
-                                        Text("The quick brown fox jumps")
-                                            .font(preset.fontName != nil ? .custom(preset.fontName!, size: 16) : .body)
+                                        Text("The quick brown fox")
+                                            .font(preset.fontName != nil ? .custom(preset.fontName!, size: 15) : .subheadline)
                                             .foregroundStyle(.primary)
 
                                         Spacer()
 
                                         Text(preset.name)
-                                            .font(.caption.weight(.semibold))
+                                            .font(.caption2.weight(.semibold))
                                             .foregroundStyle(Color.primary.opacity(0.5))
                                     }
-                                    .padding(14)
+                                    .padding(10)
                                     .background(
                                         Color.primary.opacity(isActive ? 0.15 : 0.08),
-                                        in: RoundedRectangle(cornerRadius: 12)
+                                        in: RoundedRectangle(cornerRadius: 10)
                                     )
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
+                                        RoundedRectangle(cornerRadius: 10)
                                             .strokeBorder(
                                                 Color.primary.opacity(isActive ? 0.4 : 0.1),
                                                 lineWidth: 1
@@ -3125,36 +3201,56 @@ struct ChildThemePickerView: View {
                             }
                         }
 
-                        Text("Preview")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.primary.opacity(0.7))
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Presets")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.primary.opacity(0.7))
 
-                        HStack(spacing: 14) {
-                            Circle()
-                                .strokeBorder(.primary.opacity(0.4), lineWidth: 2)
-                                .frame(width: 32, height: 32)
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                                ForEach(themePresets) { preset in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.4)) {
+                                            theme.themeId = preset.id
+                                            theme.useCustomColors = false
+                                            theme.save()
+                                        }
+                                    } label: {
+                                        let isActive = theme.themeId == preset.id && !theme.useCustomColors
+                                        VStack(spacing: 4) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .fill(
+                                                        LinearGradient(
+                                                            colors: preset.gradientColors,
+                                                            startPoint: .top,
+                                                            endPoint: .bottom
+                                                        )
+                                                    )
+                                                    .frame(height: 44)
 
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Clean my room")
-                                    .font(theme.font(.body))
-                                    .foregroundStyle(.primary)
-                                Text("Today at 5:00 PM")
-                                    .font(theme.font(.caption))
-                                    .foregroundStyle(.primary.opacity(0.6))
+                                                Text(preset.emoji)
+                                                    .font(.body)
+                                            }
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .strokeBorder(
+                                                        Color.primary.opacity(isActive ? 1 : 0.15),
+                                                        lineWidth: isActive ? 2.5 : 1
+                                                    )
+                                            )
+
+                                            Text(preset.name)
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(Color.primary.opacity(isActive ? 1 : 0.6))
+                                        }
+                                    }
+                                }
                             }
-                            Spacer()
                         }
-                        .padding(14)
-                        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(.primary.opacity(0.25), lineWidth: 1)
-                        )
 
-                        Spacer()
+                        Spacer().frame(height: 8)
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 20)
                 }
             }
             .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
@@ -3168,6 +3264,161 @@ struct ChildThemePickerView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var themePreviewScreen: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                LinearGradient(
+                    colors: theme.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                VStack(spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Good Morning!")
+                                .font(theme.font(.title3).weight(.bold))
+                                .foregroundStyle(theme.textColor)
+                            Text("Wednesday, Jun 5")
+                                .font(theme.font(.caption))
+                                .foregroundStyle(theme.secondaryTextColor)
+                        }
+                        Spacer()
+                        Circle()
+                            .fill(theme.accentColor)
+                            .frame(width: 32, height: 32)
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.white)
+                            )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+
+                    HStack(spacing: 10) {
+                        previewStatCard(icon: "star.fill", value: "12", label: "Coins", iconColor: .yellow)
+                        previewStatCard(icon: "checkmark.circle.fill", value: "5", label: "Done", iconColor: theme.accentColor)
+                        previewStatCard(icon: "clock.fill", value: "3", label: "Pending", iconColor: .orange)
+                    }
+                    .padding(.horizontal, 16)
+
+                    VStack(spacing: 8) {
+                        previewTaskRow(
+                            title: "Clean my room",
+                            subtitle: "Today at 5:00 PM",
+                            icon: "checkmark.circle",
+                            coins: 5,
+                            done: false
+                        )
+                        previewTaskRow(
+                            title: "Finish homework",
+                            subtitle: "Completed",
+                            icon: "checkmark.circle.fill",
+                            coins: 10,
+                            done: true
+                        )
+                        previewTaskRow(
+                            title: "Walk the dog",
+                            subtitle: "Tomorrow at 8:00 AM",
+                            icon: "circle",
+                            coins: 3,
+                            done: false
+                        )
+                    }
+                    .padding(.horizontal, 16)
+
+                    HStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 14))
+                            Text("Add Task")
+                                .font(theme.font(.subheadline).weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(theme.accentColor, in: Capsule())
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "gift.fill")
+                                .font(.system(size: 13))
+                            Text("Redeem")
+                                .font(theme.font(.subheadline).weight(.semibold))
+                        }
+                        .foregroundStyle(theme.accentColor)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .strokeBorder(theme.accentColor, lineWidth: 1.5)
+                        )
+                    }
+                    .padding(.bottom, 14)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(theme.textColor.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        }
+    }
+
+    private func previewStatCard(icon: String, value: String, label: String, iconColor: Color) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconColor)
+                Text(value)
+                    .font(theme.font(.subheadline).weight(.bold))
+                    .foregroundStyle(theme.textColor)
+            }
+            Text(label)
+                .font(theme.font(.caption2))
+                .foregroundStyle(theme.tertiaryTextColor)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func previewTaskRow(title: String, subtitle: String, icon: String, coins: Int, done: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundStyle(done ? theme.accentColor : theme.secondaryTextColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(theme.font(.body))
+                    .foregroundStyle(done ? theme.secondaryTextColor : theme.textColor)
+                    .strikethrough(done)
+                Text(subtitle)
+                    .font(theme.font(.caption))
+                    .foregroundStyle(theme.tertiaryTextColor)
+            }
+
+            Spacer()
+
+            HStack(spacing: 3) {
+                Image(systemName: "bitcoinsign.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.yellow)
+                Text("\(coins)")
+                    .font(theme.font(.caption).weight(.semibold))
+                    .foregroundStyle(theme.secondaryTextColor)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(theme.cardBackgroundLight, in: Capsule())
+        }
+        .padding(12)
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
