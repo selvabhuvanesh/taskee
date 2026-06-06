@@ -545,12 +545,6 @@ struct ContentView: View {
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 60)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            bottomPillBar
         }
     }
 

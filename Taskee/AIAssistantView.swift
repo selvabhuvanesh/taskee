@@ -37,6 +37,9 @@ final class ClaudeAPIService: Sendable {
         let recurrence: String?
         let occurrences: Int?
         let tasks: [[String: Any]]?
+        let newName: String?
+        let newReward: Int?
+        let newAssignee: String?
     }
 
     func chat(
@@ -107,23 +110,26 @@ final class ClaudeAPIService: Sendable {
         CURRENT TASKS:
         \(tasksSummary)
 
-        You help users create, reschedule, cancel, and complete tasks. You also answer questions about task status, coins earned, and weekly summaries.
+        You help users create, reschedule, update, cancel, and complete tasks. You also answer questions about task status, coins earned, and weekly summaries.
 
         RESPONSE FORMAT — you MUST respond with valid JSON only, no extra text:
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone",
+                "intent": "create|reschedule|cancel|markDone|update",
                 "taskName": "the task name (for single task create)",
                 "assignee": "person name or null (for single task create)",
                 "date": "ISO 8601 datetime or null (for single task create)",
-                "reward": number or null (for single task create),
+                "reward": number or null (for single task create)",
                 "matchingTaskNames": ["task names to match"] or null,
                 "newDate": "ISO 8601 datetime for reschedule target",
                 "preserveTime": true or false,
                 "rescheduleScope": "instance" or "series",
                 "recurrence": "none|daily|weekly|monthly (for single task create)",
                 "occurrences": number or null (for single task create),
+                "newName": "new task name for update or null",
+                "newReward": number or null (new coin value for update),
+                "newAssignee": "new assignee name for update or null",
                 "tasks": [
                     {
                         "taskName": "task name",
@@ -150,6 +156,8 @@ final class ClaudeAPIService: Sendable {
           - If the user specifies a new TIME (e.g. "move to 3pm", "change to 10am"), include that time in "newDate" and set "preserveTime" to false.
           - If the user only specifies a new DATE without a time (e.g. "move to tomorrow", "push to Saturday"), set "preserveTime" to true so the original time is kept.
           - If the matched task is marked [recurring], you MUST ask the user whether to change just this instance or the entire series BEFORE setting the action. Set "action" to null and ask. Once the user answers, set "rescheduleScope" to "instance" or "series".
+        - For "update": use "matchingTaskNames" to match existing tasks. Include "newName" to rename, "newReward" to change coins, "newAssignee" to reassign. You can change one or more fields at once. If the task is [recurring], ask whether to update just this instance or the entire series using "rescheduleScope".
+          - Examples: "Rename homework to math homework" → matchingTaskNames: ["homework"], newName: "Math homework". "Change swimming coins to 5" → matchingTaskNames: ["swimming"], newReward: 5. "Assign reading to Aria" → matchingTaskNames: ["reading"], newAssignee: "Aria".
         - For "cancel" and "markDone": use "matchingTaskNames" with the task names to match. Always include the action for user confirmation. Include "rescheduleScope" field for cancel too — if the task is [recurring], ask the user whether to cancel/delete just this instance or all recurring instances before setting the action.
         - After any action is confirmed, provide a clear confirmation summary of exactly what was done (task name, new date/time, who it's assigned to, etc.).
         - Be conversational, friendly, and concise. Ask clarifying questions when the request is ambiguous.
@@ -197,7 +205,10 @@ final class ClaudeAPIService: Sendable {
                 rescheduleScope: actionJson["rescheduleScope"] as? String,
                 recurrence: actionJson["recurrence"] as? String,
                 occurrences: actionJson["occurrences"] as? Int,
-                tasks: actionJson["tasks"] as? [[String: Any]]
+                tasks: actionJson["tasks"] as? [[String: Any]],
+                newName: actionJson["newName"] as? String,
+                newReward: actionJson["newReward"] as? Int,
+                newAssignee: actionJson["newAssignee"] as? String
             )
         }
 
@@ -305,6 +316,8 @@ struct TaskAction: Identifiable {
     var tasks: [Item] = []
     var newDate: Date?
     var newAssignee: String?
+    var newName: String?
+    var newReward: Int?
     var parsedTask: ParsedTask?
     var parsedTasks: [ParsedTask] = []
     var preserveTime: Bool = true
@@ -318,6 +331,7 @@ enum TaskIntent {
     case reschedule
     case cancel
     case markDone
+    case update
     case listTasks
     case checkCoins
     case weekSummary
@@ -1029,7 +1043,8 @@ struct AIAssistantView: View {
 
     private var aiContent: some View {
         ZStack {
-            AppBackground()
+            LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 messageList
@@ -1038,7 +1053,8 @@ struct AIAssistantView: View {
         }
         .navigationTitle("AI Assistant")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+        .environment(\.colorScheme, theme.colorScheme)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -1619,6 +1635,47 @@ struct AIAssistantView: View {
             let details = matching.map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
             return TaskAction(intent: .markDone, summary: "Mark \(matching.count) task\(matching.count == 1 ? "" : "s") as done", details: details, tasks: matching)
 
+        case "update":
+            let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
+            guard !matchNames.isEmpty else { return nil }
+
+            let scope = parsed.rescheduleScope ?? "instance"
+
+            var matching = allTasks.filter { task in
+                task.isOpen && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+            }
+
+            if scope == "series" {
+                let seriesNames = Set(matching.map { $0.name })
+                let seriesAssignees = Set(matching.map { $0.assignedTo })
+                let seriesTasks = allTasks.filter { task in
+                    task.isOpen && task.isRecurring &&
+                    seriesNames.contains(task.name) &&
+                    seriesAssignees.contains(task.assignedTo) &&
+                    !matching.contains(where: { $0.id == task.id })
+                }
+                matching.append(contentsOf: seriesTasks)
+            }
+
+            guard !matching.isEmpty else { return nil }
+
+            var details: [String] = []
+            for task in matching {
+                var changes: [String] = []
+                if let newName = parsed.newName { changes.append("name → \(newName)") }
+                if let newReward = parsed.newReward { changes.append("coins → \(newReward)") }
+                if let newAssignee = parsed.newAssignee { changes.append("assign → \(newAssignee)") }
+                details.append("\(task.emoji) \(task.name): \(changes.joined(separator: ", "))")
+            }
+
+            let scopeLabel = scope == "series" ? " (entire series)" : ""
+            var action = TaskAction(intent: .update, summary: "Update \(matching.count) task\(matching.count == 1 ? "" : "s")\(scopeLabel)", details: details, tasks: matching)
+            action.newName = parsed.newName
+            action.newReward = parsed.newReward
+            action.newAssignee = parsed.newAssignee
+            action.rescheduleScope = scope
+            return action
+
         default:
             return nil
         }
@@ -1636,6 +1693,8 @@ struct AIAssistantView: View {
             executeMarkDone(action, messageId: messageId)
         case .create:
             executeCreate(action, messageId: messageId)
+        case .update:
+            executeUpdate(action, messageId: messageId)
         default:
             break
         }
@@ -1696,6 +1755,52 @@ struct AIAssistantView: View {
         var response = "✅ Done! \(rescheduled) task\(rescheduled == 1 ? "" : "s") rescheduled to \(dateFormat)\(scopeNote)."
         if failed > 0 {
             response += " \(failed) task\(failed == 1 ? " was" : "s were") skipped (no longer open)."
+        }
+        messages.append(AIChatMessage(role: .assistant, text: response))
+    }
+
+    private func executeUpdate(_ action: TaskAction, messageId: UUID) {
+        var updated = 0
+        var skipped = 0
+        var changes: [String] = []
+
+        for task in action.tasks {
+            guard task.isOpen else {
+                skipped += 1
+                continue
+            }
+
+            if let newName = action.newName {
+                task.name = newName
+            }
+            if let newReward = action.newReward {
+                task.reward = Double(newReward)
+            }
+            if let newAssignee = action.newAssignee {
+                task.assignedTo = newAssignee
+            }
+            updated += 1
+        }
+
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        let snapshots = action.tasks.filter { $0.isOpen }.map { CloudKitManager.TaskSnapshot($0) }
+        Task {
+            for snap in snapshots {
+                await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+
+        if let n = action.newName { changes.append("renamed to \"\(n)\"") }
+        if let r = action.newReward { changes.append("coins set to \(r)") }
+        if let a = action.newAssignee { changes.append("assigned to \(a)") }
+        let scopeNote = action.rescheduleScope == "series" ? " (entire series)" : ""
+        var response = "✅ Done! \(updated) task\(updated == 1 ? "" : "s") updated\(scopeNote): \(changes.joined(separator: ", "))."
+        if skipped > 0 {
+            response += " \(skipped) task\(skipped == 1 ? " was" : "s were") skipped (no longer open)."
         }
         messages.append(AIChatMessage(role: .assistant, text: response))
     }
