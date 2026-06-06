@@ -1144,6 +1144,10 @@ struct AIAssistantView: View {
                 }
             }
         }
+        .onDisappear {
+            messages.removeAll()
+            ChatMemory.clear()
+        }
         .onChange(of: messages.count) { _, _ in
             if isVoiceOutputEnabled, let last = messages.last, last.role == .assistant {
                 speechManager.speak(last.text)
