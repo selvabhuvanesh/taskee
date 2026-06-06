@@ -529,16 +529,9 @@ struct ContentView: View {
                     Button {
                         withAnimation { isAIMode = false }
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "list.bullet")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Tasks")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.white.opacity(0.15), in: Capsule())
+                        Text("Done")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                     }
                 }
             }

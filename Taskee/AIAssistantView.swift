@@ -1151,6 +1151,53 @@ struct AIAssistantView: View {
         }
     }
 
+    // MARK: - Prompt Suggestions
+
+    private var suggestedPrompts: [String] {
+        if isIndividual {
+            return [
+                "How am I doing this week?",
+                "I want to start jogging every day",
+                "What tasks do I have today?",
+                "Tell me something interesting about my progress",
+                "Help me plan my weekend"
+            ]
+        } else {
+            return [
+                "Tell me interesting facts about my family tasks",
+                "I want to start jogging every day",
+                "How is my family's week looking?",
+                "How are the kids doing with their tasks?",
+                "Help us plan the weekend"
+            ]
+        }
+    }
+
+    private var promptSuggestionChips: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(suggestedPrompts, id: \.self) { prompt in
+                Button {
+                    inputText = prompt
+                    sendMessage()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                        Text(prompt)
+                            .font(.caption)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color(white: 0.2), in: Capsule())
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
     // MARK: - Message List
 
     private var messageList: some View {
@@ -1161,6 +1208,10 @@ struct AIAssistantView: View {
                     ForEach(messages) { message in
                         messageBubble(message)
                             .id(message.id)
+                    }
+
+                    if messages.count <= 1 && !isProcessing {
+                        promptSuggestionChips
                     }
 
                     if isProcessing {
@@ -1179,7 +1230,12 @@ struct AIAssistantView: View {
                 withAnimation {
                     if let lastId = messages.last?.id {
                         proxy.scrollTo(lastId, anchor: .bottom)
-                    } else {
+                    }
+                }
+            }
+            .onChange(of: isProcessing) { _, processing in
+                if processing {
+                    withAnimation {
                         proxy.scrollTo("typing", anchor: .bottom)
                     }
                 }
