@@ -322,7 +322,7 @@ struct ChildDashboardView: View {
             }
             .coordinateSpace(name: "childDashboard")
             .onAppear {
-                scheduleStickyNote(from: childTips)
+                // scheduleStickyNote(from: childTips) // Disabled for now
             }
             .toolbarColorScheme(childTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, childTheme.colorScheme)

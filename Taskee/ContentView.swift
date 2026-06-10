@@ -576,7 +576,7 @@ struct ContentView: View {
 
             }
             .onAppear {
-                scheduleStickyNote(from: parentTips)
+                // scheduleStickyNote(from: parentTips) // Disabled for now
                 deduplicateRedemptions()
             }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
