@@ -83,6 +83,14 @@ final class ClaudeAPIService: Sendable {
         let newName: String?
         let newReward: Int?
         let newAssignee: String?
+        // Goal fields
+        let goalName: String?
+        let goalTemplateId: String?
+        let assignees: [String]?
+        let category: String?
+        let durationDays: Int?
+        let isCustomGoal: Bool?
+        let goalTasks: [[String: Any]]?
     }
 
     func chat(
@@ -92,13 +100,17 @@ final class ClaudeAPIService: Sendable {
         currentUser: String,
         isIndividual: Bool,
         tasksSummary: String,
+        insightsSummary: String = "",
+        goalCatalogSummary: String = "",
         model: String = ClaudeAPIService.sonnetModel
     ) async throws -> ClaudeResponse {
         let systemPrompt = buildSystemPrompt(
             familyMembers: familyMembers,
             currentUser: currentUser,
             isIndividual: isIndividual,
-            tasksSummary: tasksSummary
+            tasksSummary: tasksSummary,
+            insightsSummary: insightsSummary,
+            goalCatalogSummary: goalCatalogSummary
         )
 
         var apiMessages: [[String: String]] = []
@@ -109,7 +121,7 @@ final class ClaudeAPIService: Sendable {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": 1536,
             "system": systemPrompt,
             "messages": apiMessages
         ]
@@ -139,29 +151,41 @@ final class ClaudeAPIService: Sendable {
         return parseResponse(text)
     }
 
-    private func buildSystemPrompt(familyMembers: [String], currentUser: String, isIndividual: Bool, tasksSummary: String) -> String {
+    private func buildSystemPrompt(familyMembers: [String], currentUser: String, isIndividual: Bool, tasksSummary: String, insightsSummary: String = "", goalCatalogSummary: String = "") -> String {
         let memberList = familyMembers.joined(separator: ", ")
         let now = Date()
         let today = now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year())
         let currentTime = now.formatted(.dateTime.hour().minute())
         let timezone = TimeZone.current.identifier
 
-        return """
+        var prompt = """
         You are a helpful family task management assistant in the Taskoot app. Today is \(today), current time is \(currentTime) (\(timezone)).
         Current user: \(currentUser). \(isIndividual ? "This user manages tasks individually (no family)." : "Family members: \(memberList).")
 
         CURRENT TASKS:
         \(tasksSummary)
+        """
 
-        You help users create, reschedule, update, cancel, and complete tasks. You also answer questions about task status, coins earned, and weekly summaries.
+        if !insightsSummary.isEmpty {
+            prompt += "\n\n\(insightsSummary)"
+        }
+
+        if !goalCatalogSummary.isEmpty {
+            prompt += "\n\n\(goalCatalogSummary)"
+        }
+
+        prompt += """
+
+
+        You help users create, reschedule, update, cancel, complete tasks, and set goals. You also answer questions about task status, coins earned, weekly summaries, and goal suggestions.
 
         RESPONSE FORMAT — you MUST respond with valid JSON only, no extra text:
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update",
+                "intent": "create|reschedule|cancel|markDone|update|setGoal",
                 "taskName": "the task name (for single task create)",
-                "assignee": "person name or null (for single task create)",
+                "assignee": "person name or null",
                 "date": "ISO 8601 datetime or null (for single task create)",
                 "reward": number or null (for single task create)",
                 "matchingTaskNames": ["task names to match"] or null,
@@ -182,19 +206,45 @@ final class ClaudeAPIService: Sendable {
                         "recurrence": "none|daily|weekly|monthly",
                         "occurrences": number or null
                     }
-                ] or null
+                ] or null,
+                "goalName": "name for the goal (setGoal only)",
+                "goalTemplateId": "template ID from catalog or empty string (setGoal only)",
+                "assignees": ["member1", "member2"] or null (setGoal only, for multiple assignees),
+                "category": "Education|Well-being|Lifestyle|Finance|Skills|Fitness (setGoal only)",
+                "durationDays": number (setGoal only, days until goal target),
+                "isCustom": true or false (setGoal only),
+                "goalTasks": [
+                    {
+                        "taskName": "task name",
+                        "frequency": "daily|weekly|monthly",
+                        "occurrences": number,
+                        "reward": number,
+                        "hour": number (0-23),
+                        "minute": number (0-59)
+                    }
+                ] or null (setGoal only)
             }
         }
 
         RULES:
         - Set "action" to null for questions, status checks, summaries, clarifications, or when information is missing.
-        - IMPORTANT: For ANY task creation, reschedule, cancel, or markDone — you MUST ALWAYS include the "action" object so the user sees a preview and can confirm before it executes. Never just describe what you would do in text — always provide the action for user confirmation.
+        - IMPORTANT: For ANY task creation, reschedule, cancel, markDone, or setGoal — you MUST ALWAYS include the "action" object so the user sees a preview and can confirm before it executes. Never just describe what you would do in text — always provide the action for user confirmation.
         - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, mention you'll default to today. Always include the action so the user can review and confirm the task details before creation.
           - To create a recurring task, set "recurrence" to "daily", "weekly", or "monthly" and "occurrences" to the number of instances to create. Defaults: daily=7, weekly=4, monthly=3 if not specified. The "date" is the start date/time; instances are generated from there.
           - Examples: "Add homework daily for 2 weeks" → recurrence: "daily", occurrences: 14. "Create swimming weekly for a month" → recurrence: "weekly", occurrences: 4.
           - MULTI-TASK CREATION: When the user asks to create multiple tasks at once, use the "tasks" array instead of the single task fields. Each entry in the "tasks" array is an independent task with its own name, assignee, date, reward, recurrence, and occurrences. You can mix single tasks and recurring tasks in the same "tasks" array.
           - Examples: "Add homework at 4pm and swimming at 6pm for Aria" → tasks array with 2 entries. "Create daily reading for Aria and weekly piano for Bhuvi" → tasks array with 2 recurring entries.
           - For a single task, you may use either the top-level fields OR a "tasks" array with one entry — both work.
+        - For "setGoal": creates a structured goal with auto-generated recurring tasks.
+          - Use "goalTemplateId" to reference a template from the GOAL TEMPLATES catalog above. If none matches, set it to "" and "isCustom" to true.
+          - Use "assignee" for a single member, or "assignees" array for multiple members (e.g., "set reading goal for all kids").
+          - "goalTasks" defines the tasks for the goal. When using a template, you can adjust task parameters based on the member's MEMBER INSIGHTS data:
+            * For members with < 60% completion in the relevant category: reduce occurrences by ~30% and increase rewards by ~50% to build habits gradually.
+            * For members with > 80% completion: use default or slightly increased parameters.
+            * Consider existing active goals to avoid overloading — never create more than 3 active goals per member simultaneously.
+          - "category" must be one of: Education, Well-being, Lifestyle, Finance, Skills, Fitness.
+          - "durationDays" is the number of days for the goal (default from template or 30).
+          - If the user asks "any goal suggestions?" or "what goals should we set?", respond with action: null and a conversational recommendation of 2-3 goals with reasoning based on the insights data.
         - For "reschedule": use "matchingTaskNames" with task names to match, and "newDate" for the target date and time.
           - If the user specifies a new TIME (e.g. "move to 3pm", "change to 10am"), include that time in "newDate" and set "preserveTime" to false.
           - If the user only specifies a new DATE without a time (e.g. "move to tomorrow", "push to Saturday"), set "preserveTime" to true so the original time is kept.
@@ -208,6 +258,7 @@ final class ClaudeAPIService: Sendable {
         - ALL dates in the action MUST be ISO 8601 format in the user's LOCAL time WITHOUT timezone suffix. Example: "2026-05-28T19:00:00" (NOT "2026-05-28T19:00:00Z"). Never append "Z" or any timezone offset.
         - ALWAYS respond with valid JSON. Never include markdown, backticks, or text outside the JSON object.
         """
+        return prompt
     }
 
     private func parseResponse(_ text: String) -> ClaudeResponse {
@@ -251,7 +302,14 @@ final class ClaudeAPIService: Sendable {
                 tasks: actionJson["tasks"] as? [[String: Any]],
                 newName: actionJson["newName"] as? String,
                 newReward: actionJson["newReward"] as? Int,
-                newAssignee: actionJson["newAssignee"] as? String
+                newAssignee: actionJson["newAssignee"] as? String,
+                goalName: actionJson["goalName"] as? String,
+                goalTemplateId: actionJson["goalTemplateId"] as? String,
+                assignees: actionJson["assignees"] as? [String],
+                category: actionJson["category"] as? String,
+                durationDays: actionJson["durationDays"] as? Int,
+                isCustomGoal: actionJson["isCustom"] as? Bool,
+                goalTasks: actionJson["goalTasks"] as? [[String: Any]]
             )
         }
 
@@ -348,6 +406,15 @@ struct AIChatMessage: Identifiable {
 
 // MARK: - Task Action (preview card)
 
+struct GoalTaskEntry {
+    var name: String
+    var frequency: RecurrenceType
+    var occurrences: Int
+    var reward: Int
+    var hour: Int
+    var minute: Int
+}
+
 struct TaskAction: Identifiable {
     let id = UUID()
     let intent: TaskIntent
@@ -365,6 +432,15 @@ struct TaskAction: Identifiable {
     var parsedTasks: [ParsedTask] = []
     var preserveTime: Bool = true
     var rescheduleScope: String = "instance"
+
+    // Goal fields
+    var goalName: String?
+    var goalTemplateId: String?
+    var goalCategory: String?
+    var goalDurationDays: Int?
+    var goalIsCustom: Bool = false
+    var goalAssignees: [String] = []
+    var goalTasks: [GoalTaskEntry] = []
 }
 
 // MARK: - Task Intent
@@ -375,6 +451,7 @@ enum TaskIntent {
     case cancel
     case markDone
     case update
+    case setGoal
     case listTasks
     case checkCoins
     case weekSummary
@@ -408,13 +485,14 @@ struct TaskCommandParser {
         if let result = tryReschedule(lower, input) { return result }
         if let result = tryCancel(lower, input) { return result }
         if let result = tryMarkDone(lower, input) { return result }
+        if let result = trySetGoal(lower, input) { return result }
         if let result = tryCreate(lower, input) { return result }
         if let result = tryListTasks(lower) { return result }
         if let result = tryCheckCoins(lower) { return result }
         if let result = tryWeekSummary(lower) { return result }
         if let result = tryStatus(lower, input) { return result }
 
-        return (.unknown, "I didn't quite catch that. Here's what I can help with:\n\n• Create tasks — \"Add homework for Arya tomorrow 5pm\"\n• Reschedule — \"Move today's tasks to Saturday\"\n• Cancel or complete — \"Cancel swimming\" / \"Mark reading as done\"\n• Check status — \"What's Arya doing today?\"\n• Summaries — \"How did we do last week?\"", nil, .none)
+        return (.unknown, "I didn't quite catch that. Here's what I can help with:\n\n• Create tasks — \"Add homework for Arya tomorrow 5pm\"\n• Set goals — \"Set a reading goal for Arya\"\n• Reschedule — \"Move today's tasks to Saturday\"\n• Cancel or complete — \"Cancel swimming\" / \"Mark reading as done\"\n• Check status — \"What's Arya doing today?\"\n• Summaries — \"How did we do last week?\"", nil, .none)
     }
 
     // MARK: - Handle Pending Context
@@ -617,6 +695,73 @@ struct TaskCommandParser {
         )
 
         return (.markDone, "I'll mark the following as done.\(coinNote) Please confirm:", action, .none)
+    }
+
+    // MARK: - Create
+
+    // MARK: - Set Goal (offline)
+
+    private func trySetGoal(_ lower: String, _ original: String) -> (TaskIntent, String, TaskAction?, PendingContext)? {
+        let goalPatterns = ["set a goal", "set goal", "create a goal", "create goal", "start a goal", "start goal",
+                            "goal for", "reading goal", "fitness goal", "homework goal", "education goal",
+                            "wellbeing goal", "lifestyle goal", "finance goal", "skills goal"]
+        guard goalPatterns.contains(where: { lower.contains($0) }) else { return nil }
+
+        // Try to match a template by name keywords
+        let templates = GoalTemplateCatalog.all
+        var matched: GoalTemplate?
+        for template in templates {
+            let nameWords = template.name.lowercased().split(separator: " ")
+            if nameWords.contains(where: { lower.contains(String($0)) && String($0).count > 3 }) {
+                matched = template
+                break
+            }
+        }
+        // Also match by category keyword
+        if matched == nil {
+            for cat in GoalCategory.allCases {
+                if lower.contains(cat.rawValue.lowercased()) {
+                    let audience: GoalAudience = isIndividual ? .individual : .child
+                    matched = templates.first { $0.category == cat && $0.audience.contains(audience) }
+                    break
+                }
+            }
+        }
+
+        guard let template = matched else {
+            return (.setGoal, "I found a few goal options. Try being more specific, like \"Set a reading goal for Arya\" or use the Goals tab for the full catalog.", nil, .none)
+        }
+
+        let person = extractPerson(from: original)
+        let assignee = person ?? currentUser
+
+        let entries = template.suggestedTasks.map {
+            GoalTaskEntry(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+        }
+
+        var details: [String] = []
+        details.append("🎯 \(template.name)")
+        details.append("📂 \(template.category.rawValue) • \(template.durationDays) days")
+        details.append("👤 \(assignee)")
+        details.append("─────")
+        details.append("Tasks:")
+        for task in entries {
+            details.append("  \(task.name) (\(task.frequency.rawValue) × \(task.occurrences)) - \(task.reward) coins")
+        }
+        let totalTasks = entries.reduce(0) { $0 + $1.occurrences }
+        let totalCoins = entries.reduce(0) { $0 + $1.reward * $1.occurrences }
+        details.append("─────")
+        details.append("Total: \(totalTasks) tasks, \(totalCoins) coins possible")
+
+        var action = TaskAction(intent: .setGoal, summary: "Set Goal: \(template.name)", details: details)
+        action.goalName = template.name
+        action.goalTemplateId = template.id
+        action.goalCategory = template.category.rawValue
+        action.goalDurationDays = template.durationDays
+        action.goalIsCustom = false
+        action.goalAssignees = [assignee]
+        action.goalTasks = entries
+        return (.setGoal, "Here's a goal I can set up for \(assignee):", action, .none)
     }
 
     // MARK: - Create
@@ -1056,6 +1201,7 @@ struct AIAssistantView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     let allTasks: [Item]
     let allMembers: [FamilyMember]
+    let allGoals: [Goal]
     let isIndividual: Bool
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var isInline: Bool = false
@@ -1161,15 +1307,15 @@ struct AIAssistantView: View {
         if isIndividual {
             return [
                 "How am I doing this week?",
-                "I want to start jogging every day",
+                "Set a fitness goal for me",
                 "What tasks do I have today?",
-                "Tell me something interesting about my progress",
+                "Any goal suggestions based on my progress?",
                 "Help me plan my weekend"
             ]
         } else {
             return [
-                "Tell me interesting facts about my family tasks",
-                "I want to start jogging every day",
+                "Set a reading goal for the kids",
+                "Any goal suggestions for the family?",
                 "How is my family's week looking?",
                 "How are the kids doing with their tasks?",
                 "Help us plan the weekend"
@@ -1462,7 +1608,7 @@ struct AIAssistantView: View {
         let lower = message.lowercased()
         let actionKeywords = ["create", "add", "schedule", "reschedule", "cancel", "delete", "remove",
                               "assign", "update", "change", "move", "set", "mark", "complete", "done",
-                              "pick up", "unassign", "recurring"]
+                              "pick up", "unassign", "recurring", "goal"]
         if actionKeywords.contains(where: { lower.contains($0) }) {
             return ClaudeAPIService.sonnetModel
         }
@@ -1490,6 +1636,8 @@ struct AIAssistantView: View {
             .map { (role: $0.role == .user ? "user" : "assistant", text: $0.text) }
 
         let tasksSummary = buildTasksSummary()
+        let insightsSummary = InsightsEngine.compute(tasks: allTasks, goals: allGoals, members: allMembers, currentUser: authManager.userName, isIndividual: isIndividual)
+        let goalCatalogSummary = GoalTemplateCatalog.summaryForPrompt()
 
         do {
             let response = try await service.chat(
@@ -1499,6 +1647,8 @@ struct AIAssistantView: View {
                 currentUser: authManager.userName,
                 isIndividual: isIndividual,
                 tasksSummary: tasksSummary,
+                insightsSummary: insightsSummary,
+                goalCatalogSummary: goalCatalogSummary,
                 model: model
             )
 
@@ -1783,6 +1933,77 @@ struct AIAssistantView: View {
             action.rescheduleScope = scope
             return action
 
+        case "setGoal":
+            guard let goalName = parsed.goalName, !goalName.isEmpty else { return nil }
+
+            let templateId = parsed.goalTemplateId ?? ""
+            let assignees: [String]
+            if let multiAssignees = parsed.assignees, !multiAssignees.isEmpty {
+                assignees = multiAssignees
+            } else if let single = parsed.assignee, !single.isEmpty {
+                assignees = [single]
+            } else {
+                assignees = [authManager.userName]
+            }
+            let category = parsed.category ?? "Lifestyle"
+            let durationDays = parsed.durationDays ?? 30
+            let isCustom = parsed.isCustomGoal ?? templateId.isEmpty
+
+            // Build goal task entries from AI response or fall back to template
+            var goalTaskEntries: [GoalTaskEntry] = []
+            if let tasksArray = parsed.goalTasks, !tasksArray.isEmpty {
+                for taskDict in tasksArray {
+                    guard let name = taskDict["taskName"] as? String, !name.isEmpty else { continue }
+                    let freqStr = (taskDict["frequency"] as? String ?? "daily").lowercased()
+                    let freq: RecurrenceType = switch freqStr {
+                        case "daily": .daily
+                        case "weekly": .weekly
+                        case "monthly": .monthly
+                        default: .daily
+                    }
+                    let occ = taskDict["occurrences"] as? Int ?? (freq == .daily ? 30 : freq == .weekly ? 4 : 3)
+                    let reward = taskDict["reward"] as? Int ?? 2
+                    let hour = taskDict["hour"] as? Int ?? 9
+                    let minute = taskDict["minute"] as? Int ?? 0
+                    goalTaskEntries.append(GoalTaskEntry(name: name, frequency: freq, occurrences: occ, reward: reward, hour: hour, minute: minute))
+                }
+            }
+
+            // Fall back to template defaults if no tasks provided
+            if goalTaskEntries.isEmpty, let template = GoalTemplateCatalog.all.first(where: { $0.id == templateId }) {
+                goalTaskEntries = template.suggestedTasks.map {
+                    GoalTaskEntry(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+                }
+            }
+
+            guard !goalTaskEntries.isEmpty else { return nil }
+
+            // Build preview details
+            var details: [String] = []
+            details.append("🎯 \(goalName)")
+            details.append("📂 \(category) • \(durationDays) days")
+            details.append("👤 \(assignees.joined(separator: ", "))")
+            details.append("─────")
+            details.append("Tasks:")
+            for task in goalTaskEntries {
+                let freqLabel = "\(task.frequency.rawValue) × \(task.occurrences)"
+                details.append("  \(task.name) (\(freqLabel)) - \(task.reward) coins")
+            }
+            let totalTasks = goalTaskEntries.reduce(0) { $0 + $1.occurrences } * assignees.count
+            let totalCoins = goalTaskEntries.reduce(0) { $0 + $1.reward * $1.occurrences } * assignees.count
+            details.append("─────")
+            details.append("Total: \(totalTasks) tasks, \(totalCoins) coins possible")
+
+            var action = TaskAction(intent: .setGoal, summary: "Set Goal: \(goalName)", details: details)
+            action.goalName = goalName
+            action.goalTemplateId = templateId
+            action.goalCategory = category
+            action.goalDurationDays = durationDays
+            action.goalIsCustom = isCustom
+            action.goalAssignees = assignees
+            action.goalTasks = goalTaskEntries
+            return action
+
         default:
             return nil
         }
@@ -1802,6 +2023,8 @@ struct AIAssistantView: View {
             executeCreate(action, messageId: messageId)
         case .update:
             executeUpdate(action, messageId: messageId)
+        case .setGoal:
+            executeSetGoal(action, messageId: messageId)
         default:
             break
         }
@@ -2080,6 +2303,97 @@ struct AIAssistantView: View {
         messages.append(AIChatMessage(role: .assistant, text: response))
     }
 
+    private func executeSetGoal(_ action: TaskAction, messageId: UUID) {
+        guard let goalName = action.goalName, !action.goalTasks.isEmpty else {
+            messages.append(AIChatMessage(role: .assistant, text: "Something went wrong — goal details were missing. Please try again."))
+            return
+        }
+
+        if !subscriptionManager.canCreateMoreTasks(allTasks: allTasks) {
+            markActionExecuted(messageId: messageId)
+            messages.append(AIChatMessage(role: .assistant, text: "You've reached the task limit for this month. Upgrade your plan to create more tasks."))
+            return
+        }
+
+        let assignees = action.goalAssignees.isEmpty ? [authManager.userName] : action.goalAssignees
+        let category = action.goalCategory ?? "Lifestyle"
+        let durationDays = action.goalDurationDays ?? 30
+        let templateId = action.goalTemplateId ?? ""
+        let isCustom = action.goalIsCustom
+        let icon = GoalCategory(rawValue: category)?.icon ?? "target"
+
+        let calendar = Calendar.current
+        let startDate = calendar.startOfDay(for: Date())
+        let targetDate = calendar.date(byAdding: .day, value: durationDays, to: startDate) ?? startDate
+
+        // Check for duplicate active goals
+        let existingGoals: [Goal] = (try? modelContext.fetch(FetchDescriptor<Goal>())) ?? []
+
+        var allCreatedItems: [Item] = []
+        var goalSummaries: [String] = []
+
+        for assignee in assignees {
+            let hasDuplicate = existingGoals.contains { $0.assignedTo == assignee && $0.isActive && ($0.templateId == templateId || $0.name == goalName) }
+            if hasDuplicate {
+                goalSummaries.append("⚠️ \(assignee) already has an active \"\(goalName)\" goal — skipped.")
+                continue
+            }
+
+            let goal = Goal(
+                name: goalName,
+                category: category,
+                icon: icon,
+                assignedTo: assignee,
+                createdBy: authManager.userName,
+                targetDate: targetDate,
+                isCustom: isCustom,
+                templateId: templateId
+            )
+            modelContext.insert(goal)
+
+            var tasksCreated = 0
+            for entry in action.goalTasks {
+                let baseDate = calendar.date(bySettingHour: entry.hour, minute: entry.minute, second: 0, of: startDate) ?? startDate
+                let isRecurring = entry.frequency != .none
+                let dates = generateRecurringDates(startDate: baseDate, recurrence: entry.frequency, occurrences: entry.occurrences)
+
+                for date in dates {
+                    let item = Item(
+                        name: entry.name,
+                        targetDate: date,
+                        assignedTo: assignee,
+                        reward: Double(entry.reward),
+                        isRecurring: isRecurring,
+                        createdBy: authManager.userName,
+                        createdByID: authManager.appleUserID
+                    )
+                    item.goalId = goal.id.uuidString
+                    modelContext.insert(item)
+                    allCreatedItems.append(item)
+                    subscriptionManager.recordTaskCreation()
+                    notificationManager.scheduleTaskReminder(taskId: item.id, taskName: item.name, assignedTo: assignee, dueDate: date)
+                    tasksCreated += 1
+                }
+            }
+            goalSummaries.append("🎯 \"\(goalName)\" for \(assignee) — \(tasksCreated) tasks created")
+        }
+
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        Task {
+            for item in allCreatedItems {
+                await cloudKitManager.pushTask(item, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+
+        var response = goalSummaries.joined(separator: "\n")
+        response += "\n\n\(allCreatedItems.count) total task\(allCreatedItems.count == 1 ? "" : "s") scheduled with reminders set."
+        messages.append(AIChatMessage(role: .assistant, text: response))
+    }
+
     private func generateRecurringDates(startDate: Date, recurrence: RecurrenceType, occurrences: Int) -> [Date] {
         let calendar = Calendar.current
         switch recurrence {
@@ -2124,6 +2438,7 @@ struct AIAssistantView: View {
         case .reschedule: return "calendar.badge.clock"
         case .cancel: return "xmark.circle.fill"
         case .markDone: return "checkmark.circle.fill"
+        case .setGoal: return "target"
         default: return "sparkles"
         }
     }
@@ -2134,6 +2449,7 @@ struct AIAssistantView: View {
         case .reschedule: return .orange
         case .cancel: return .red
         case .markDone: return .green
+        case .setGoal: return .teal
         default: return .purple
         }
     }

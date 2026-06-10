@@ -3171,4 +3171,155 @@ struct GoalTemplateCatalog {
             return templates.isEmpty ? nil : (category: cat, templates: templates)
         }
     }
+
+    static func summaryForPrompt() -> String {
+        var lines: [String] = ["GOAL TEMPLATES (use goalTemplateId when setting goals):"]
+        for template in all {
+            let audiences = template.audience.map { $0.rawValue }.sorted().joined(separator: ",")
+            let taskNames = template.suggestedTasks.map { $0.name }.joined(separator: ", ")
+            lines.append("- \(template.id) (\(template.category.rawValue), \(audiences)): \"\(template.name)\" \(template.durationDays)d, \(template.suggestedTasks.count) tasks [\(taskNames)]")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - Insights Engine
+
+struct MemberInsight {
+    let memberName: String
+    let completionRate: Double
+    let categoryBreakdown: [(category: String, rate: Double)]
+    let strongestCategory: String?
+    let weakestCategory: String?
+    let currentStreak: Int
+    let coinsEarned: Int
+    let activeGoalCount: Int
+    let activeGoalNames: [String]
+}
+
+struct InsightsEngine {
+    static func compute(tasks: [Item], goals: [Goal], members: [FamilyMember], currentUser: String, isIndividual: Bool) -> String {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        guard let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: today) else {
+            return "MEMBER INSIGHTS: No data available yet."
+        }
+
+        let memberNames: [String]
+        if isIndividual {
+            memberNames = [currentUser]
+        } else {
+            memberNames = members.map { $0.name }
+        }
+
+        if memberNames.isEmpty {
+            return "MEMBER INSIGHTS: No members found."
+        }
+
+        let recentTasks = tasks.filter { !$0.isArchived && $0.targetDate >= thirtyDaysAgo && $0.targetDate <= today }
+        if recentTasks.isEmpty {
+            return "MEMBER INSIGHTS: No task history in the last 30 days. Use default goal parameters."
+        }
+
+        var insights: [MemberInsight] = []
+        for name in memberNames {
+            let memberTasks = recentTasks.filter { $0.assignedTo == name }
+            guard !memberTasks.isEmpty else { continue }
+
+            let approved = memberTasks.filter { $0.isApproved }.count
+            let total = memberTasks.count
+            let rate = Double(approved) / Double(total)
+
+            // Category breakdown
+            var catCounts: [String: (done: Int, total: Int)] = [:]
+            for task in memberTasks {
+                let cat = inferCategory(taskName: task.name, goalId: task.goalId, goals: goals)
+                var entry = catCounts[cat] ?? (0, 0)
+                entry.total += 1
+                if task.isApproved { entry.done += 1 }
+                catCounts[cat] = entry
+            }
+            let breakdown = catCounts.map { (category: $0.key, rate: $0.value.total > 0 ? Double($0.value.done) / Double($0.value.total) : 0.0) }
+                .sorted { $0.rate > $1.rate }
+            let strongest = breakdown.first { $0.rate > 0 }?.category
+            let weakest = breakdown.last { $0.category != "Other" }?.category
+
+            // Streak calculation
+            let streak = computeStreak(tasks: tasks, memberName: name, calendar: calendar, today: today)
+
+            // Coins
+            let coins = memberTasks.filter { $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+
+            // Active goals
+            let memberGoals = goals.filter { $0.assignedTo == name && $0.isActive }
+
+            insights.append(MemberInsight(
+                memberName: name,
+                completionRate: rate,
+                categoryBreakdown: breakdown,
+                strongestCategory: strongest,
+                weakestCategory: weakest,
+                currentStreak: streak,
+                coinsEarned: coins,
+                activeGoalCount: memberGoals.count,
+                activeGoalNames: memberGoals.map { $0.name }
+            ))
+        }
+
+        if insights.isEmpty {
+            return "MEMBER INSIGHTS: No task history in the last 30 days. Use default goal parameters."
+        }
+
+        var lines: [String] = ["MEMBER INSIGHTS (last 30 days):"]
+        for ins in insights {
+            var parts: [String] = []
+            parts.append("\(Int(ins.completionRate * 100))% completion")
+            for (cat, catRate) in ins.categoryBreakdown.prefix(3) where cat != "Other" {
+                parts.append("\(cat) \(Int(catRate * 100))%")
+            }
+            if ins.currentStreak > 0 { parts.append("streak: \(ins.currentStreak)d") }
+            parts.append("\(ins.coinsEarned) coins")
+            if ins.activeGoalCount > 0 {
+                parts.append("goals: \(ins.activeGoalNames.joined(separator: ", "))")
+            } else {
+                parts.append("no active goals")
+            }
+            lines.append("- \(ins.memberName): \(parts.joined(separator: ", "))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func inferCategory(taskName: String, goalId: String, goals: [Goal]) -> String {
+        // If task belongs to a goal, use the goal's category
+        if !goalId.isEmpty, let goal = goals.first(where: { $0.id.uuidString == goalId }) {
+            return goal.category
+        }
+        let lower = taskName.lowercased()
+        if ["homework", "study", "read", "book", "math", "science", "school", "learn", "quiz", "notes"].contains(where: { lower.contains($0) }) { return "Education" }
+        if ["exercise", "run", "swim", "gym", "walk", "yoga", "sport", "stretch", "jog", "workout"].contains(where: { lower.contains($0) }) { return "Fitness" }
+        if ["clean", "tidy", "laundry", "dishes", "organize", "vacuum", "bed", "room"].contains(where: { lower.contains($0) }) { return "Lifestyle" }
+        if ["meditat", "sleep", "water", "brush", "shower", "wake", "breakfast", "routine", "gratitude"].contains(where: { lower.contains($0) }) { return "Well-being" }
+        if ["save", "money", "budget", "spending", "pocket", "coins"].contains(where: { lower.contains($0) }) { return "Finance" }
+        if ["piano", "guitar", "cook", "coding", "language", "practice", "recipe", "lesson"].contains(where: { lower.contains($0) }) { return "Skills" }
+        return "Other"
+    }
+
+    private static func computeStreak(tasks: [Item], memberName: String, calendar: Calendar, today: Date) -> Int {
+        var streak = 0
+        var checkDate = calendar.date(byAdding: .day, value: -1, to: today)!
+
+        for _ in 0..<60 {
+            let dayStart = calendar.startOfDay(for: checkDate)
+            let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart)!
+            let dayTasks = tasks.filter { $0.assignedTo == memberName && !$0.isArchived && $0.targetDate >= dayStart && $0.targetDate < dayEnd }
+
+            if dayTasks.isEmpty { break }
+            let allDone = dayTasks.allSatisfy { $0.isApproved || $0.isCancelled }
+            if !allDone { break }
+
+            streak += 1
+            checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate)!
+        }
+        return streak
+    }
 }

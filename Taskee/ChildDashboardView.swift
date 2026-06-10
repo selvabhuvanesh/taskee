@@ -179,7 +179,7 @@ struct ChildDashboardView: View {
                 LinearGradient(colors: childTheme.gradientColors, startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
 
-                AIAssistantView(allTasks: allTasks, allMembers: allMembers, isIndividual: false, theme: childTheme, isInline: true)
+                AIAssistantView(allTasks: allTasks, allMembers: allMembers, allGoals: allGoals, isIndividual: false, theme: childTheme, isInline: true)
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

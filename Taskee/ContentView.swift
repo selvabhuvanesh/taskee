@@ -522,7 +522,7 @@ struct ContentView: View {
                 LinearGradient(colors: parentTheme.gradientColors, startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
 
-                AIAssistantView(allTasks: tasks, allMembers: allMembers, isIndividual: isIndividual, theme: parentTheme, isInline: true)
+                AIAssistantView(allTasks: tasks, allMembers: allMembers, allGoals: allGoals, isIndividual: isIndividual, theme: parentTheme, isInline: true)
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
