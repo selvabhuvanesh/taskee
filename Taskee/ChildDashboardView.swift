@@ -1176,7 +1176,7 @@ struct ChildDashboardView: View {
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 18, height: 18)
-                                .background(.teal, in: Circle())
+                                .background(childTheme.accentColor, in: Circle())
                         }
                     }
                     .foregroundStyle(showGoalsTab ? childTheme.textColor : childTheme.secondaryTextColor)
@@ -1487,7 +1487,7 @@ struct ChildDashboardView: View {
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
-                                    .background(.indigo, in: Circle())
+                                    .background(childTheme.accentColor, in: Circle())
                             }
 
                             if task.belongsToGoal {
@@ -1495,7 +1495,7 @@ struct ChildDashboardView: View {
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
-                                    .background(.teal, in: Circle())
+                                    .background(childTheme.accentColor, in: Circle())
                             }
 
                             if task.hasGift {

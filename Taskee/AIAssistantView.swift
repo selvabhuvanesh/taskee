@@ -1263,7 +1263,7 @@ struct AIAssistantView: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.6))
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -1275,13 +1275,13 @@ struct AIAssistantView: View {
                 } label: {
                     Image(systemName: isVoiceOutputEnabled ? "speaker.wave.2.fill" : "speaker.slash")
                         .font(.subheadline)
-                        .foregroundStyle(isVoiceOutputEnabled ? calmAccent : .white.opacity(0.6))
+                        .foregroundStyle(isVoiceOutputEnabled ? theme.accentColor : .primary.opacity(0.6))
                 }
             }
             if !isInline {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
             }
         }
@@ -1342,10 +1342,10 @@ struct AIAssistantView: View {
                             .font(.caption)
                             .multilineTextAlignment(.leading)
                     }
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.primary.opacity(0.85))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(Color(white: 0.2), in: Capsule())
+                    .background(theme.cardBackground, in: Capsule())
                 }
             }
         }
@@ -1402,14 +1402,14 @@ struct AIAssistantView: View {
         HStack(spacing: 4) {
             Text("Thinking...")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
             ProgressView()
-                .tint(.white.opacity(0.5))
+                .tint(.primary.opacity(0.5))
                 .scaleEffect(0.7)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 
     // MARK: - Message Bubble
@@ -1424,10 +1424,10 @@ struct AIAssistantView: View {
             VStack(alignment: isUser ? .trailing : .leading, spacing: 8) {
                 Text(message.text)
                     .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isUser ? .white : .primary)
                     .padding(12)
                     .background(
-                        isUser ? calmAccent : Color(white: 0.2),
+                        isUser ? theme.accentColor : theme.cardBackground,
                         in: RoundedRectangle(cornerRadius: 16)
                     )
 
@@ -1468,13 +1468,13 @@ struct AIAssistantView: View {
                     .foregroundStyle(colorForIntent(action.intent))
                 Text(action.summary)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
 
             ForEach(action.details, id: \.self) { detail in
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.primary.opacity(0.8))
             }
 
             HStack(spacing: 12) {
@@ -1489,7 +1489,7 @@ struct AIAssistantView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(.green, in: Capsule())
+                    .background(theme.accentColor, in: Capsule())
                 }
 
                 Button {
@@ -1500,16 +1500,16 @@ struct AIAssistantView: View {
                         Text("Cancel")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.primary.opacity(0.7))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(.white.opacity(0.15), in: Capsule())
+                    .background(.primary.opacity(0.15), in: Capsule())
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(white: 0.15), in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(colorForIntent(action.intent).opacity(0.5), lineWidth: 1)
@@ -1522,12 +1522,12 @@ struct AIAssistantView: View {
         HStack(spacing: 10) {
             TextField("Ask me anything...", text: $inputText)
                 .font(.subheadline)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .padding(12)
-                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
+                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                 )
                 .focused($isInputFocused)
                 .onSubmit { sendMessage() }
@@ -1547,7 +1547,7 @@ struct AIAssistantView: View {
             } label: {
                 Image(systemName: speechManager.isListening ? "mic.fill" : "mic")
                     .font(.system(size: 22))
-                    .foregroundStyle(speechManager.isListening ? .red : .white.opacity(0.6))
+                    .foregroundStyle(speechManager.isListening ? .red : .primary.opacity(0.6))
             }
 
             Button {
@@ -1555,13 +1555,13 @@ struct AIAssistantView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 34))
-                    .foregroundStyle(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.3) : calmAccent)
+                    .foregroundStyle(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.3) : theme.accentColor)
             }
             .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.4))
+        .background(theme.cardBackgroundLight)
     }
 
     // MARK: - Send & Process
@@ -2450,12 +2450,12 @@ struct AIAssistantView: View {
 
     private func colorForIntent(_ intent: TaskIntent) -> Color {
         switch intent {
-        case .create: return .blue
+        case .create: return theme.accentColor
         case .reschedule: return .orange
         case .cancel: return .red
         case .markDone: return .green
-        case .setGoal: return .teal
-        default: return .purple
+        case .setGoal: return theme.accentColor
+        default: return theme.accentColor
         }
     }
 }

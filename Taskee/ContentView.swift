@@ -1173,7 +1173,7 @@ struct ContentView: View {
             HStack {
                 Image(systemName: "calendar")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(parentTheme.accentColor)
                 Text("Today's Preview")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(parentTheme.textColor)
@@ -1186,7 +1186,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "bubble.left.and.text.bubble.right.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(parentTheme.accentColor)
                 }
             }
             .padding(.horizontal, 20)
@@ -1241,7 +1241,7 @@ struct ContentView: View {
                 HStack {
                     Image(systemName: "calendar")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(parentTheme.accentColor)
                     Text("Today's Preview")
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.white)
@@ -1254,7 +1254,7 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "bubble.left.and.text.bubble.right.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(parentTheme.accentColor)
                     }
                     Button {
                         withAnimation(.spring(duration: 0.3)) { showDayPreview = false }
@@ -1335,7 +1335,7 @@ struct ContentView: View {
                                 .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 16, height: 16)
-                                .background(.indigo, in: Circle())
+                                .background(parentTheme.accentColor, in: Circle())
                         }
 
                         if task.belongsToGoal {
@@ -1343,7 +1343,7 @@ struct ContentView: View {
                                 .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 16, height: 16)
-                                .background(.teal, in: Circle())
+                                .background(parentTheme.accentColor, in: Circle())
                         }
 
                         if task.needsTransport {
@@ -1368,7 +1368,7 @@ struct ContentView: View {
             HStack {
                 Image(systemName: "calendar")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(parentTheme.accentColor)
                 Text("Today's Preview")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
@@ -2210,7 +2210,7 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                 .frame(width: 52, height: 52)
-                .background(.teal, in: Circle())
+                .background(parentTheme.accentColor, in: Circle())
 
                 Text("\(dayNumber)")
                     .font(.system(size: 13, weight: .black))
@@ -2218,7 +2218,7 @@ struct ContentView: View {
                     .offset(y: 4)
             }
         }
-        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: parentTheme.accentColor.opacity(0.3), radius: 8, y: 4)
     }
 
     private var insightsCalendarButton: some View {
@@ -2238,7 +2238,7 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                 .frame(width: 52, height: 52)
-                .background(.teal, in: Circle())
+                .background(parentTheme.accentColor, in: Circle())
 
                 Text("\(dayNumber)")
                     .font(.system(size: 13, weight: .black))
@@ -2246,7 +2246,7 @@ struct ContentView: View {
                     .offset(y: 4)
             }
         }
-        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: parentTheme.accentColor.opacity(0.3), radius: 8, y: 4)
     }
 
     private var searchButton: some View {
@@ -2260,9 +2260,9 @@ struct ContentView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
-                .background(isSearching ? .orange : .teal, in: Circle())
+                .background(isSearching ? .orange : parentTheme.accentColor, in: Circle())
         }
-        .shadow(color: .teal.opacity(0.3), radius: 8, y: 4)
+        .shadow(color: parentTheme.accentColor.opacity(0.3), radius: 8, y: 4)
     }
 
     private var familyChatButton: some View {
@@ -4177,7 +4177,7 @@ struct TaskRow: View {
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
-                                    .background(.indigo, in: Circle())
+                                    .background(theme.accentColor, in: Circle())
                             }
 
                             if task.belongsToGoal {
@@ -4185,7 +4185,7 @@ struct TaskRow: View {
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(width: 18, height: 18)
-                                    .background(.teal, in: Circle())
+                                    .background(theme.accentColor, in: Circle())
                             }
 
                             if task.needsTransport {
@@ -6588,10 +6588,10 @@ struct ChildrenManagementView: View {
                     } label: {
                         Text("Accept")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(.green, in: Capsule())
+                            .background(theme.accentColor, in: Capsule())
                     }
                 }
                 .padding(14)
@@ -7878,7 +7878,7 @@ struct SettingsView: View {
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
-                                    .background(.blue, in: RoundedRectangle(cornerRadius: 10))
+                                    .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 10))
                                 }
                             }
                             .padding(14)

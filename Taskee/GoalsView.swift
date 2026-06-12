@@ -38,7 +38,7 @@ struct GoalsTabContent: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 7)
-                                .background(.teal, in: Capsule())
+                                .background(theme.accentColor, in: Capsule())
                         }
                     }
                 }
@@ -51,19 +51,11 @@ struct GoalsTabContent: View {
                         Text("No goals yet")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(theme.textColor)
-                        Text("Pick a goal and we'll create a plan with tasks, schedule, and rewards to help you achieve it.")
+                        Text("Tap 'Add Goal' to pick a goal and create a plan with tasks, schedule, and rewards.")
                             .font(.subheadline)
                             .foregroundStyle(theme.secondaryTextColor)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
-                        Button { showGoalPicker = true } label: {
-                            Text("Set a Goal")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 28)
-                                .padding(.vertical, 10)
-                                .background(.teal, in: Capsule())
-                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
@@ -124,7 +116,7 @@ struct GoalsTabContent: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 10)
-                .background(.teal, in: Capsule())
+                .background(theme.accentColor, in: Capsule())
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
             }
             .frame(maxWidth: .infinity)
@@ -189,18 +181,10 @@ struct GoalsDashboardView: View {
                     Text("No goals yet")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(theme.secondaryTextColor)
-                    Text("Set a goal and we'll help you plan the tasks to achieve it")
+                    Text("Tap 'Add Goal' to get started")
                         .font(.caption)
                         .foregroundStyle(theme.tertiaryTextColor)
                         .multilineTextAlignment(.center)
-                    Button(action: onAddGoal) {
-                        Text("Set a Goal")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(.blue, in: Capsule())
-                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
@@ -345,7 +329,7 @@ struct GoalPickerView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "sparkle")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.indigo)
+                                .foregroundStyle(theme.accentColor)
                             Text("Custom Goal")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(theme.textColor)
@@ -356,9 +340,9 @@ struct GoalPickerView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "plus.circle.fill")
                                     .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.indigo)
+                                    .foregroundStyle(theme.accentColor)
                                     .frame(width: 36, height: 36)
-                                    .background(.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                                    .background(theme.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
 
                                 Text("Create your own goal")
                                     .font(.subheadline.weight(.medium))
@@ -581,7 +565,7 @@ struct GoalTaskPreviewView: View {
                             Text("Add Task")
                         }
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(theme.accentColor)
                     }
                     .padding(.top, 4)
                 }
@@ -848,7 +832,7 @@ struct CustomGoalView: View {
                             Text("Add Task")
                         }
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(theme.accentColor)
                     }
                 }
                 .padding(16)
@@ -921,21 +905,11 @@ struct GoalsListView: View {
                             .foregroundStyle(.secondary)
                         Text("No goals yet")
                             .font(.title3.weight(.semibold))
-                        Text("Pick a goal and we'll create a plan with tasks, schedule, and rewards to help you achieve it.")
+                        Text("Tap 'Add Goal' to pick a goal and create a plan with tasks, schedule, and rewards.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
-                        Button {
-                            showGoalPicker = true
-                        } label: {
-                            Text("Set a Goal")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 28)
-                                .padding(.vertical, 10)
-                                .background(.blue, in: Capsule())
-                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
@@ -1172,7 +1146,7 @@ struct GoalDetailView: View {
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 20)
                                         .padding(.vertical, 8)
-                                        .background(.teal, in: Capsule())
+                                        .background(theme.accentColor, in: Capsule())
                                 }
                                 .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
 
@@ -1224,7 +1198,7 @@ struct GoalDetailView: View {
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 5)
-                                        .background(.teal, in: Capsule())
+                                        .background(theme.accentColor, in: Capsule())
                                 }
                                 Button {
                                     taskEdits.removeAll()
