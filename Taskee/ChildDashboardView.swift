@@ -762,7 +762,7 @@ struct ChildDashboardView: View {
             && Calendar.current.isDateInToday(task.targetDate)
 
         if task.createdByChild || task.reward <= 0 {
-            task.status = "approved"
+            withAnimation(.snappy) { task.status = "approved" }
             if task.reward > 0, let me = allMembers.first(where: { $0.appleUserID == authManager.appleUserID }) {
                 me.addReward(task.reward)
                 let familyCode = authManager.familyCode

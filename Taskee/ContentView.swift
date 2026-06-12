@@ -378,6 +378,7 @@ struct ContentView: View {
     @State private var showGoalPicker = false
     @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
     @State private var giftTaskToReveal: Item?
+    @State private var taskListVersion = 0
 
     private var pendingRedemptions: [RewardRedemption] {
         allRedemptions.filter { $0.isPending }
@@ -449,7 +450,7 @@ struct ContentView: View {
     }
 
     private var filteredTasks: [Item] {
-        let base = showOpenOnly ? myTasks.filter { (!$0.isApproved && !$0.isMissed && !$0.isCancelled) || ($0.hasGift && !$0.giftRevealed) } : myTasks
+        let base = showOpenOnly ? myTasks.filter { !$0.isApproved && !$0.isMissed && !$0.isCancelled } : myTasks
         if isSearching {
             let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
             if !query.isEmpty {
@@ -729,7 +730,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingAddTask) {
+            .sheet(isPresented: $showingAddTask, onDismiss: { taskListVersion += 1 }) {
                 AddTaskView(children: children, otherParent: otherParent, theme: parentTheme)
             }
             .sheet(isPresented: $showingChildren) {
@@ -903,7 +904,8 @@ struct ContentView: View {
                 children: children,
                 otherParent: otherParent,
                 allMembers: allMembers,
-                theme: parentTheme
+                theme: parentTheme,
+                onTaskChanged: { taskListVersion += 1 }
             ))
             .confirmationDialog("This is a recurring task", isPresented: $showEditChoice, titleVisibility: .visible) {
                 Button("Edit This Task Only") {
@@ -1785,6 +1787,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .id(taskListVersion)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     withAnimation { proxy.scrollTo("Today", anchor: .top) }
@@ -2014,14 +2017,16 @@ struct ContentView: View {
                                 },
                                 onDelete: { taskToDelete = task },
                                 onMarkMissed: {
-                                    task.status = "missed"
+                                    withAnimation(.snappy) { task.status = "missed" }
                                     let familyCode = authManager.familyCode
                                     Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                                    taskListVersion += 1
                                 },
                                 onCancel: {
-                                    task.status = "cancelled"
+                                    withAnimation(.snappy) { task.status = "cancelled" }
                                     let familyCode = authManager.familyCode
                                     Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                                    taskListVersion += 1
                                 }
                             )
                             Spacer(minLength: 0)
@@ -3127,7 +3132,9 @@ struct DateTasksView: View {
     }
 
     private func handleApproval(task: Item) {
-        task.status = "approved"
+        withAnimation(.snappy) {
+            task.status = "approved"
+        }
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 && !task.assignedTo.isEmpty {
             let allFamilyMembers = children + [otherParent].compactMap { $0 }
@@ -3738,7 +3745,9 @@ struct ChildTasksView: View {
     }
 
     private func handleChildApproval(task: Item) {
-        task.status = "approved"
+        withAnimation(.snappy) {
+            task.status = "approved"
+        }
         let snapshot = CloudKitManager.TaskSnapshot(task)
         if task.reward > 0 {
             child.addReward(task.reward)
@@ -3833,6 +3842,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     var otherParent: FamilyMember?
     let allMembers: [FamilyMember]
     var theme: ChildTheme
+    var onTaskChanged: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
@@ -3926,7 +3936,9 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     private var approveButtons: some View {
         Button(taskToApprove?.isInReview == true ? "Approve" : "Complete") {
             if let task = taskToApprove {
-                task.status = "approved"
+                withAnimation(.snappy) {
+                    task.status = "approved"
+                }
                 let familyCode = authManager.familyCode
                 Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                 if task.reward > 0, !task.assignedTo.isEmpty {
@@ -3936,6 +3948,7 @@ struct ParentExpandedTaskAlerts: ViewModifier {
                     }
                 }
                 try? modelContext.save()
+                onTaskChanged?()
                 taskToApprove = nil
             }
         }
@@ -6702,16 +6715,18 @@ struct PendingApprovalsView: View {
                 }
                 Button("Approve") {
                     if let task = taskToApprove {
-                        task.status = "approved"
+                        withAnimation(.snappy) {
+                            task.status = "approved"
+                        }
                         let snapshot = CloudKitManager.TaskSnapshot(task)
                         if task.reward > 0 && !task.assignedTo.isEmpty {
                             if let child = children.first(where: { $0.name == task.assignedTo }) {
                                 child.addReward(task.reward)
                                 let familyCode = authManager.familyCode
-                                try? modelContext.save()
                                 Task { await cloudKitManager.pushMember(child, familyCode: familyCode) }
                             }
                         }
+                        try? modelContext.save()
                         withAnimation(.snappy) {
                             onApproved?(task.reward)
                         }
