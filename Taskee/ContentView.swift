@@ -4970,6 +4970,7 @@ struct AddTaskView: View {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
                             }
                         }
+                        try? modelContext.save()
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -6124,6 +6125,7 @@ struct EditTaskView: View {
         )
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+        try? modelContext.save()
         dismiss()
     }
 
@@ -7697,6 +7699,35 @@ struct SettingsView: View {
 
                             if !notificationManager.isVoiceEnabled {
                                 Text("Reminders will play a beep sound instead of speaking the task name.")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+                            }
+
+                            HStack {
+                                Image(systemName: SoundManager.shared.isSoundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.primary.opacity(0.6))
+                                    .frame(width: 24)
+                                Text("In-App Sounds")
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { SoundManager.shared.isSoundEnabled },
+                                    set: { SoundManager.shared.isSoundEnabled = $0 }
+                                ))
+                                .labelsHidden()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if !SoundManager.shared.isSoundEnabled {
+                                Text("Celebration sounds and beeps are muted.")
                                     .font(.caption)
                                     .foregroundStyle(.primary.opacity(0.5))
                             }

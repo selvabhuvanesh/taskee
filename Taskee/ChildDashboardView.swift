@@ -1869,6 +1869,7 @@ struct AddChildTaskView: View {
                                 await cloudKitManager.pushTask(task, familyCode: familyCode)
                             }
                         }
+                        try? modelContext.save()
                         dismiss()
                     }
                     .fontWeight(.semibold)

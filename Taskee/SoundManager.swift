@@ -4,10 +4,17 @@
 //
 
 import AVFoundation
+import AudioToolbox
 
 final class SoundManager {
     static let shared = SoundManager()
-    private var player: AVAudioPlayer?
+    private var cheerSoundID: SystemSoundID = 0
+    private var reminderSoundID: SystemSoundID = 0
+
+    var isSoundEnabled: Bool {
+        get { !UserDefaults.standard.bool(forKey: "soundDisabled") }
+        set { UserDefaults.standard.set(!newValue, forKey: "soundDisabled") }
+    }
 
     private lazy var cheerURL: URL? = {
         generateCheerWAV()
@@ -49,25 +56,18 @@ final class SoundManager {
     }
 
     func playApplause() {
-        guard let url = cheerURL else { return }
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: .mixWithOthers)
-            try AVAudioSession.sharedInstance().setActive(true)
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.volume = 0.75
-            player?.play()
-        } catch {}
+        guard isSoundEnabled, let url = cheerURL else { return }
+        // Dispose previous sound to avoid leaks
+        if cheerSoundID != 0 { AudioServicesDisposeSystemSoundID(cheerSoundID) }
+        AudioServicesCreateSystemSoundID(url as CFURL, &cheerSoundID)
+        AudioServicesPlaySystemSound(cheerSoundID)
     }
 
     func playReminderBeep() {
-        guard let url = reminderBeepURL else { return }
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: .mixWithOthers)
-            try AVAudioSession.sharedInstance().setActive(true)
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.volume = 0.85
-            player?.play()
-        } catch {}
+        guard isSoundEnabled, let url = reminderBeepURL else { return }
+        if reminderSoundID != 0 { AudioServicesDisposeSystemSoundID(reminderSoundID) }
+        AudioServicesCreateSystemSoundID(url as CFURL, &reminderSoundID)
+        AudioServicesPlaySystemSound(reminderSoundID)
     }
 
     private func brassTone(_ t: Double, freq: Double) -> Double {
