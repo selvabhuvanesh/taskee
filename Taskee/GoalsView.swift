@@ -569,8 +569,8 @@ struct GoalTaskPreviewView: View {
                     Text("Tasks to Create")
                         .font(.subheadline.weight(.bold))
 
-                    ForEach($editableTasks) { $task in
-                        taskEditRow(task: $task)
+                    ForEach(editableTasks) { task in
+                        taskEditRow(task: editableTaskBinding(task.id))
                     }
 
                     Button {
@@ -621,7 +621,10 @@ struct GoalTaskPreviewView: View {
                 Spacer()
 
                 Button(role: .destructive) {
-                    editableTasks.removeAll { $0.id == task.wrappedValue.id }
+                    let idToRemove = task.wrappedValue.id
+                    withAnimation {
+                        editableTasks.removeAll { $0.id == idToRemove }
+                    }
                 } label: {
                     Image(systemName: "trash")
                         .font(.caption)
@@ -683,6 +686,17 @@ struct GoalTaskPreviewView: View {
         }
         .padding(10)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func editableTaskBinding(_ id: UUID) -> Binding<EditableSuggestedTask> {
+        Binding(
+            get: { editableTasks.first { $0.id == id } ?? EditableSuggestedTask() },
+            set: { newValue in
+                if let idx = editableTasks.firstIndex(where: { $0.id == id }) {
+                    editableTasks[idx] = newValue
+                }
+            }
+        )
     }
 
     private func statBadge(value: String, label: String, icon: String) -> some View {
@@ -771,13 +785,14 @@ struct CustomGoalView: View {
                     Text("Tasks")
                         .font(.subheadline.weight(.bold))
 
-                    ForEach($tasks) { $task in
+                    ForEach(tasks) { task in
+                        let taskBinding = customTaskBinding(task.id)
                         VStack(spacing: 6) {
-                            TextField("Task name", text: $task.name)
+                            TextField("Task name", text: taskBinding.name)
                                 .font(.subheadline)
                                 .textFieldStyle(.roundedBorder)
                             HStack(spacing: 8) {
-                                Picker("", selection: $task.frequency) {
+                                Picker("", selection: taskBinding.frequency) {
                                     ForEach(RecurrenceType.allCases, id: \.self) { freq in
                                         Text(freq.rawValue).tag(freq)
                                     }
@@ -791,7 +806,7 @@ struct CustomGoalView: View {
                                     Text("x")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                    TextField("", value: $task.occurrences, format: .number)
+                                    TextField("", value: taskBinding.occurrences, format: .number)
                                         .font(.caption)
                                         .frame(width: 34)
                                         .textFieldStyle(.roundedBorder)
@@ -802,7 +817,7 @@ struct CustomGoalView: View {
                                     Image(systemName: "star.fill")
                                         .font(.caption2)
                                         .foregroundStyle(.orange)
-                                    TextField("", value: $task.reward, format: .number)
+                                    TextField("", value: taskBinding.reward, format: .number)
                                         .font(.caption)
                                         .frame(width: 30)
                                         .textFieldStyle(.roundedBorder)
@@ -810,7 +825,10 @@ struct CustomGoalView: View {
                                 .fixedSize()
 
                                 Button(role: .destructive) {
-                                    tasks.removeAll { $0.id == task.id }
+                                    let idToRemove = task.id
+                                    withAnimation {
+                                        tasks.removeAll { $0.id == idToRemove }
+                                    }
                                 } label: {
                                     Image(systemName: "trash")
                                         .font(.caption)
@@ -851,6 +869,17 @@ struct CustomGoalView: View {
                 }
             }
         }
+    }
+
+    private func customTaskBinding(_ id: UUID) -> Binding<EditableSuggestedTask> {
+        Binding(
+            get: { tasks.first { $0.id == id } ?? EditableSuggestedTask() },
+            set: { newValue in
+                if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[idx] = newValue
+                }
+            }
+        )
     }
 }
 

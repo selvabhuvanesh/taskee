@@ -703,8 +703,9 @@ struct TaskCommandParser {
 
     private func trySetGoal(_ lower: String, _ original: String) -> (TaskIntent, String, TaskAction?, PendingContext)? {
         let goalPatterns = ["set a goal", "set goal", "create a goal", "create goal", "start a goal", "start goal",
-                            "goal for", "reading goal", "fitness goal", "homework goal", "education goal",
-                            "wellbeing goal", "lifestyle goal", "finance goal", "skills goal"]
+                            "goal for", "reading goal", "fitness goal", "study goal", "education goal",
+                            "wellbeing goal", "wellness goal", "lifestyle goal", "finance goal", "money goal",
+                            "skills goal", "cooking goal", "running goal", "sport goal", "health goal", "sleep goal"]
         guard goalPatterns.contains(where: { lower.contains($0) }) else { return nil }
 
         // Try to match a template by name keywords
@@ -712,7 +713,11 @@ struct TaskCommandParser {
         var matched: GoalTemplate?
         for template in templates {
             let nameWords = template.name.lowercased().split(separator: " ")
-            if nameWords.contains(where: { lower.contains(String($0)) && String($0).count > 3 }) {
+            let stopWords: Set<String> = ["more", "into", "find", "keep", "build", "start"]
+            if nameWords.contains(where: { word in
+                let w = String(word)
+                return w.count > 3 && !stopWords.contains(w) && lower.contains(w)
+            }) {
                 matched = template
                 break
             }

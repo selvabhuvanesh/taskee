@@ -731,8 +731,10 @@ struct ChildDashboardView: View {
     }
 
     private func deleteAllRecurring(like task: Item) {
+        let taskName = task.name
+        let taskAssignee = task.assignedTo
         let matching = allTasks.filter {
-            $0.name == task.name && $0.assignedTo == task.assignedTo
+            $0.name == taskName && $0.assignedTo == taskAssignee
             && $0.isRecurring && !$0.isArchived
         }
         let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
@@ -741,7 +743,9 @@ struct ChildDashboardView: View {
         for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
-            withAnimation { modelContext.delete(t) }
+        }
+        withAnimation {
+            for t in toDelete { modelContext.delete(t) }
         }
         try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }

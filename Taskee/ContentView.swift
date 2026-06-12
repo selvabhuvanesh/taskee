@@ -2641,7 +2641,8 @@ struct DateTasksView: View {
         if !memberName.isEmpty {
             return allTasks.filter { $0.assignedTo == memberName }
         }
-        return tasks
+        let taskIds = Set(tasks.map { $0.id })
+        return allTasks.filter { taskIds.contains($0.id) }
     }
 
     private var filteredTasks: [Item] {
@@ -3160,8 +3161,10 @@ struct DateTasksView: View {
     }
 
     private func deleteAllRecurring(like task: Item) {
+        let taskName = task.name
+        let taskAssignee = task.assignedTo
         let matching = allTasks.filter {
-            $0.name == task.name && $0.assignedTo == task.assignedTo
+            $0.name == taskName && $0.assignedTo == taskAssignee
             && $0.isRecurring && !$0.isArchived
         }
         let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
@@ -3170,7 +3173,9 @@ struct DateTasksView: View {
         for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
-            withAnimation { modelContext.delete(t) }
+        }
+        withAnimation {
+            for t in toDelete { modelContext.delete(t) }
         }
         try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
@@ -3291,8 +3296,12 @@ struct ChildTasksView: View {
         max(0, childTotalEarned - childRedeemedCoins)
     }
 
+    private var childLiveTasks: [Item] {
+        allTasks.filter { $0.assignedTo == child.name }
+    }
+
     private var filteredTasks: [Item] {
-        showOpenOnly ? tasks.filter { !$0.isApproved && !$0.isMissed && !$0.isCancelled } : tasks
+        showOpenOnly ? childLiveTasks.filter { !$0.isApproved && !$0.isMissed && !$0.isCancelled } : childLiveTasks
     }
 
     private var groupedTasks: [(key: String, tasks: [Item])] {
@@ -3836,8 +3845,10 @@ struct ChildTasksView: View {
     }
 
     private func deleteAllRecurring(like task: Item) {
+        let taskName = task.name
+        let taskAssignee = task.assignedTo
         let matching = allTasks.filter {
-            $0.name == task.name && $0.assignedTo == task.assignedTo
+            $0.name == taskName && $0.assignedTo == taskAssignee
             && $0.isRecurring && !$0.isArchived
         }
         let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
@@ -3846,7 +3857,9 @@ struct ChildTasksView: View {
         for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
-            withAnimation { modelContext.delete(t) }
+        }
+        withAnimation {
+            for t in toDelete { modelContext.delete(t) }
         }
         try? modelContext.save()
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
@@ -3961,8 +3974,10 @@ struct ParentExpandedTaskAlerts: ViewModifier {
     }
 
     private func deleteAllRecurringExpanded(like task: Item) {
+        let taskName = task.name
+        let taskAssignee = task.assignedTo
         let matching = tasks.filter {
-            $0.name == task.name && $0.assignedTo == task.assignedTo
+            $0.name == taskName && $0.assignedTo == taskAssignee
             && $0.isRecurring && !$0.isArchived
         }
         let toDelete = matching.filter { !$0.isApproved && !$0.isInReview }
@@ -3970,7 +3985,9 @@ struct ParentExpandedTaskAlerts: ViewModifier {
         for t in toDelete {
             notificationManager.cancelTaskReminder(taskId: t.id)
             taskIDs.append(t.id)
-            withAnimation { modelContext.delete(t) }
+        }
+        withAnimation {
+            for t in toDelete { modelContext.delete(t) }
         }
         try? modelContext.save()
         taskToDelete = nil
