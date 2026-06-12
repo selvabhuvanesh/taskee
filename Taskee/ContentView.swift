@@ -553,8 +553,6 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    parentTasksGoalsToggle
-
                     if showGoalsTab {
                         GoalsTabContent(
                             userName: authManager.userName,
@@ -621,6 +619,15 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
+                        if !isIndividual {
+                            Button {
+                                showWishList = true
+                            } label: {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.subheadline)
+                            }
+                        }
+
                         Button {
                             showNotificationCenter = true
                         } label: {
@@ -974,11 +981,13 @@ struct ContentView: View {
             }
 
             HStack(spacing: 14) {
+                pillTasksButton
+                pillGoalsButton
+
                 if !isIndividual {
                     familyChatButton
                     shoppingBagButton
                     familyProjectsButton
-                    wishListButton
                 }
                 addTaskButton
             }
@@ -995,6 +1004,42 @@ struct ContentView: View {
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 4)
+        }
+    }
+
+    private var pillTasksButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
+        } label: {
+            Image(systemName: "checklist")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(showGoalsTab ? .white.opacity(0.15) : .green.opacity(0.5), in: Circle())
+        }
+    }
+
+    private var pillGoalsButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "target")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(!showGoalsTab ? .white.opacity(0.15) : .green.opacity(0.5), in: Circle())
+
+                let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
         }
     }
 
