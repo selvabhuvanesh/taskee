@@ -261,140 +261,435 @@ struct GoalPickerView: View {
     let assignee: String
     let theme: ChildTheme
 
-    @State private var selectedTemplate: GoalTemplate?
-    @State private var showCustomGoal = false
-    @State private var customGoalName = ""
-    @State private var customCategory: GoalCategory = .lifestyle
+    enum Phase { case input, generating, review, refining }
+
+    @State private var phase: Phase = .input
+    @State private var goalName = ""
+    @State private var goalDuration: Int = 30
     @State private var showTaskPreview = false
     @State private var editableTasks: [EditableSuggestedTask] = []
-    @State private var goalDuration: Int = 30
+    @State private var aiCategory: GoalCategory = .lifestyle
+    @State private var aiIcon: String = "star.fill"
+    @State private var generationError: String?
+    @State private var refinementText = ""
+    @State private var currentTasks: [GoalTaskEntry] = []
+    @State private var sparkleRotation: Double = 0
+    @State private var sparkleScale: CGFloat = 0.5
+    @FocusState private var isInputFocused: Bool
+    @FocusState private var isRefineFocused: Bool
+
+    private var exampleGoals: [GoalTemplate] {
+        GoalTemplateCatalog.templates(for: audience)
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    ForEach(GoalTemplateCatalog.grouped(for: audience), id: \.category) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 6) {
-                                Image(systemName: group.category.icon)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(group.category.color)
-                                Text(group.category.rawValue)
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(theme.textColor)
-                            }
-                            .padding(.horizontal, 4)
 
-                            ForEach(group.templates) { template in
-                                Button {
-                                    selectedTemplate = template
-                                    goalDuration = template.durationDays
-                                    editableTasks = template.suggestedTasks.map { EditableSuggestedTask(from: $0) }
-                                    showTaskPreview = true
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: template.icon)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundStyle(group.category.color)
-                                            .frame(width: 36, height: 36)
-                                            .background(group.category.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(template.name)
-                                                .font(.subheadline.weight(.medium))
-                                                .foregroundStyle(theme.textColor)
-                                            Text("\(template.suggestedTasks.count) tasks \u{00B7} \(template.durationDays) days")
-                                                .font(.caption2)
-                                                .foregroundStyle(theme.secondaryTextColor)
-                                        }
-
-                                        Spacer()
-
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundStyle(theme.tertiaryTextColor)
-                                    }
-                                    .padding(12)
-                                    .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
-                                }
-                            }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        switch phase {
+                        case .input:
+                            inputPhase
+                                .transition(.opacity)
+                        case .generating:
+                            generatingPhase
+                                .transition(.opacity)
+                        case .review, .refining:
+                            reviewPhase
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
-
-                    // Custom goal option
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(theme.accentColor)
-                            Text("Custom Goal")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(theme.textColor)
-                        }
-                        .padding(.horizontal, 4)
-
-                        Button { showCustomGoal = true } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(theme.accentColor)
-                                    .frame(width: 36, height: 36)
-                                    .background(theme.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-
-                                Text("Create your own goal")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(theme.textColor)
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(theme.tertiaryTextColor)
-                            }
-                            .padding(12)
-                            .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
+                    .animation(.easeInOut(duration: 0.4), value: phase)
+                    .padding(16)
                 }
-                .padding(16)
             }
-            }
-            .navigationTitle("Choose a Goal")
+            .navigationTitle("Add Goal")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-            }
-            .sheet(isPresented: $showTaskPreview) {
-                if let template = selectedTemplate {
-                    GoalTaskPreviewView(
-                        goalName: template.name,
-                        goalIcon: template.icon,
-                        category: template.category,
-                        templateId: template.id,
-                        isCustom: false,
-                        assignee: assignee,
-                        durationDays: $goalDuration,
-                        editableTasks: $editableTasks,
-                        theme: theme,
-                        onConfirm: { createGoalWithTasks(name: template.name, icon: template.icon, category: template.category, templateId: template.id, isCustom: false) }
-                    )
+                if phase == .review || phase == .refining {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation { phase = .input }
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.subheadline)
+                        }
+                    }
                 }
             }
-            .sheet(isPresented: $showCustomGoal) {
-                CustomGoalView(
+            .sheet(isPresented: $showTaskPreview) {
+                GoalTaskPreviewView(
+                    goalName: goalName,
+                    goalIcon: aiIcon,
+                    category: aiCategory,
+                    templateId: "",
+                    isCustom: true,
                     assignee: assignee,
+                    durationDays: $goalDuration,
+                    editableTasks: $editableTasks,
                     theme: theme,
-                    onCreate: { name, category, tasks, duration in
-                        editableTasks = tasks
-                        goalDuration = duration
-                        createGoalWithTasks(name: name, icon: category.icon, category: category, templateId: "", isCustom: true)
-                    }
+                    onConfirm: { createGoalWithTasks(name: goalName, icon: aiIcon, category: aiCategory, templateId: "", isCustom: true) }
                 )
+            }
+        }
+    }
+
+    // MARK: - Phase 1: Input
+
+    private var inputPhase: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What do you want to achieve?")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(theme.textColor)
+
+                TextField("e.g., Learn to cook, Run a 5K...", text: $goalName)
+                    .font(.body)
+                    .padding(12)
+                    .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(theme.accentColor.opacity(goalName.isEmpty ? 0 : 0.5), lineWidth: 1.5)
+                    )
+                    .focused($isInputFocused)
+                    .submitLabel(.go)
+                    .onSubmit { if !goalName.trimmingCharacters(in: .whitespaces).isEmpty { startGeneration() } }
+            }
+
+            // Duration picker
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Duration")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.secondaryTextColor)
+                Picker("", selection: $goalDuration) {
+                    Text("2 weeks").tag(14)
+                    Text("1 month").tag(30)
+                    Text("2 months").tag(60)
+                    Text("3 months").tag(90)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // Generate button
+            Button { startGeneration() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                    Text("Generate My Plan")
+                        .font(.body.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    goalName.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? theme.accentColor.opacity(0.4) : theme.accentColor,
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+            .disabled(goalName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            Divider().overlay(theme.tertiaryTextColor)
+
+            // Example chips
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Ideas for you")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.secondaryTextColor)
+
+                FlowLayout(spacing: 8) {
+                    ForEach(exampleGoals) { template in
+                        Button {
+                            goalName = template.name
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: template.icon)
+                                    .font(.caption2)
+                                Text(template.name)
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(goalName == template.name ? .white : theme.textColor)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                goalName == template.name ? theme.accentColor : theme.cardBackground,
+                                in: Capsule()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Phase 2: Generating (animation)
+
+    private var generatingPhase: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 60)
+
+            ZStack {
+                // Outer rotating ring
+                Circle()
+                    .stroke(theme.accentColor.opacity(0.2), lineWidth: 3)
+                    .frame(width: 80, height: 80)
+
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 80, height: 80)
+                    .rotationEffect(.degrees(sparkleRotation))
+
+                // Center sparkle icon
+                Image(systemName: "sparkles")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(theme.accentColor)
+                    .scaleEffect(sparkleScale)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    sparkleRotation = 360
+                }
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    sparkleScale = 1.1
+                }
+            }
+
+            Text("Creating your plan...")
+                .font(.headline)
+                .foregroundStyle(theme.textColor)
+
+            Text("\"\(goalName)\"")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+                .multilineTextAlignment(.center)
+
+            Spacer().frame(height: 60)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Phase 3 & 4: Review / Refine
+
+    private var reviewPhase: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Goal header
+            HStack(spacing: 10) {
+                Image(systemName: aiIcon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(aiCategory.color)
+                    .frame(width: 40, height: 40)
+                    .background(aiCategory.color.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(goalName)
+                        .font(.headline)
+                        .foregroundStyle(theme.textColor)
+                    Text("\(goalDuration) days \u{00B7} \(aiCategory.rawValue)")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryTextColor)
+                }
+                Spacer()
+            }
+
+            // AI message
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(theme.accentColor)
+                    .padding(.top, 2)
+                Text("Here's a plan to help you achieve your goal. You can refine it or go ahead!")
+                    .font(.subheadline)
+                    .foregroundStyle(theme.secondaryTextColor)
+            }
+
+            // Error
+            if let error = generationError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryTextColor)
+                    Spacer()
+                    Button("Retry") { startGeneration() }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.accentColor)
+                }
+                .padding(10)
+                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            // Task list
+            VStack(spacing: 8) {
+                ForEach(Array(currentTasks.enumerated()), id: \.offset) { index, task in
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(aiCategory.color)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.name)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(theme.textColor)
+                            HStack(spacing: 8) {
+                                Label(task.frequency.rawValue, systemImage: "repeat")
+                                Label("x\(task.occurrences)", systemImage: "number")
+                                HStack(spacing: 2) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundStyle(.orange)
+                                    Text("\(task.reward)")
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(theme.tertiaryTextColor)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.8).combined(with: .opacity).animation(.spring(duration: 0.4).delay(Double(index) * 0.08)),
+                        removal: .opacity
+                    ))
+                }
+            }
+
+            // Refinement input
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    TextField("Ask AI to adjust tasks...", text: $refinementText)
+                        .font(.subheadline)
+                        .padding(10)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+                        .focused($isRefineFocused)
+                        .submitLabel(.send)
+                        .onSubmit { if !refinementText.trimmingCharacters(in: .whitespaces).isEmpty { refineTaskList() } }
+
+                    if phase == .refining {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Button { refineTaskList() } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundStyle(refinementText.trimmingCharacters(in: .whitespaces).isEmpty ? theme.tertiaryTextColor : theme.accentColor)
+                        }
+                        .disabled(refinementText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+
+                // Action buttons
+                HStack(spacing: 12) {
+                    Button {
+                        editableTasks = currentTasks.map { EditableSuggestedTask(from: $0) }
+                        showTaskPreview = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark")
+                            Text("Looks Good")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func startGeneration() {
+        let trimmedName = goalName.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty else { return }
+        isInputFocused = false
+        generationError = nil
+        sparkleRotation = 0
+        sparkleScale = 0.5
+
+        withAnimation { phase = .generating }
+
+        let recentTasks = allTasks.filter { $0.assignedTo == assignee }
+        let total = recentTasks.count
+        let done = recentTasks.filter { $0.isApproved }.count
+        let insightText = total > 5 ? "User has completed \(done)/\(total) tasks recently (\(Int(Double(done) / Double(total) * 100))% completion rate)." : ""
+
+        Task {
+            do {
+                let suggestion = try await ClaudeAPIService.shared.generateGoalTasks(
+                    goalName: trimmedName,
+                    audience: audience,
+                    durationDays: goalDuration,
+                    memberInsight: insightText
+                )
+
+                // Brief delay so animation feels intentional
+                try await Task.sleep(for: .seconds(1.2))
+
+                await MainActor.run {
+                    if suggestion.tasks.isEmpty {
+                        generationError = "Couldn't generate tasks. Try a different goal or tap Retry."
+                        withAnimation { phase = .input }
+                    } else {
+                        aiCategory = suggestion.category
+                        aiIcon = suggestion.icon
+                        currentTasks = suggestion.tasks
+                        withAnimation(.spring(duration: 0.5)) { phase = .review }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    generationError = "Something went wrong. Check your connection and try again."
+                    withAnimation { phase = .input }
+                }
+            }
+        }
+    }
+
+    private func refineTaskList() {
+        let feedback = refinementText.trimmingCharacters(in: .whitespaces)
+        guard !feedback.isEmpty else { return }
+        isRefineFocused = false
+
+        withAnimation { phase = .refining }
+
+        Task {
+            do {
+                let suggestion = try await ClaudeAPIService.shared.refineGoalTasks(
+                    goalName: goalName.trimmingCharacters(in: .whitespaces),
+                    audience: audience,
+                    durationDays: goalDuration,
+                    currentTasks: currentTasks,
+                    userFeedback: feedback
+                )
+
+                await MainActor.run {
+                    refinementText = ""
+                    if !suggestion.tasks.isEmpty {
+                        aiCategory = suggestion.category
+                        aiIcon = suggestion.icon
+                        withAnimation(.spring(duration: 0.5)) {
+                            currentTasks = suggestion.tasks
+                            phase = .review
+                        }
+                    } else {
+                        generationError = "Couldn't refine tasks. Try again."
+                        phase = .review
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    generationError = "Refinement failed. Try again."
+                    phase = .review
+                }
             }
         }
     }
@@ -448,7 +743,6 @@ struct GoalPickerView: View {
         }
 
         showTaskPreview = false
-        showCustomGoal = false
         dismiss()
     }
 
@@ -491,6 +785,15 @@ struct EditableSuggestedTask: Identifiable {
         self.reward = reward
         self.hour = hour
         self.minute = minute
+    }
+
+    init(from entry: GoalTaskEntry) {
+        self.name = entry.name
+        self.frequency = entry.frequency
+        self.occurrences = entry.occurrences
+        self.reward = entry.reward
+        self.hour = entry.hour
+        self.minute = entry.minute
     }
 }
 
@@ -701,171 +1004,6 @@ struct GoalTaskPreviewView: View {
 }
 
 // MARK: - Custom Goal View
-
-struct CustomGoalView: View {
-    @Environment(\.dismiss) private var dismiss
-    let assignee: String
-    let theme: ChildTheme
-    let onCreate: (String, GoalCategory, [EditableSuggestedTask], Int) -> Void
-
-    @State private var goalName = ""
-    @State private var category: GoalCategory = .lifestyle
-    @State private var durationDays = 30
-    @State private var tasks: [EditableSuggestedTask] = [EditableSuggestedTask()]
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Goal Name")
-                            .font(.subheadline.weight(.semibold))
-                        TextField("e.g., Learn to swim", text: $goalName)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Category")
-                            .font(.subheadline.weight(.semibold))
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-                            ForEach(GoalCategory.allCases) { cat in
-                                Button {
-                                    category = cat
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: cat.icon)
-                                            .font(.caption)
-                                        Text(cat.rawValue)
-                                            .font(.caption)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity)
-                                    .background(category == cat ? cat.color.opacity(0.2) : Color.primary.opacity(0.05), in: Capsule())
-                                    .overlay(Capsule().strokeBorder(category == cat ? cat.color : .clear, lineWidth: 1.5))
-                                    .foregroundStyle(category == cat ? cat.color : .primary.opacity(0.6))
-                                }
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Duration")
-                            .font(.subheadline.weight(.semibold))
-                        Picker("", selection: $durationDays) {
-                            Text("2 weeks").tag(14)
-                            Text("1 month").tag(30)
-                            Text("2 months").tag(60)
-                            Text("3 months").tag(90)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
-                    Divider()
-
-                    Text("Tasks")
-                        .font(.subheadline.weight(.bold))
-
-                    ForEach(tasks) { task in
-                        let taskBinding = customTaskBinding(task.id)
-                        VStack(spacing: 6) {
-                            TextField("Task name", text: taskBinding.name)
-                                .font(.subheadline)
-                                .textFieldStyle(.roundedBorder)
-                            HStack(spacing: 8) {
-                                Picker("", selection: taskBinding.frequency) {
-                                    ForEach(RecurrenceType.allCases, id: \.self) { freq in
-                                        Text(freq.rawValue).tag(freq)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .font(.caption)
-
-                                Spacer()
-
-                                HStack(spacing: 2) {
-                                    Text("x")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    TextField("", value: taskBinding.occurrences, format: .number)
-                                        .font(.caption)
-                                        .frame(width: 34)
-                                        .textFieldStyle(.roundedBorder)
-                                }
-                                .fixedSize()
-
-                                HStack(spacing: 2) {
-                                    Image(systemName: "star.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.orange)
-                                    TextField("", value: taskBinding.reward, format: .number)
-                                        .font(.caption)
-                                        .frame(width: 30)
-                                        .textFieldStyle(.roundedBorder)
-                                }
-                                .fixedSize()
-
-                                Button(role: .destructive) {
-                                    let idToRemove = task.id
-                                    withAnimation {
-                                        tasks.removeAll { $0.id == idToRemove }
-                                    }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption)
-                                        .foregroundStyle(.red.opacity(0.6))
-                                }
-                            }
-                        }
-                        .padding(10)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                    }
-
-                    Button {
-                        tasks.append(EditableSuggestedTask())
-                    } label: {
-                        HStack {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Add Task")
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(theme.accentColor)
-                    }
-                }
-                .padding(16)
-            }
-            }
-            .navigationTitle("Custom Goal")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        onCreate(goalName, category, tasks, durationDays)
-                        dismiss()
-                    }
-                    .disabled(goalName.isEmpty || tasks.filter { !$0.name.isEmpty }.isEmpty)
-                }
-            }
-        }
-    }
-
-    private func customTaskBinding(_ id: UUID) -> Binding<EditableSuggestedTask> {
-        Binding(
-            get: { tasks.first { $0.id == id } ?? EditableSuggestedTask() },
-            set: { newValue in
-                if let idx = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[idx] = newValue
-                }
-            }
-        )
-    }
-}
 
 // MARK: - Full Goals List View
 
@@ -1385,5 +1523,46 @@ struct GoalDetailView: View {
         }
         try? modelContext.save()
         taskEdits.removeAll()
+    }
+}
+
+// MARK: - Flow Layout (wrapping horizontal layout)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = layout(in: proposal.width ?? 0, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(in: bounds.width, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func layout(in width: CGFloat, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var maxWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > width && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            maxWidth = max(maxWidth, x - spacing)
+        }
+
+        return (CGSize(width: maxWidth, height: y + rowHeight), positions)
     }
 }

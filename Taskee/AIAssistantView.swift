@@ -316,6 +316,223 @@ final class ClaudeAPIService: Sendable {
         return ClaudeResponse(message: message, action: parsedAction)
     }
 
+    // MARK: - Goal Task Generation
+
+    func generateGoalTasks(
+        goalName: String,
+        audience: GoalAudience,
+        durationDays: Int,
+        memberInsight: String = ""
+    ) async throws -> GoalSuggestion {
+        let audienceDesc: String = switch audience {
+        case .child: "a child (use simple, encouraging language and age-appropriate tasks)"
+        case .parent: "a parent/adult managing family tasks"
+        case .individual: "an individual adult"
+        }
+
+        var prompt = """
+        Generate 4-5 practical, actionable tasks for this goal. Each task should be something the person does regularly to achieve the goal.
+
+        Goal: "\(goalName)"
+        Audience: \(audienceDesc)
+        Duration: \(durationDays) days
+
+        """
+
+        if !memberInsight.isEmpty {
+            prompt += "\nUser context:\n\(memberInsight)\n"
+        }
+
+        prompt += """
+
+        Respond with ONLY valid JSON (no markdown, no backticks, no extra text):
+        {
+            "category": "Education|Well-being|Lifestyle|Finance|Skills|Fitness",
+            "icon": "SF Symbol name (e.g. book.fill, figure.run, heart.fill)",
+            "tasks": [
+                {
+                    "taskName": "specific actionable task",
+                    "frequency": "daily|weekly|monthly",
+                    "occurrences": number,
+                    "reward": number (1-5 based on effort),
+                    "hour": number (0-23, sensible time for this activity),
+                    "minute": 0
+                }
+            ]
+        }
+
+        Guidelines:
+        - Each task must be specific and actionable (not vague like "work on goal")
+        - Mix daily habits (3-4) with weekly tasks (1-2) for variety
+        - Daily occurrences: roughly match duration days (e.g. 25-30 for a 30-day goal)
+        - Weekly occurrences: duration/7 rounded (e.g. 4 for 30 days)
+        - Rewards: 1-2 for easy daily tasks, 3-5 for harder weekly tasks
+        - Schedule times that make sense (exercise=morning, reading=evening, etc.)
+        - Pick the single best matching category
+        - Use a relevant SF Symbol icon name
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 1024,
+            "system": prompt,
+            "messages": [["role": "user", "content": "Generate tasks for this goal."]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorBody = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(statusCode, errorBody)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            throw APIError.parseError
+        }
+
+        return parseGoalSuggestion(text, durationDays: durationDays)
+    }
+
+    private func parseGoalSuggestion(_ text: String, durationDays: Int) -> GoalSuggestion {
+        var jsonText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let codeStart = jsonText.range(of: "```(?:json)?\\s*", options: .regularExpression),
+           let codeEnd = jsonText.range(of: "```", options: .backwards, range: codeStart.upperBound..<jsonText.endIndex) {
+            jsonText = String(jsonText[codeStart.upperBound..<codeEnd.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if !jsonText.hasPrefix("{"),
+           let start = jsonText.firstIndex(of: "{"),
+           let end = jsonText.lastIndex(of: "}") {
+            jsonText = String(jsonText[start...end])
+        }
+
+        guard let data = jsonText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tasksArray = json["tasks"] as? [[String: Any]], !tasksArray.isEmpty else {
+            // Return a sensible fallback
+            return GoalSuggestion(category: .lifestyle, icon: "star.fill", durationDays: durationDays, tasks: [])
+        }
+
+        let categoryStr = (json["category"] as? String ?? "Lifestyle").lowercased().replacingOccurrences(of: "-", with: "")
+        let category = GoalCategory.allCases.first { $0.rawValue.lowercased() == categoryStr }
+            ?? GoalCategory.allCases.first { categoryStr.contains($0.rawValue.lowercased()) }
+            ?? .lifestyle
+        let icon = json["icon"] as? String ?? category.icon
+
+        var entries: [GoalTaskEntry] = []
+        for taskDict in tasksArray {
+            guard let name = taskDict["taskName"] as? String, !name.isEmpty else { continue }
+            let freqStr = (taskDict["frequency"] as? String ?? "daily").lowercased()
+            let freq: RecurrenceType = switch freqStr {
+            case "weekly": .weekly
+            case "monthly": .monthly
+            default: .daily
+            }
+            let occ = taskDict["occurrences"] as? Int ?? (freq == .daily ? durationDays : freq == .weekly ? max(durationDays / 7, 1) : max(durationDays / 30, 1))
+            let reward = taskDict["reward"] as? Int ?? 2
+            let hour = taskDict["hour"] as? Int ?? 9
+            let minute = taskDict["minute"] as? Int ?? 0
+            entries.append(GoalTaskEntry(name: name, frequency: freq, occurrences: occ, reward: reward, hour: hour, minute: minute))
+        }
+
+        return GoalSuggestion(category: category, icon: icon, durationDays: durationDays, tasks: entries)
+    }
+
+    // MARK: - Goal Task Refinement
+
+    func refineGoalTasks(
+        goalName: String,
+        audience: GoalAudience,
+        durationDays: Int,
+        currentTasks: [GoalTaskEntry],
+        userFeedback: String
+    ) async throws -> GoalSuggestion {
+        let audienceDesc: String = switch audience {
+        case .child: "a child (use simple, encouraging language and age-appropriate tasks)"
+        case .parent: "a parent/adult managing family tasks"
+        case .individual: "an individual adult"
+        }
+
+        let tasksJSON = currentTasks.map { task in
+            "- \(task.name) (\(task.frequency.rawValue), x\(task.occurrences), reward:\(task.reward))"
+        }.joined(separator: "\n")
+
+        let prompt = """
+        You previously suggested tasks for a goal. The user wants changes. Update the task list based on their feedback.
+
+        Goal: "\(goalName)"
+        Audience: \(audienceDesc)
+        Duration: \(durationDays) days
+
+        Current tasks:
+        \(tasksJSON)
+
+        User feedback: "\(userFeedback)"
+
+        Respond with ONLY valid JSON (no markdown, no backticks, no extra text):
+        {
+            "category": "Education|Well-being|Lifestyle|Finance|Skills|Fitness",
+            "icon": "SF Symbol name",
+            "tasks": [
+                {
+                    "taskName": "specific actionable task",
+                    "frequency": "daily|weekly|monthly",
+                    "occurrences": number,
+                    "reward": number (1-5),
+                    "hour": number (0-23),
+                    "minute": 0
+                }
+            ]
+        }
+
+        Apply the user's feedback precisely. Keep unchanged tasks as-is. Return the full updated list.
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 1024,
+            "system": prompt,
+            "messages": [["role": "user", "content": "Refine the tasks based on my feedback."]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorBody = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(statusCode, errorBody)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            throw APIError.parseError
+        }
+
+        return parseGoalSuggestion(text, durationDays: durationDays)
+    }
+
     enum APIError: Error {
         case httpError(Int, String), parseError
     }
@@ -413,6 +630,13 @@ struct GoalTaskEntry {
     var reward: Int
     var hour: Int
     var minute: Int
+}
+
+struct GoalSuggestion {
+    let category: GoalCategory
+    let icon: String
+    let durationDays: Int
+    let tasks: [GoalTaskEntry]
 }
 
 struct TaskAction: Identifiable {
@@ -1098,9 +1322,10 @@ struct TaskCommandParser {
 // MARK: - Speech Manager
 
 @Observable
-final class SpeechManager {
+final class SpeechManager: NSObject, AVSpeechSynthesizerDelegate {
     var isListening = false
     var transcribedText = ""
+    var isSpeaking = false
     private(set) var isAuthorized = false
 
     private var speechRecognizer = SFSpeechRecognizer()
@@ -1108,6 +1333,21 @@ final class SpeechManager {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
+    private var silenceTimer: Timer?
+    private static let silenceDelay: TimeInterval = 2.0
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { self.isSpeaking = false }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { self.isSpeaking = false }
+    }
 
     func startListening() {
         if !isAuthorized {
@@ -1145,8 +1385,12 @@ final class SpeechManager {
                 guard let self else { return }
                 if let result {
                     self.transcribedText = result.bestTranscription.formattedString
+                    // Reset silence timer on each new partial result
+                    self.resetSilenceTimer()
                 }
                 if error != nil || (result?.isFinal ?? false) {
+                    self.silenceTimer?.invalidate()
+                    self.silenceTimer = nil
                     self.stopListening()
                 }
             }
@@ -1167,7 +1411,19 @@ final class SpeechManager {
         }
     }
 
+    private func resetSilenceTimer() {
+        silenceTimer?.invalidate()
+        guard !transcribedText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: Self.silenceDelay, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.stopListening()
+            }
+        }
+    }
+
     func stopListening() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
@@ -1181,10 +1437,13 @@ final class SpeechManager {
 
     func speak(_ text: String) {
         synthesizer.stopSpeaking(at: .immediate)
+        let cleanText = Self.stripEmojis(from: text)
+        guard !cleanText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         let audioSession = AVAudioSession.sharedInstance()
         try? audioSession.setCategory(.playback, mode: .default, options: .duckOthers)
         try? audioSession.setActive(true)
-        let utterance = AVSpeechUtterance(string: text)
+        isSpeaking = true
+        let utterance = AVSpeechUtterance(string: cleanText)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         synthesizer.speak(utterance)
@@ -1192,6 +1451,15 @@ final class SpeechManager {
 
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
+        isSpeaking = false
+    }
+
+    private static func stripEmojis(from text: String) -> String {
+        text.unicodeScalars.filter { scalar in
+            // Keep basic Latin, common punctuation, and extended characters — skip emoji ranges
+            !(scalar.properties.isEmoji && scalar.properties.isEmojiPresentation)
+            && scalar.value != 0xFE0F // variation selector
+        }.map(String.init).joined()
     }
 }
 
@@ -1218,6 +1486,7 @@ struct AIAssistantView: View {
     @FocusState private var isInputFocused: Bool
     @State private var speechManager = SpeechManager()
     @State private var isVoiceOutputEnabled = false
+    @State private var isVoiceMode = false
 
     private var memberNames: [String] {
         var names = [authManager.userName]
@@ -1384,14 +1653,14 @@ struct AIAssistantView: View {
             .onChange(of: messages.count) { _, _ in
                 withAnimation {
                     if let lastId = messages.last?.id {
-                        proxy.scrollTo(lastId, anchor: .bottom)
+                        proxy.scrollTo(lastId, anchor: .top)
                     }
                 }
             }
             .onChange(of: isProcessing) { _, processing in
                 if processing {
                     withAnimation {
-                        proxy.scrollTo("typing", anchor: .bottom)
+                        proxy.scrollTo("typing", anchor: .top)
                     }
                 }
             }
@@ -1520,48 +1789,133 @@ struct AIAssistantView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField("Ask me anything...", text: $inputText)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .padding(12)
-                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
-                )
-                .focused($isInputFocused)
-                .onSubmit { sendMessage() }
-                .onChange(of: speechManager.transcribedText) { _, newText in
-                    if speechManager.isListening && !newText.isEmpty {
-                        inputText = newText
+            if isVoiceMode {
+                // Voice mode: listening area + keyboard toggle
+                HStack(spacing: 12) {
+                    Button {
+                        isVoiceMode = false
+                        if speechManager.isListening { speechManager.stopListening() }
+                    } label: {
+                        Image(systemName: "keyboard")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.primary.opacity(0.6))
+                    }
+
+                    if speechManager.isListening {
+                        HStack(spacing: 8) {
+                            // Pulsing dot to indicate active listening
+                            Circle()
+                                .fill(.red)
+                                .frame(width: 8, height: 8)
+                                .opacity(speechManager.isListening ? 1 : 0.3)
+                                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: speechManager.isListening)
+                            Text(inputText.isEmpty ? "Listening..." : inputText)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
+                    } else if isProcessing {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Thinking...")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary.opacity(0.6))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
+                    } else {
+                        HStack(spacing: 8) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(theme.accentColor)
+                            Text("Speak now...")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary.opacity(0.6))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
                     }
                 }
-                .onChange(of: isInputFocused) { _, focused in
-                    if focused && speechManager.isListening {
-                        speechManager.stopListening()
-                    }
+            } else {
+                // Text mode
+                TextField("Ask me anything...", text: $inputText)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .padding(12)
+                    .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                    )
+                    .focused($isInputFocused)
+                    .onSubmit { sendMessage() }
+
+                Button {
+                    isVoiceMode = true
+                    isVoiceOutputEnabled = true
+                    speechManager.transcribedText = ""
+                    inputText = ""
+                    speechManager.startListening()
+                } label: {
+                    Image(systemName: "mic")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.primary.opacity(0.6))
                 }
 
-            Button {
-                toggleListening()
-            } label: {
-                Image(systemName: speechManager.isListening ? "mic.fill" : "mic")
-                    .font(.system(size: 22))
-                    .foregroundStyle(speechManager.isListening ? .red : .primary.opacity(0.6))
+                Button {
+                    sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.3) : theme.accentColor)
+                }
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing)
             }
-
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .primary.opacity(0.3) : theme.accentColor)
-            }
-            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || isProcessing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(theme.cardBackgroundLight)
+        .onChange(of: speechManager.transcribedText) { _, newText in
+            if speechManager.isListening && !newText.isEmpty {
+                inputText = newText
+            }
+        }
+        .onChange(of: speechManager.isListening) { _, listening in
+            // Auto-send when speech recognition finishes (user paused) in voice mode
+            if !listening && isVoiceMode && !inputText.trimmingCharacters(in: .whitespaces).isEmpty {
+                sendMessage()
+            }
+        }
+        .onChange(of: isProcessing) { _, processing in
+            // Re-start listening after AI responds in voice mode (only if not speaking)
+            if !processing && isVoiceMode && !speechManager.isListening && !speechManager.isSpeaking {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
+                        speechManager.transcribedText = ""
+                        inputText = ""
+                        speechManager.startListening()
+                    }
+                }
+            }
+        }
+        .onChange(of: speechManager.isSpeaking) { _, speaking in
+            // Re-start listening after voice output finishes in voice mode
+            if !speaking && isVoiceMode && !isProcessing && !speechManager.isListening {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
+                        speechManager.transcribedText = ""
+                        inputText = ""
+                        speechManager.startListening()
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Send & Process
