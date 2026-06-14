@@ -99,6 +99,8 @@ final class ClaudeAPIService: Sendable {
         let projectCategory: String?
         let projectStatus: String?
         let ideaText: String?
+        // Reminder fields
+        let reminderScope: String?
     }
 
     func chat(
@@ -193,7 +195,7 @@ final class ClaudeAPIService: Sendable {
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea",
+                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder",
 
                 // Task fields (create/reschedule/cancel/markDone/update)
                 "taskName": "string or null",
@@ -228,7 +230,8 @@ final class ClaudeAPIService: Sendable {
                 "projectDescription": "string or null",
                 "projectCategory": "string or null",
                 "projectStatus": "ideating|planning|inProgress|completed",
-                "ideaText": "string or null"
+                "ideaText": "string or null",
+                "reminderScope": "today or null"
             }
         }
 
@@ -266,6 +269,10 @@ final class ClaudeAPIService: Sendable {
         - "deleteProject": delete a project. Use "projectName" to match.
         - "updateProjectStatus": change status. Use "projectName" + "projectStatus" (ideating→planning→inProgress→completed).
         - "addProjectIdea": submit an idea to a project. Use "projectName" to match + "ideaText".
+
+        REMINDERS (parent mode only):
+        - "sendReminder": send a reminder notification to a family member for their tasks. Use "matchingTaskNames" to specify tasks, OR set "reminderScope" to "today" to remind about all of today's open tasks. Optionally use "assignee" to target a specific member.
+        - This pushes a notification to the member's device. Only available for parents.
 
         GENERAL:
         - Be conversational, friendly, and concise. Ask clarifying questions when ambiguous.
@@ -338,7 +345,8 @@ final class ClaudeAPIService: Sendable {
                 projectDescription: actionJson["projectDescription"] as? String,
                 projectCategory: actionJson["projectCategory"] as? String,
                 projectStatus: actionJson["projectStatus"] as? String,
-                ideaText: actionJson["ideaText"] as? String
+                ideaText: actionJson["ideaText"] as? String,
+                reminderScope: actionJson["reminderScope"] as? String
             )
         }
 
@@ -702,6 +710,7 @@ struct TaskAction: Identifiable {
     var projectCategory: String?
     var projectStatus: String?
     var ideaText: String?
+    var reminderScope: String?
     var matchingGoals: [Goal] = []
     var matchingShoppingItems: [ShoppingItem] = []
     var matchingWishListItems: [WishListItem] = []
@@ -735,6 +744,8 @@ enum TaskIntent {
     case deleteProject
     case updateProjectStatus
     case addProjectIdea
+    // Reminders
+    case sendReminder
     // Informational
     case listTasks
     case checkCoins
@@ -2132,7 +2143,8 @@ struct AIAssistantView: View {
         let actionKeywords = ["create", "add", "schedule", "reschedule", "cancel", "delete", "remove",
                               "assign", "update", "change", "move", "set", "mark", "complete", "done",
                               "pick up", "unassign", "recurring", "goal", "pause", "resume",
-                              "cart", "shopping", "buy", "bought", "wish", "project", "idea", "status"]
+                              "cart", "shopping", "buy", "bought", "wish", "project", "idea", "status",
+                              "remind", "reminder", "nudge", "notify"]
         if actionKeywords.contains(where: { lower.contains($0) }) {
             return ClaudeAPIService.sonnetModel
         }
@@ -2738,6 +2750,40 @@ struct AIAssistantView: View {
             action.ideaText = idea
             return action
 
+        case "sendReminder":
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+            let scope = parsed.reminderScope ?? ""
+            let assignee = parsed.assignee
+
+            var matching: [Item]
+            if scope == "today" {
+                // All open tasks for today, optionally filtered by assignee
+                matching = allTasks.filter { task in
+                    task.isOpen && !task.isArchived &&
+                    task.targetDate >= today && task.targetDate < tomorrow &&
+                    (assignee == nil || task.assignedTo.localizedCaseInsensitiveContains(assignee!))
+                }
+            } else {
+                // Match specific tasks by name
+                let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
+                guard !matchNames.isEmpty else { return nil }
+                matching = allTasks.filter { task in
+                    task.isOpen && !task.isArchived &&
+                    matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) }) &&
+                    (assignee == nil || task.assignedTo.localizedCaseInsensitiveContains(assignee!))
+                }
+            }
+            guard !matching.isEmpty else { return nil }
+
+            let memberSet = Set(matching.map { $0.assignedTo }).filter { !$0.isEmpty }
+            let memberLabel = memberSet.isEmpty ? "" : " to \(memberSet.joined(separator: ", "))"
+            let details = matching.map { "🔔 \($0.name) [\($0.assignedTo.isEmpty ? "unassigned" : $0.assignedTo)]" }
+            var action = TaskAction(intent: .sendReminder, summary: "Send \(matching.count) reminder\(matching.count == 1 ? "" : "s")\(memberLabel)", details: details, tasks: matching)
+            action.reminderScope = scope
+            return action
+
         default:
             return nil
         }
@@ -2781,6 +2827,8 @@ struct AIAssistantView: View {
             executeUpdateProjectStatus(action, messageId: messageId)
         case .addProjectIdea:
             executeAddProjectIdea(action, messageId: messageId)
+        case .sendReminder:
+            executeSendReminder(action, messageId: messageId)
         default:
             break
         }
@@ -3434,6 +3482,36 @@ struct AIAssistantView: View {
         messages.append(AIChatMessage(role: .assistant, text: "💡 Added idea to \"\(project.name)\": \(ideaText)"))
     }
 
+    private func executeSendReminder(_ action: TaskAction, messageId: UUID) {
+        guard !action.tasks.isEmpty else {
+            messages.append(AIChatMessage(role: .assistant, text: "No matching tasks found to send reminders for."))
+            return
+        }
+
+        var reminded = 0
+        let now = Date()
+        for task in action.tasks {
+            task.lastRemindedAt = now
+            reminded += 1
+        }
+        try? modelContext.save()
+
+        // Push updated tasks to CloudKit — the receiver's device will show notification via sync
+        let familyCode = authManager.familyCode
+        let snapshots = action.tasks.map { CloudKitManager.TaskSnapshot($0) }
+        Task {
+            for snap in snapshots {
+                await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
+            }
+        }
+
+        let memberSet = Set(action.tasks.compactMap { $0.assignedTo.isEmpty ? nil : $0.assignedTo })
+        let memberLabel = memberSet.isEmpty ? "" : " to \(memberSet.joined(separator: ", "))"
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "🔔 Sent \(reminded) reminder\(reminded == 1 ? "" : "s")\(memberLabel)."))
+    }
+
     private func generateRecurringDates(startDate: Date, recurrence: RecurrenceType, occurrences: Int) -> [Date] {
         let calendar = Calendar.current
         switch recurrence {
@@ -3493,6 +3571,7 @@ struct AIAssistantView: View {
         case .deleteProject: return "folder.badge.minus"
         case .updateProjectStatus: return "arrow.right.circle.fill"
         case .addProjectIdea: return "lightbulb.fill"
+        case .sendReminder: return "bell.badge.fill"
         default: return "sparkles"
         }
     }
@@ -3507,6 +3586,7 @@ struct AIAssistantView: View {
         case .pauseGoal: return .orange
         case .addToCart, .addToWishList: return theme.accentColor
         case .createProject, .editProject, .updateProjectStatus, .addProjectIdea: return theme.accentColor
+        case .sendReminder: return .orange
         default: return theme.accentColor
         }
     }
