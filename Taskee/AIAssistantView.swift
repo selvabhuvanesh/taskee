@@ -91,6 +91,14 @@ final class ClaudeAPIService: Sendable {
         let durationDays: Int?
         let isCustomGoal: Bool?
         let goalTasks: [[String: Any]]?
+        // Shopping & wish list fields
+        let itemNames: [String]?
+        // Project fields
+        let projectName: String?
+        let projectDescription: String?
+        let projectCategory: String?
+        let projectStatus: String?
+        let ideaText: String?
     }
 
     func chat(
@@ -183,80 +191,84 @@ final class ClaudeAPIService: Sendable {
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update|setGoal",
-                "taskName": "the task name (for single task create)",
-                "assignee": "person name or null",
-                "date": "ISO 8601 datetime or null (for single task create)",
-                "reward": number or null (for single task create)",
-                "matchingTaskNames": ["task names to match"] or null,
-                "newDate": "ISO 8601 datetime for reschedule target",
-                "preserveTime": true or false,
-                "rescheduleScope": "instance" or "series",
-                "recurrence": "none|daily|weekly|monthly (for single task create)",
-                "occurrences": number or null (for single task create),
-                "newName": "new task name for update or null",
-                "newReward": number or null (new coin value for update),
-                "newAssignee": "new assignee name for update or null",
-                "tasks": [
-                    {
-                        "taskName": "task name",
-                        "assignee": "person name",
-                        "date": "ISO 8601 datetime",
-                        "reward": number or null,
-                        "recurrence": "none|daily|weekly|monthly",
-                        "occurrences": number or null
-                    }
-                ] or null,
-                "goalName": "name for the goal (setGoal only)",
-                "goalTemplateId": "template ID from catalog or empty string (setGoal only)",
-                "assignees": ["member1", "member2"] or null (setGoal only, for multiple assignees),
-                "category": "Education|Well-being|Lifestyle|Finance|Skills|Fitness (setGoal only)",
-                "durationDays": number (setGoal only, days until goal target),
-                "isCustom": true or false (setGoal only),
-                "goalTasks": [
-                    {
-                        "taskName": "task name",
-                        "frequency": "daily|weekly|monthly",
-                        "occurrences": number,
-                        "reward": number,
-                        "hour": number (0-23),
-                        "minute": number (0-59)
-                    }
-                ] or null (setGoal only)
+                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea",
+
+                // Task fields (create/reschedule/cancel/markDone/update)
+                "taskName": "string or null",
+                "assignee": "string or null",
+                "date": "ISO 8601 datetime or null",
+                "reward": "number or null",
+                "matchingTaskNames": ["names"] or null,
+                "newDate": "ISO 8601 datetime or null",
+                "preserveTime": true/false,
+                "rescheduleScope": "instance|series",
+                "recurrence": "none|daily|weekly|monthly",
+                "occurrences": "number or null",
+                "newName": "string or null",
+                "newReward": "number or null",
+                "newAssignee": "string or null",
+                "tasks": [{"taskName":"","assignee":"","date":"","reward":0,"recurrence":"","occurrences":0}] or null,
+
+                // Goal fields (setGoal)
+                "goalName": "string or null",
+                "goalTemplateId": "string or null",
+                "assignees": ["names"] or null,
+                "category": "string or null",
+                "durationDays": "number or null",
+                "isCustom": true/false,
+                "goalTasks": [{"taskName":"","frequency":"","occurrences":0,"reward":0,"hour":0,"minute":0}] or null,
+
+                // Shopping & wish list fields
+                "itemNames": ["item1", "item2"] or null,
+
+                // Project fields
+                "projectName": "string or null",
+                "projectDescription": "string or null",
+                "projectCategory": "string or null",
+                "projectStatus": "ideating|planning|inProgress|completed",
+                "ideaText": "string or null"
             }
         }
 
         RULES:
         - Set "action" to null for questions, status checks, summaries, clarifications, or when information is missing.
-        - IMPORTANT: For ANY task creation, reschedule, cancel, markDone, or setGoal — you MUST ALWAYS include the "action" object so the user sees a preview and can confirm before it executes. Never just describe what you would do in text — always provide the action for user confirmation.
-        - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, mention you'll default to today. Always include the action so the user can review and confirm the task details before creation.
-          - To create a recurring task, set "recurrence" to "daily", "weekly", or "monthly" and "occurrences" to the number of instances to create. Defaults: daily=7, weekly=4, monthly=3 if not specified. The "date" is the start date/time; instances are generated from there.
-          - Examples: "Add homework daily for 2 weeks" → recurrence: "daily", occurrences: 14. "Create swimming weekly for a month" → recurrence: "weekly", occurrences: 4.
-          - MULTI-TASK CREATION: When the user asks to create multiple tasks at once, use the "tasks" array instead of the single task fields. Each entry in the "tasks" array is an independent task with its own name, assignee, date, reward, recurrence, and occurrences. You can mix single tasks and recurring tasks in the same "tasks" array.
-          - Examples: "Add homework at 4pm and swimming at 6pm for Aria" → tasks array with 2 entries. "Create daily reading for Aria and weekly piano for Bhuvi" → tasks array with 2 recurring entries.
-          - For a single task, you may use either the top-level fields OR a "tasks" array with one entry — both work.
-        - For "setGoal": creates a structured goal with auto-generated recurring tasks.
-          - Use "goalTemplateId" to reference a template from the GOAL TEMPLATES catalog above. If none matches, set it to "" and "isCustom" to true.
-          - Use "assignee" for a single member, or "assignees" array for multiple members (e.g., "set reading goal for all kids").
-          - "goalTasks" defines the tasks for the goal. When using a template, you can adjust task parameters based on the member's MEMBER INSIGHTS data:
-            * For members with < 60% completion in the relevant category: reduce occurrences by ~30% and increase rewards by ~50% to build habits gradually.
-            * For members with > 80% completion: use default or slightly increased parameters.
-            * Consider existing active goals to avoid overloading — never create more than 3 active goals per member simultaneously.
-          - "category" must be one of: Education, Well-being, Lifestyle, Finance, Skills, Fitness.
-          - "durationDays" is the number of days for the goal (default from template or 30).
-          - If the user asks "any goal suggestions?" or "what goals should we set?", respond with action: null and a conversational recommendation of 2-3 goals with reasoning based on the insights data.
-        - For "reschedule": use "matchingTaskNames" with task names to match, and "newDate" for the target date and time.
-          - If the user specifies a new TIME (e.g. "move to 3pm", "change to 10am"), include that time in "newDate" and set "preserveTime" to false.
-          - If the user only specifies a new DATE without a time (e.g. "move to tomorrow", "push to Saturday"), set "preserveTime" to true so the original time is kept.
-          - If the matched task is marked [recurring], you MUST ask the user whether to change just this instance or the entire series BEFORE setting the action. Set "action" to null and ask. Once the user answers, set "rescheduleScope" to "instance" or "series".
-        - For "update": use "matchingTaskNames" to match existing tasks. Include "newName" to rename, "newReward" to change coins, "newAssignee" to reassign. You can change one or more fields at once. If the task is [recurring], ask whether to update just this instance or the entire series using "rescheduleScope".
-          - Examples: "Rename homework to math homework" → matchingTaskNames: ["homework"], newName: "Math homework". "Change swimming coins to 5" → matchingTaskNames: ["swimming"], newReward: 5. "Assign reading to Aria" → matchingTaskNames: ["reading"], newAssignee: "Aria".
-        - For "cancel" and "markDone": use "matchingTaskNames" with the task names to match. Always include the action for user confirmation. Include "rescheduleScope" field for cancel too — if the task is [recurring], ask the user whether to cancel/delete just this instance or all recurring instances before setting the action.
-        - After any action is confirmed, provide a clear confirmation summary of exactly what was done (task name, new date/time, who it's assigned to, etc.).
-        - Be conversational, friendly, and concise. Ask clarifying questions when the request is ambiguous.
-        - When listing tasks or summarizing, use the task data provided above.
-        - ALL dates in the action MUST be ISO 8601 format in the user's LOCAL time WITHOUT timezone suffix. Example: "2026-05-28T19:00:00" (NOT "2026-05-28T19:00:00Z"). Never append "Z" or any timezone offset.
-        - ALWAYS respond with valid JSON. Never include markdown, backticks, or text outside the JSON object.
+        - IMPORTANT: For ANY action that modifies data, you MUST include the "action" object so the user sees a preview and can confirm. Never just describe what you would do — always provide the action.
+        - For "create": require at minimum a task name. If assignee is missing\(isIndividual ? ", default to \(currentUser)" : " and there are multiple family members, ask who to assign to"). If date is missing, default to today.
+          - Recurring: set "recurrence" + "occurrences". Defaults: daily=7, weekly=4, monthly=3.
+          - Multi-task: use "tasks" array. Each entry has own name, assignee, date, reward, recurrence, occurrences.
+        - For "setGoal": structured goal with recurring tasks. Use "goalTemplateId" for template, or "" + "isCustom":true for custom.
+          - Adjust task parameters based on MEMBER INSIGHTS. Max 3 active goals per member.
+          - "category": Education|Well-being|Lifestyle|Finance|Skills|Fitness. "durationDays": default 30.
+        - For "reschedule": "matchingTaskNames" + "newDate". Set "preserveTime":true if only date changes, false if time specified. Ask about "rescheduleScope" for recurring tasks.
+        - For "update": "matchingTaskNames" + "newName"/"newReward"/"newAssignee". Ask about scope for recurring.
+        - For "cancel"/"markDone": "matchingTaskNames". Ask about scope for recurring.
+
+        GOAL MANAGEMENT:
+        - "deleteGoal": delete a goal and its open tasks. Use "goalName" to match. Match against CURRENT GOALS data.
+        - "pauseGoal": pause an active goal. Use "goalName".
+        - "resumeGoal": resume a paused goal. Use "goalName".
+        - "completeGoal": mark goal as completed. Use "goalName".
+
+        SHOPPING LIST:
+        - "addToCart": add items. Use "itemNames" array with item names to add.
+        - "removeFromCart": remove items. Use "itemNames" to match existing items.
+        - "markBought": toggle bought status. Use "itemNames" to match.
+
+        WISH LIST:
+        - "addToWishList": add items. Use "itemNames" array.
+        - "removeFromWishList": remove items. Use "itemNames" to match.
+
+        PROJECTS:
+        - "createProject": create a family project. Use "projectName", "projectDescription" (optional), "projectCategory" (one of: Home, Travel, Pet, Fitness, Education, Fun, Finance).
+        - "editProject": modify project. Use "projectName" to match, plus "newName"/"projectDescription"/"projectCategory" for changes.
+        - "deleteProject": delete a project. Use "projectName" to match.
+        - "updateProjectStatus": change status. Use "projectName" + "projectStatus" (ideating→planning→inProgress→completed).
+        - "addProjectIdea": submit an idea to a project. Use "projectName" to match + "ideaText".
+
+        GENERAL:
+        - Be conversational, friendly, and concise. Ask clarifying questions when ambiguous.
+        - ALL dates MUST be ISO 8601 in LOCAL time WITHOUT timezone suffix (e.g. "2026-06-14T19:00:00").
+        - ALWAYS respond with valid JSON only. No markdown, backticks, or text outside the JSON.
         """
         return prompt
     }
@@ -309,7 +321,13 @@ final class ClaudeAPIService: Sendable {
                 category: actionJson["category"] as? String,
                 durationDays: actionJson["durationDays"] as? Int,
                 isCustomGoal: actionJson["isCustom"] as? Bool,
-                goalTasks: actionJson["goalTasks"] as? [[String: Any]]
+                goalTasks: actionJson["goalTasks"] as? [[String: Any]],
+                itemNames: actionJson["itemNames"] as? [String],
+                projectName: actionJson["projectName"] as? String,
+                projectDescription: actionJson["projectDescription"] as? String,
+                projectCategory: actionJson["projectCategory"] as? String,
+                projectStatus: actionJson["projectStatus"] as? String,
+                ideaText: actionJson["ideaText"] as? String
             )
         }
 
@@ -665,6 +683,18 @@ struct TaskAction: Identifiable {
     var goalIsCustom: Bool = false
     var goalAssignees: [String] = []
     var goalTasks: [GoalTaskEntry] = []
+    // Shopping & wish list
+    var itemNames: [String] = []
+    // Project fields
+    var projectName: String?
+    var projectDescription: String?
+    var projectCategory: String?
+    var projectStatus: String?
+    var ideaText: String?
+    var matchingGoals: [Goal] = []
+    var matchingShoppingItems: [ShoppingItem] = []
+    var matchingWishListItems: [WishListItem] = []
+    var matchingProjects: [FamilyProject] = []
 }
 
 // MARK: - Task Intent
@@ -676,6 +706,25 @@ enum TaskIntent {
     case markDone
     case update
     case setGoal
+    // Goal management
+    case deleteGoal
+    case pauseGoal
+    case resumeGoal
+    case completeGoal
+    // Shopping list
+    case addToCart
+    case removeFromCart
+    case markBought
+    // Wish list
+    case addToWishList
+    case removeFromWishList
+    // Projects
+    case createProject
+    case editProject
+    case deleteProject
+    case updateProjectStatus
+    case addProjectIdea
+    // Informational
     case listTasks
     case checkCoins
     case weekSummary
@@ -1479,6 +1528,11 @@ struct AIAssistantView: View {
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var isInline: Bool = false
 
+    @Query(sort: \ShoppingItem.createdAt) private var allShoppingItems: [ShoppingItem]
+    @Query(sort: \WishListItem.createdAt) private var allWishListItems: [WishListItem]
+    @Query(sort: \FamilyProject.createdAt) private var allProjects: [FamilyProject]
+    @Query(sort: \ProjectIdea.createdAt) private var allProjectIdeas: [ProjectIdea]
+
     @State private var messages: [AIChatMessage] = []
     @State private var inputText = ""
     @State private var isProcessing = false
@@ -1967,7 +2021,8 @@ struct AIAssistantView: View {
         let lower = message.lowercased()
         let actionKeywords = ["create", "add", "schedule", "reschedule", "cancel", "delete", "remove",
                               "assign", "update", "change", "move", "set", "mark", "complete", "done",
-                              "pick up", "unassign", "recurring", "goal"]
+                              "pick up", "unassign", "recurring", "goal", "pause", "resume",
+                              "cart", "shopping", "buy", "bought", "wish", "project", "idea", "status"]
         if actionKeywords.contains(where: { lower.contains($0) }) {
             return ClaudeAPIService.sonnetModel
         }
@@ -1998,6 +2053,17 @@ struct AIAssistantView: View {
         let insightsSummary = InsightsEngine.compute(tasks: allTasks, goals: allGoals, members: allMembers, currentUser: authManager.userName, isIndividual: isIndividual)
         let goalCatalogSummary = GoalTemplateCatalog.summaryForPrompt()
 
+        // Extended context for full capabilities
+        var extendedContext = ""
+        let goalsSummary = buildGoalsSummary()
+        if goalsSummary != "No goals." { extendedContext += "\n\nCURRENT GOALS:\n\(goalsSummary)" }
+        let shoppingSummary = buildShoppingSummary()
+        if shoppingSummary != "Shopping list is empty." { extendedContext += "\n\nSHOPPING LIST:\n\(shoppingSummary)" }
+        let wishSummary = buildWishListSummary()
+        if wishSummary != "No wish list items." { extendedContext += "\n\nWISH LIST:\n\(wishSummary)" }
+        let projectsSummary = buildProjectsSummary()
+        if projectsSummary != "No projects." { extendedContext += "\n\nFAMILY PROJECTS:\n\(projectsSummary)" }
+
         do {
             let response = try await service.chat(
                 userMessage: text,
@@ -2005,7 +2071,7 @@ struct AIAssistantView: View {
                 familyMembers: memberNames,
                 currentUser: authManager.userName,
                 isIndividual: isIndividual,
-                tasksSummary: tasksSummary,
+                tasksSummary: tasksSummary + extendedContext,
                 insightsSummary: insightsSummary,
                 goalCatalogSummary: goalCatalogSummary,
                 model: model
@@ -2073,6 +2139,49 @@ struct AIAssistantView: View {
         }
         if relevantTasks.count > 30 {
             lines.append("...and \(relevantTasks.count - 30) more tasks")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildGoalsSummary() -> String {
+        let myGoals = allGoals.filter { goal in
+            isIndividual ? true : true // show all goals for context
+        }
+        if myGoals.isEmpty { return "No goals." }
+        var lines: [String] = []
+        for goal in myGoals.prefix(20) {
+            let progress = goal.progress(from: allTasks)
+            lines.append("- \(goal.name) [\(goal.assignedTo)] | \(goal.status) | \(Int(progress * 100))% done | \(goal.category)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildShoppingSummary() -> String {
+        if allShoppingItems.isEmpty { return "Shopping list is empty." }
+        var lines: [String] = []
+        for item in allShoppingItems {
+            let status = item.isBought ? "bought" : "needed"
+            lines.append("- \(item.name) [\(status)] (added by \(item.addedBy))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildWishListSummary() -> String {
+        if allWishListItems.isEmpty { return "No wish list items." }
+        var lines: [String] = []
+        for item in allWishListItems {
+            lines.append("- \(item.name) (by \(item.ownerName))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildProjectsSummary() -> String {
+        if allProjects.isEmpty { return "No projects." }
+        var lines: [String] = []
+        for project in allProjects {
+            let ideas = allProjectIdeas.filter { $0.projectId == project.id.uuidString }
+            let tasks = allTasks.filter { $0.projectId == project.id.uuidString }
+            lines.append("- \(project.name) [\(project.status)] | \(project.category) | \(ideas.count) ideas, \(tasks.count) tasks | by \(project.createdBy)")
         }
         return lines.joined(separator: "\n")
     }
@@ -2363,6 +2472,138 @@ struct AIAssistantView: View {
             action.goalTasks = goalTaskEntries
             return action
 
+        case "deleteGoal", "pauseGoal", "resumeGoal", "completeGoal":
+            guard let name = parsed.goalName, !name.isEmpty else { return nil }
+            let matching = allGoals.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard !matching.isEmpty else { return nil }
+            let intent: TaskIntent = switch parsed.intent {
+            case "deleteGoal": .deleteGoal
+            case "pauseGoal": .pauseGoal
+            case "resumeGoal": .resumeGoal
+            default: .completeGoal
+            }
+            let verb = switch intent {
+            case .deleteGoal: "Delete"
+            case .pauseGoal: "Pause"
+            case .resumeGoal: "Resume"
+            default: "Complete"
+            }
+            let details = matching.map { "🎯 \($0.name) [\($0.assignedTo)] — \($0.status)" }
+            var action = TaskAction(intent: intent, summary: "\(verb) \(matching.count) goal\(matching.count == 1 ? "" : "s")", details: details)
+            action.matchingGoals = matching
+            action.goalName = name
+            return action
+
+        case "addToCart":
+            let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
+            guard !names.isEmpty else { return nil }
+            let details = names.map { "🛒 \($0)" }
+            var action = TaskAction(intent: .addToCart, summary: "Add \(names.count) item\(names.count == 1 ? "" : "s") to cart", details: details)
+            action.itemNames = names
+            return action
+
+        case "removeFromCart":
+            let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
+            guard !names.isEmpty else { return nil }
+            let matching = allShoppingItems.filter { item in
+                names.contains(where: { item.name.localizedCaseInsensitiveContains($0) })
+            }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "🛒 \($0.name)" }
+            var action = TaskAction(intent: .removeFromCart, summary: "Remove \(matching.count) item\(matching.count == 1 ? "" : "s") from cart", details: details)
+            action.matchingShoppingItems = matching
+            return action
+
+        case "markBought":
+            let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
+            guard !names.isEmpty else { return nil }
+            let matching = allShoppingItems.filter { item in
+                names.contains(where: { item.name.localizedCaseInsensitiveContains($0) })
+            }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "\($0.isBought ? "↩️" : "✅") \($0.name) → \($0.isBought ? "needed" : "bought")" }
+            var action = TaskAction(intent: .markBought, summary: "Toggle \(matching.count) item\(matching.count == 1 ? "" : "s")", details: details)
+            action.matchingShoppingItems = matching
+            return action
+
+        case "addToWishList":
+            let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
+            guard !names.isEmpty else { return nil }
+            let details = names.map { "⭐ \($0)" }
+            var action = TaskAction(intent: .addToWishList, summary: "Add \(names.count) item\(names.count == 1 ? "" : "s") to wish list", details: details)
+            action.itemNames = names
+            return action
+
+        case "removeFromWishList":
+            let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
+            guard !names.isEmpty else { return nil }
+            let matching = allWishListItems.filter { item in
+                names.contains(where: { item.name.localizedCaseInsensitiveContains($0) })
+            }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "⭐ \($0.name)" }
+            var action = TaskAction(intent: .removeFromWishList, summary: "Remove \(matching.count) item\(matching.count == 1 ? "" : "s") from wish list", details: details)
+            action.matchingWishListItems = matching
+            return action
+
+        case "createProject":
+            guard let name = parsed.projectName, !name.isEmpty else { return nil }
+            var details = ["📁 \(name)"]
+            if let desc = parsed.projectDescription, !desc.isEmpty { details.append("📝 \(desc)") }
+            if let cat = parsed.projectCategory { details.append("📂 \(cat)") }
+            var action = TaskAction(intent: .createProject, summary: "Create project: \(name)", details: details)
+            action.projectName = name
+            action.projectDescription = parsed.projectDescription
+            action.projectCategory = parsed.projectCategory
+            return action
+
+        case "editProject":
+            guard let name = parsed.projectName, !name.isEmpty else { return nil }
+            let matching = allProjects.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard !matching.isEmpty else { return nil }
+            var changes: [String] = []
+            if let n = parsed.newName { changes.append("name → \(n)") }
+            if let d = parsed.projectDescription { changes.append("description → \(d)") }
+            if let c = parsed.projectCategory { changes.append("category → \(c)") }
+            let details = matching.map { "📁 \($0.name): \(changes.joined(separator: ", "))" }
+            var action = TaskAction(intent: .editProject, summary: "Edit \(matching.count) project\(matching.count == 1 ? "" : "s")", details: details)
+            action.matchingProjects = matching
+            action.newName = parsed.newName
+            action.projectDescription = parsed.projectDescription
+            action.projectCategory = parsed.projectCategory
+            return action
+
+        case "deleteProject":
+            guard let name = parsed.projectName, !name.isEmpty else { return nil }
+            let matching = allProjects.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "📁 \($0.name) [\($0.status)]" }
+            var action = TaskAction(intent: .deleteProject, summary: "Delete \(matching.count) project\(matching.count == 1 ? "" : "s")", details: details)
+            action.matchingProjects = matching
+            return action
+
+        case "updateProjectStatus":
+            guard let name = parsed.projectName, !name.isEmpty,
+                  let status = parsed.projectStatus, !status.isEmpty else { return nil }
+            let matching = allProjects.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "📁 \($0.name): \($0.status) → \(status)" }
+            var action = TaskAction(intent: .updateProjectStatus, summary: "Update project status", details: details)
+            action.matchingProjects = matching
+            action.projectStatus = status
+            return action
+
+        case "addProjectIdea":
+            guard let name = parsed.projectName, !name.isEmpty,
+                  let idea = parsed.ideaText, !idea.isEmpty else { return nil }
+            let matching = allProjects.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard !matching.isEmpty else { return nil }
+            let details = ["📁 \(matching.first!.name)", "💡 \(idea)"]
+            var action = TaskAction(intent: .addProjectIdea, summary: "Add idea to \(matching.first!.name)", details: details)
+            action.matchingProjects = matching
+            action.ideaText = idea
+            return action
+
         default:
             return nil
         }
@@ -2384,6 +2625,28 @@ struct AIAssistantView: View {
             executeUpdate(action, messageId: messageId)
         case .setGoal:
             executeSetGoal(action, messageId: messageId)
+        case .deleteGoal, .pauseGoal, .resumeGoal, .completeGoal:
+            executeGoalAction(action, messageId: messageId)
+        case .addToCart:
+            executeAddToCart(action, messageId: messageId)
+        case .removeFromCart:
+            executeRemoveFromCart(action, messageId: messageId)
+        case .markBought:
+            executeMarkBought(action, messageId: messageId)
+        case .addToWishList:
+            executeAddToWishList(action, messageId: messageId)
+        case .removeFromWishList:
+            executeRemoveFromWishList(action, messageId: messageId)
+        case .createProject:
+            executeCreateProject(action, messageId: messageId)
+        case .editProject:
+            executeEditProject(action, messageId: messageId)
+        case .deleteProject:
+            executeDeleteProject(action, messageId: messageId)
+        case .updateProjectStatus:
+            executeUpdateProjectStatus(action, messageId: messageId)
+        case .addProjectIdea:
+            executeAddProjectIdea(action, messageId: messageId)
         default:
             break
         }
@@ -2753,6 +3016,285 @@ struct AIAssistantView: View {
         messages.append(AIChatMessage(role: .assistant, text: response))
     }
 
+    // MARK: - Goal Management Actions
+
+    private func executeGoalAction(_ action: TaskAction, messageId: UUID) {
+        guard !action.matchingGoals.isEmpty else {
+            messages.append(AIChatMessage(role: .assistant, text: "Couldn't find that goal. Please try again."))
+            return
+        }
+
+        var summaries: [String] = []
+
+        for goal in action.matchingGoals {
+            switch action.intent {
+            case .deleteGoal:
+                let openTasks = allTasks.filter { $0.goalId == goal.id.uuidString && $0.isOpen }
+                for task in openTasks {
+                    notificationManager.cancelTaskReminder(taskId: task.id)
+                    modelContext.delete(task)
+                }
+                modelContext.delete(goal)
+                summaries.append("🗑️ Deleted \"\(goal.name)\" and \(openTasks.count) open task\(openTasks.count == 1 ? "" : "s").")
+            case .pauseGoal:
+                goal.status = "paused"
+                summaries.append("⏸️ Paused \"\(goal.name)\".")
+            case .resumeGoal:
+                goal.status = "active"
+                summaries.append("▶️ Resumed \"\(goal.name)\".")
+            case .completeGoal:
+                goal.status = "completed"
+                summaries.append("🎉 Completed \"\(goal.name)\"!")
+            default:
+                break
+            }
+        }
+
+        try? modelContext.save()
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: summaries.joined(separator: "\n")))
+    }
+
+    // MARK: - Shopping List Actions
+
+    private func executeAddToCart(_ action: TaskAction, messageId: UUID) {
+        var added = 0
+        var createdItems: [ShoppingItem] = []
+        for name in action.itemNames {
+            let item = ShoppingItem(name: name, addedBy: authManager.userName)
+            modelContext.insert(item)
+            createdItems.append(item)
+            added += 1
+        }
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        Task {
+            for item in createdItems {
+                let snap = CloudKitManager.ShoppingSnapshot(item)
+                await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "🛒 Added \(added) item\(added == 1 ? "" : "s") to the shopping list."))
+    }
+
+    private func executeRemoveFromCart(_ action: TaskAction, messageId: UUID) {
+        var removed = 0
+        let familyCode = authManager.familyCode
+        var idsToDelete: [UUID] = []
+        for item in action.matchingShoppingItems {
+            idsToDelete.append(item.id)
+            modelContext.delete(item)
+            removed += 1
+        }
+        try? modelContext.save()
+
+        Task {
+            for id in idsToDelete {
+                await cloudKitManager.deleteShoppingItem(id: id, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "🗑️ Removed \(removed) item\(removed == 1 ? "" : "s") from the shopping list."))
+    }
+
+    private func executeMarkBought(_ action: TaskAction, messageId: UUID) {
+        var toggled = 0
+        for item in action.matchingShoppingItems {
+            item.isBought.toggle()
+            toggled += 1
+        }
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        Task {
+            for item in action.matchingShoppingItems {
+                let snap = CloudKitManager.ShoppingSnapshot(item)
+                await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "✅ Updated \(toggled) item\(toggled == 1 ? "" : "s") in the shopping list."))
+    }
+
+    // MARK: - Wish List Actions
+
+    private func executeAddToWishList(_ action: TaskAction, messageId: UUID) {
+        var added = 0
+        var createdItems: [WishListItem] = []
+        for name in action.itemNames {
+            let item = WishListItem(name: name, ownerAppleUserID: authManager.appleUserID, ownerName: authManager.userName)
+            modelContext.insert(item)
+            createdItems.append(item)
+            added += 1
+        }
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        Task {
+            for item in createdItems {
+                await cloudKitManager.pushWishListItem(item, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "⭐ Added \(added) item\(added == 1 ? "" : "s") to your wish list."))
+    }
+
+    private func executeRemoveFromWishList(_ action: TaskAction, messageId: UUID) {
+        var removed = 0
+        let familyCode = authManager.familyCode
+        var idsToDelete: [UUID] = []
+        for item in action.matchingWishListItems {
+            idsToDelete.append(item.id)
+            modelContext.delete(item)
+            removed += 1
+        }
+        try? modelContext.save()
+
+        Task {
+            for id in idsToDelete {
+                await cloudKitManager.deleteWishListItem(id: id, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "🗑️ Removed \(removed) item\(removed == 1 ? "" : "s") from wish list."))
+    }
+
+    // MARK: - Project Actions
+
+    private func executeCreateProject(_ action: TaskAction, messageId: UUID) {
+        guard let name = action.projectName else {
+            messages.append(AIChatMessage(role: .assistant, text: "Project name is missing. Please try again."))
+            return
+        }
+        let project = FamilyProject(
+            name: name,
+            descriptionText: action.projectDescription ?? "",
+            category: action.projectCategory ?? "Fun",
+            createdBy: authManager.userName
+        )
+        modelContext.insert(project)
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        let projectCopy = project
+        Task {
+            await cloudKitManager.pushProject(projectCopy, familyCode: familyCode)
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "📁 Created project \"\(name)\"."))
+    }
+
+    private func executeEditProject(_ action: TaskAction, messageId: UUID) {
+        var updated = 0
+        for project in action.matchingProjects {
+            if let n = action.newName { project.name = n }
+            if let d = action.projectDescription { project.descriptionText = d }
+            if let c = action.projectCategory { project.category = c }
+            updated += 1
+        }
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        let projects = action.matchingProjects
+        Task {
+            for project in projects {
+                await cloudKitManager.pushProject(project, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "📁 Updated \(updated) project\(updated == 1 ? "" : "s")."))
+    }
+
+    private func executeDeleteProject(_ action: TaskAction, messageId: UUID) {
+        var deleted = 0
+        var deletedProjectIDs: [UUID] = []
+        var deletedIdeaIDs: [UUID] = []
+        for project in action.matchingProjects {
+            // Delete associated ideas
+            let ideas = allProjectIdeas.filter { $0.projectId == project.id.uuidString }
+            for idea in ideas {
+                deletedIdeaIDs.append(idea.id)
+                modelContext.delete(idea)
+            }
+            // Unlink tasks (don't delete — just remove project association)
+            let tasks = allTasks.filter { $0.projectId == project.id.uuidString }
+            for task in tasks { task.projectId = "" }
+            deletedProjectIDs.append(project.id)
+            modelContext.delete(project)
+            deleted += 1
+        }
+        try? modelContext.save()
+
+        Task {
+            for ideaID in deletedIdeaIDs {
+                await cloudKitManager.deleteRemoteIdea(ideaID)
+            }
+            for projectID in deletedProjectIDs {
+                await cloudKitManager.deleteRemoteProject(projectID)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "🗑️ Deleted \(deleted) project\(deleted == 1 ? "" : "s")."))
+    }
+
+    private func executeUpdateProjectStatus(_ action: TaskAction, messageId: UUID) {
+        guard let newStatus = action.projectStatus else {
+            messages.append(AIChatMessage(role: .assistant, text: "No status specified. Please try again."))
+            return
+        }
+        var updated = 0
+        for project in action.matchingProjects {
+            project.status = newStatus
+            updated += 1
+        }
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        let projects = action.matchingProjects
+        Task {
+            for project in projects {
+                await cloudKitManager.pushProject(project, familyCode: familyCode)
+            }
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "📁 Updated \(updated) project\(updated == 1 ? "" : "s") to \"\(newStatus)\"."))
+    }
+
+    private func executeAddProjectIdea(_ action: TaskAction, messageId: UUID) {
+        guard let project = action.matchingProjects.first,
+              let ideaText = action.ideaText else {
+            messages.append(AIChatMessage(role: .assistant, text: "Couldn't find the project or idea text. Please try again."))
+            return
+        }
+        let idea = ProjectIdea(
+            projectId: project.id.uuidString,
+            text: ideaText,
+            submittedBy: authManager.userName
+        )
+        modelContext.insert(idea)
+        try? modelContext.save()
+
+        let familyCode = authManager.familyCode
+        let ideaCopy = idea
+        Task {
+            await cloudKitManager.pushIdea(ideaCopy, familyCode: familyCode)
+        }
+
+        markActionExecuted(messageId: messageId)
+        messages.append(AIChatMessage(role: .assistant, text: "💡 Added idea to \"\(project.name)\": \(ideaText)"))
+    }
+
     private func generateRecurringDates(startDate: Date, recurrence: RecurrenceType, occurrences: Int) -> [Date] {
         let calendar = Calendar.current
         switch recurrence {
@@ -2798,6 +3340,20 @@ struct AIAssistantView: View {
         case .cancel: return "xmark.circle.fill"
         case .markDone: return "checkmark.circle.fill"
         case .setGoal: return "target"
+        case .deleteGoal: return "trash.circle.fill"
+        case .pauseGoal: return "pause.circle.fill"
+        case .resumeGoal: return "play.circle.fill"
+        case .completeGoal: return "checkmark.seal.fill"
+        case .addToCart: return "cart.badge.plus"
+        case .removeFromCart: return "cart.badge.minus"
+        case .markBought: return "bag.fill"
+        case .addToWishList: return "star.circle.fill"
+        case .removeFromWishList: return "star.slash.fill"
+        case .createProject: return "folder.badge.plus"
+        case .editProject: return "pencil.circle.fill"
+        case .deleteProject: return "folder.badge.minus"
+        case .updateProjectStatus: return "arrow.right.circle.fill"
+        case .addProjectIdea: return "lightbulb.fill"
         default: return "sparkles"
         }
     }
@@ -2806,9 +3362,12 @@ struct AIAssistantView: View {
         switch intent {
         case .create: return theme.accentColor
         case .reschedule: return .orange
-        case .cancel: return .red
-        case .markDone: return .green
-        case .setGoal: return theme.accentColor
+        case .cancel, .deleteGoal, .deleteProject, .removeFromCart, .removeFromWishList: return .red
+        case .markDone, .completeGoal, .markBought: return .green
+        case .setGoal, .resumeGoal: return theme.accentColor
+        case .pauseGoal: return .orange
+        case .addToCart, .addToWishList: return theme.accentColor
+        case .createProject, .editProject, .updateProjectStatus, .addProjectIdea: return theme.accentColor
         default: return theme.accentColor
         }
     }
