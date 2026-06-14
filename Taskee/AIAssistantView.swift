@@ -1554,6 +1554,7 @@ struct AIAssistantView: View {
     @State private var isVoiceOutputEnabled = false
     @State private var isVoiceMode = false
     @State private var pendingSpeechText: String?
+    @State private var isEndingVoiceMode = false
 
     private var memberNames: [String] {
         var names = [authManager.userName]
@@ -1969,9 +1970,9 @@ struct AIAssistantView: View {
         }
         .onChange(of: isProcessing) { _, processing in
             // Re-start listening after AI responds in voice mode (only if not speaking)
-            if !processing && isVoiceMode && !speechManager.isListening && !speechManager.isSpeaking {
+            if !processing && isVoiceMode && !isEndingVoiceMode && !speechManager.isListening && !speechManager.isSpeaking {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
+                    if isVoiceMode && !isEndingVoiceMode && !isProcessing && !speechManager.isSpeaking {
                         speechManager.transcribedText = ""
                         inputText = ""
                         speechManager.startListening()
@@ -1988,9 +1989,9 @@ struct AIAssistantView: View {
                     return
                 }
                 // Re-start listening after voice output finishes in voice mode
-                if isVoiceMode && !isProcessing && !speechManager.isListening {
+                if isVoiceMode && !isEndingVoiceMode && !isProcessing && !speechManager.isListening {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
+                        if isVoiceMode && !isEndingVoiceMode && !isProcessing && !speechManager.isSpeaking {
                             speechManager.transcribedText = ""
                             inputText = ""
                             speechManager.startListening()
@@ -2037,6 +2038,9 @@ struct AIAssistantView: View {
         guard !text.isEmpty else { return }
 
         let isFarewell = Self.isFarewellMessage(text)
+        if isFarewell && isVoiceMode {
+            isEndingVoiceMode = true
+        }
 
         messages.append(AIChatMessage(role: .user, text: text))
         inputText = ""
@@ -2052,6 +2056,8 @@ struct AIAssistantView: View {
                 }
                 await MainActor.run {
                     isVoiceMode = false
+                    isVoiceOutputEnabled = false
+                    isEndingVoiceMode = false
                     speechManager.stopListening()
                 }
             }
