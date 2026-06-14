@@ -110,7 +110,8 @@ final class ClaudeAPIService: Sendable {
         tasksSummary: String,
         insightsSummary: String = "",
         goalCatalogSummary: String = "",
-        model: String = ClaudeAPIService.sonnetModel
+        model: String = ClaudeAPIService.sonnetModel,
+        isVoiceMode: Bool = false
     ) async throws -> ClaudeResponse {
         let systemPrompt = buildSystemPrompt(
             familyMembers: familyMembers,
@@ -118,7 +119,8 @@ final class ClaudeAPIService: Sendable {
             isIndividual: isIndividual,
             tasksSummary: tasksSummary,
             insightsSummary: insightsSummary,
-            goalCatalogSummary: goalCatalogSummary
+            goalCatalogSummary: goalCatalogSummary,
+            isVoiceMode: isVoiceMode
         )
 
         var apiMessages: [[String: String]] = []
@@ -159,7 +161,7 @@ final class ClaudeAPIService: Sendable {
         return parseResponse(text)
     }
 
-    private func buildSystemPrompt(familyMembers: [String], currentUser: String, isIndividual: Bool, tasksSummary: String, insightsSummary: String = "", goalCatalogSummary: String = "") -> String {
+    private func buildSystemPrompt(familyMembers: [String], currentUser: String, isIndividual: Bool, tasksSummary: String, insightsSummary: String = "", goalCatalogSummary: String = "", isVoiceMode: Bool = false) -> String {
         let memberList = familyMembers.joined(separator: ", ")
         let now = Date()
         let today = now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year())
@@ -269,6 +271,16 @@ final class ClaudeAPIService: Sendable {
         - Be conversational, friendly, and concise. Ask clarifying questions when ambiguous.
         - ALL dates MUST be ISO 8601 in LOCAL time WITHOUT timezone suffix (e.g. "2026-06-14T19:00:00").
         - ALWAYS respond with valid JSON only. No markdown, backticks, or text outside the JSON.
+        - When the user says goodbye, thanks, or indicates they're done (e.g. "bye", "thanks", "I'm good", "that's all"), respond warmly and briefly. Mention they can tap the mic anytime to start voice mode again. Do NOT include an action for farewell messages.
+        \(isVoiceMode ? """
+
+        VOICE MODE (ACTIVE):
+        - The user is speaking via voice. Keep responses SHORT — 1-2 sentences max. No lists, no bullet points, no long explanations.
+        - For actions: describe what you'll do in one brief sentence, then include the action object. The app will auto-execute without waiting for a button tap.
+        - For status/summary questions: give a brief spoken-friendly answer. Say numbers naturally (e.g. "You have 3 tasks today, 2 are done").
+        - Avoid emojis and special formatting — your response will be read aloud.
+        - If the user says "yes", "yeah", "sure", "do it", "go ahead", "confirm" — treat it as confirming the last proposed action.
+        """ : "")
         """
         return prompt
     }
@@ -1541,6 +1553,7 @@ struct AIAssistantView: View {
     @State private var speechManager = SpeechManager()
     @State private var isVoiceOutputEnabled = false
     @State private var isVoiceMode = false
+    @State private var pendingSpeechText: String?
 
     private var memberNames: [String] {
         var names = [authManager.userName]
@@ -1622,9 +1635,15 @@ struct AIAssistantView: View {
             messages.removeAll()
             ChatMemory.clear()
         }
-        .onChange(of: messages.count) { _, _ in
+        .onChange(of: messages.count) { oldCount, newCount in
             if isVoiceOutputEnabled, let last = messages.last, last.role == .assistant {
-                speechManager.speak(last.text)
+                // Don't interrupt ongoing speech — only speak new responses
+                if !speechManager.isSpeaking {
+                    speechManager.speak(last.text)
+                } else if newCount > oldCount + 1 {
+                    // Multiple messages added (e.g. action result) — queue the latest
+                    pendingSpeechText = last.text
+                }
             }
         }
     }
@@ -1635,18 +1654,20 @@ struct AIAssistantView: View {
         if isIndividual {
             return [
                 "How am I doing this week?",
+                "Add milk, eggs, and bread to shopping list",
+                "Create a weekend project to organize my desk",
                 "Set a fitness goal for me",
-                "What tasks do I have today?",
-                "Any goal suggestions based on my progress?",
-                "Help me plan my weekend"
+                "What's on my wish list?",
+                "Delete all cancelled tasks"
             ]
         } else {
             return [
+                "How is the family doing this week?",
+                "Add school supplies to the shopping cart",
+                "Start a family project for the backyard garden",
                 "Set a reading goal for the kids",
-                "Any goal suggestions for the family?",
-                "How is my family's week looking?",
-                "How are the kids doing with their tasks?",
-                "Help us plan the weekend"
+                "Add an idea to our travel project",
+                "What tasks do the kids have today?"
             ]
         }
     }
@@ -1959,13 +1980,21 @@ struct AIAssistantView: View {
             }
         }
         .onChange(of: speechManager.isSpeaking) { _, speaking in
-            // Re-start listening after voice output finishes in voice mode
-            if !speaking && isVoiceMode && !isProcessing && !speechManager.isListening {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
-                        speechManager.transcribedText = ""
-                        inputText = ""
-                        speechManager.startListening()
+            if !speaking {
+                // Speak any queued text first
+                if let pending = pendingSpeechText {
+                    pendingSpeechText = nil
+                    speechManager.speak(pending)
+                    return
+                }
+                // Re-start listening after voice output finishes in voice mode
+                if isVoiceMode && !isProcessing && !speechManager.isListening {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if isVoiceMode && !isProcessing && !speechManager.isSpeaking {
+                            speechManager.transcribedText = ""
+                            inputText = ""
+                            speechManager.startListening()
+                        }
                     }
                 }
             }
@@ -2007,6 +2036,8 @@ struct AIAssistantView: View {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
 
+        let isFarewell = Self.isFarewellMessage(text)
+
         messages.append(AIChatMessage(role: .user, text: text))
         inputText = ""
         isProcessing = true
@@ -2014,7 +2045,32 @@ struct AIAssistantView: View {
 
         Task {
             await sendViaClaude(text)
+            if isFarewell && isVoiceMode {
+                // Wait for voice output to finish, then exit voice mode
+                while speechManager.isSpeaking {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                await MainActor.run {
+                    isVoiceMode = false
+                    speechManager.stopListening()
+                }
+            }
         }
+    }
+
+    private static func isFarewellMessage(_ text: String) -> Bool {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let farewellPhrases = [
+            "bye", "goodbye", "good bye", "see you", "see ya",
+            "i'm done", "im done", "i am done",
+            "i'm good", "im good", "i am good",
+            "thanks", "thank you", "that's all", "thats all",
+            "that's it", "thats it", "nothing else",
+            "all done", "we're done", "were done",
+            "talk later", "catch you later", "later",
+            "good night", "goodnight", "gotta go", "got to go"
+        ]
+        return farewellPhrases.contains(where: { lower.hasPrefix($0) || lower == $0 })
     }
 
     private func selectModel(for message: String) -> String {
@@ -2074,14 +2130,21 @@ struct AIAssistantView: View {
                 tasksSummary: tasksSummary + extendedContext,
                 insightsSummary: insightsSummary,
                 goalCatalogSummary: goalCatalogSummary,
-                model: model
+                model: model,
+                isVoiceMode: isVoiceMode
             )
 
             subscriptionManager.recordAIMessage()
 
             if let parsedAction = response.action {
                 let action = buildActionFromClaude(parsedAction)
-                messages.append(AIChatMessage(role: .assistant, text: response.message, action: action))
+                let msg = AIChatMessage(role: .assistant, text: response.message, action: action)
+                messages.append(msg)
+
+                // In voice mode, auto-execute actions without waiting for confirm button
+                if isVoiceMode, let action = action, !action.isExecuted, !action.isCancelled {
+                    executeAction(action, messageId: msg.id)
+                }
             } else {
                 messages.append(AIChatMessage(role: .assistant, text: response.message))
             }
