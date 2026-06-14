@@ -101,6 +101,9 @@ final class ClaudeAPIService: Sendable {
         let ideaText: String?
         // Reminder fields
         let reminderScope: String?
+        // Filter-based fields (for bulk operations without listing every task name)
+        let taskFilter: String?  // all_overdue, all_cancelled, all_missed, all_today, all_open, all_past_open, all_done
+        let filterAssignee: String?  // optional: filter by member name
     }
 
     func chat(
@@ -195,7 +198,7 @@ final class ClaudeAPIService: Sendable {
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder",
+                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder|listTasks",
 
                 // Task fields (create/reschedule/cancel/markDone/update)
                 "taskName": "string or null",
@@ -231,7 +234,11 @@ final class ClaudeAPIService: Sendable {
                 "projectCategory": "string or null",
                 "projectStatus": "ideating|planning|inProgress|completed",
                 "ideaText": "string or null",
-                "reminderScope": "today or null"
+                "reminderScope": "today or null",
+
+                // Filter-based fields (for bulk operations — code handles filtering)
+                "taskFilter": "all_overdue|all_cancelled|all_missed|all_today|all_open|all_past_open|all_done or null",
+                "filterAssignee": "member name or null"
             }
         }
 
@@ -246,7 +253,9 @@ final class ClaudeAPIService: Sendable {
           - "category": Education|Well-being|Lifestyle|Finance|Skills|Fitness. "durationDays": default 30.
         - For "reschedule": "matchingTaskNames" + "newDate". Set "preserveTime":true if only date changes, false if time specified. Ask about "rescheduleScope" for recurring tasks.
         - For "update": "matchingTaskNames" + "newName"/"newReward"/"newAssignee". Ask about scope for recurring.
-        - For "cancel"/"markDone": "matchingTaskNames". Ask about scope for recurring.
+        - For "cancel"/"markDone": use "matchingTaskNames" for specific tasks, OR "taskFilter" for bulk operations (e.g. "cancel all overdue tasks" → taskFilter:"all_overdue"). Optionally add "filterAssignee" to target a member. The app handles the filtering — you just specify the filter. Ask about scope for recurring.
+        - BULK OPERATIONS: For requests like "delete all cancelled tasks", "mark all overdue done", "cancel all past open tasks" — use "taskFilter" instead of listing task names. Available filters: all_overdue, all_cancelled, all_missed, all_today, all_open, all_past_open, all_done. Combine with "filterAssignee" to target a member.
+        - For "listTasks": use "taskFilter" to specify which tasks to show (e.g. all_today, all_overdue, all_open, all_cancelled, all_missed, all_done). Optionally add "filterAssignee". The app formats and displays the task list — you just provide a brief intro message. ALWAYS use listTasks with taskFilter when the user asks to see/list/show tasks.
 
         GOAL MANAGEMENT:
         - "deleteGoal": delete a goal and its open tasks. Use "goalName" to match. Match against CURRENT GOALS data.
@@ -346,7 +355,9 @@ final class ClaudeAPIService: Sendable {
                 projectCategory: actionJson["projectCategory"] as? String,
                 projectStatus: actionJson["projectStatus"] as? String,
                 ideaText: actionJson["ideaText"] as? String,
-                reminderScope: actionJson["reminderScope"] as? String
+                reminderScope: actionJson["reminderScope"] as? String,
+                taskFilter: actionJson["taskFilter"] as? String,
+                filterAssignee: actionJson["filterAssignee"] as? String
             )
         }
 
@@ -2203,13 +2214,22 @@ struct AIAssistantView: View {
             subscriptionManager.recordAIMessage()
 
             if let parsedAction = response.action {
-                let action = buildActionFromClaude(parsedAction)
-                let msg = AIChatMessage(role: .assistant, text: response.message, action: action)
-                messages.append(msg)
+                // Handle listTasks locally — no confirmation needed
+                if parsedAction.intent == "listTasks" {
+                    let filter = parsedAction.taskFilter ?? "all_today"
+                    let assignee = parsedAction.filterAssignee ?? parsedAction.assignee
+                    let taskList = formatTaskList(filter: filter, assignee: assignee)
+                    let fullMessage = response.message + "\n\n" + taskList
+                    messages.append(AIChatMessage(role: .assistant, text: fullMessage))
+                } else {
+                    let action = buildActionFromClaude(parsedAction)
+                    let msg = AIChatMessage(role: .assistant, text: response.message, action: action)
+                    messages.append(msg)
 
-                // In voice mode, store pending action for oral confirmation
-                if isVoiceMode, let action = action, !action.isExecuted, !action.isCancelled {
-                    pendingVoiceAction = (action: action, messageId: msg.id)
+                    // In voice mode, store pending action for oral confirmation
+                    if isVoiceMode, let action = action, !action.isExecuted, !action.isCancelled {
+                        pendingVoiceAction = (action: action, messageId: msg.id)
+                    }
                 }
             } else {
                 messages.append(AIChatMessage(role: .assistant, text: response.message))
@@ -2249,43 +2269,56 @@ struct AIAssistantView: View {
     private func buildTasksSummary() -> String {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-
-        let relevantTasks = allTasks.filter { !$0.isArchived }
-            .sorted { $0.targetDate < $1.targetDate }
-
-        if relevantTasks.isEmpty { return "No tasks scheduled." }
-
-        // Split into today, upcoming, and past for clarity
         let todayEnd = calendar.date(byAdding: .day, value: 1, to: today)!
-        let todayTasks = relevantTasks.filter { $0.targetDate >= today && $0.targetDate < todayEnd }
-        let upcomingTasks = relevantTasks.filter { $0.targetDate >= todayEnd }
-        let pastTasks = relevantTasks.filter { $0.targetDate < today }
+        let weekAhead = calendar.date(byAdding: .day, value: 7, to: today)!
 
-        func formatTask(_ task: Item) -> String {
-            let status = task.isApproved ? "done" : task.isInReview ? "in-review" : task.isMissed ? "missed" : task.isCancelled ? "cancelled" : "open"
-            let date = task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
-            let who = task.assignedTo.isEmpty ? "" : " [\(task.assignedTo)]"
-            let reward = task.reward > 0 ? " \(Int(task.reward))coins" : ""
-            let recurring = task.isRecurring ? " [recurring]" : ""
-            return "- \(task.name)\(who) | \(date) | \(status)\(reward)\(recurring)"
+        let active = allTasks.filter { !$0.isArchived }
+        if active.isEmpty { return "No tasks." }
+
+        let todayTasks = active.filter { $0.targetDate >= today && $0.targetDate < todayEnd }
+        let todayOpen = todayTasks.filter { $0.isOpen }
+        let todayDone = todayTasks.filter { $0.isApproved }
+        let todayInReview = todayTasks.filter { $0.isInReview }
+
+        let overdue = active.filter { $0.targetDate < today && $0.isOpen }
+        let upcoming = active.filter { $0.targetDate >= todayEnd && $0.targetDate < weekAhead && $0.isOpen }
+        let cancelled = active.filter { $0.isCancelled }
+        let missed = active.filter { $0.isMissed }
+
+        // Per-member breakdown
+        let members = Set(active.compactMap { $0.assignedTo.isEmpty ? nil : $0.assignedTo })
+        var memberStats: [String] = []
+        for member in members.sorted() {
+            let mTasks = todayTasks.filter { $0.assignedTo == member }
+            let mOpen = mTasks.filter { $0.isOpen }.count
+            let mDone = mTasks.filter { $0.isApproved }.count
+            if mOpen + mDone > 0 {
+                memberStats.append("\(member): \(mOpen) open, \(mDone) done today")
+            }
         }
 
         var lines: [String] = []
+        lines.append("TASK STATS:")
+        lines.append("Today: \(todayOpen.count) open, \(todayDone.count) done, \(todayInReview.count) in review")
+        if !overdue.isEmpty { lines.append("Overdue: \(overdue.count) tasks") }
+        lines.append("Upcoming (7 days): \(upcoming.count) open")
+        if !cancelled.isEmpty { lines.append("Cancelled: \(cancelled.count) total") }
+        if !missed.isEmpty { lines.append("Missed: \(missed.count) total") }
+        lines.append("Total active: \(active.count)")
+        if !memberStats.isEmpty {
+            lines.append("BY MEMBER: " + memberStats.joined(separator: " | "))
+        }
 
+        // Show only today's task names (compact) for context
         if !todayTasks.isEmpty {
-            lines.append("TODAY:")
-            for task in todayTasks { lines.append(formatTask(task)) }
+            lines.append("TODAY'S TASKS:")
+            for task in todayTasks {
+                let status = task.isApproved ? "done" : task.isInReview ? "review" : task.isCancelled ? "cancelled" : "open"
+                let who = task.assignedTo.isEmpty ? "" : " [\(task.assignedTo)]"
+                lines.append("- \(task.name)\(who) | \(status)")
+            }
         }
-        if !upcomingTasks.isEmpty {
-            lines.append("UPCOMING:")
-            for task in upcomingTasks.prefix(30) { lines.append(formatTask(task)) }
-            if upcomingTasks.count > 30 { lines.append("...and \(upcomingTasks.count - 30) more upcoming") }
-        }
-        if !pastTasks.isEmpty {
-            lines.append("RECENT PAST:")
-            for task in pastTasks.suffix(20) { lines.append(formatTask(task)) }
-            if pastTasks.count > 20 { lines.append("...and \(pastTasks.count - 20) more past tasks") }
-        }
+
         return lines.joined(separator: "\n")
     }
 
@@ -2330,6 +2363,38 @@ struct AIAssistantView: View {
             lines.append("- \(project.name) [\(project.status)] | \(project.category) | \(ideas.count) ideas, \(tasks.count) tasks | by \(project.createdBy)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func filterTasks(by filter: String, assignee: String?) -> [Item] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let todayEnd = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        var result: [Item]
+        switch filter {
+        case "all_overdue":
+            result = allTasks.filter { !$0.isArchived && $0.isOpen && $0.targetDate < today }
+        case "all_cancelled":
+            result = allTasks.filter { !$0.isArchived && $0.isCancelled }
+        case "all_missed":
+            result = allTasks.filter { !$0.isArchived && $0.isMissed }
+        case "all_today":
+            result = allTasks.filter { !$0.isArchived && $0.targetDate >= today && $0.targetDate < todayEnd }
+        case "all_open":
+            result = allTasks.filter { !$0.isArchived && $0.isOpen }
+        case "all_past_open":
+            result = allTasks.filter { !$0.isArchived && $0.isOpen && $0.targetDate < today }
+        case "all_done":
+            result = allTasks.filter { !$0.isArchived && $0.isApproved }
+        default:
+            result = []
+        }
+
+        if let assignee, !assignee.isEmpty {
+            result = result.filter { $0.assignedTo.localizedCaseInsensitiveContains(assignee) }
+        }
+
+        return result
     }
 
     private func buildActionFromClaude(_ parsed: ClaudeAPIService.ParsedAction) -> TaskAction? {
@@ -2465,13 +2530,18 @@ struct AIAssistantView: View {
             return action
 
         case "cancel":
-            let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
-            guard !matchNames.isEmpty else { return nil }
-
             let cancelScope = parsed.rescheduleScope ?? "instance"
+            var matching: [Item]
 
-            var matching = allTasks.filter { task in
-                !task.isArchived && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+            if let filter = parsed.taskFilter, !filter.isEmpty {
+                // Filter-based bulk operation
+                matching = filterTasks(by: filter, assignee: parsed.filterAssignee ?? parsed.assignee)
+            } else {
+                let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
+                guard !matchNames.isEmpty else { return nil }
+                matching = allTasks.filter { task in
+                    !task.isArchived && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+                }
             }
 
             if cancelScope == "series" {
@@ -2489,21 +2559,29 @@ struct AIAssistantView: View {
             guard !matching.isEmpty else { return nil }
 
             let scopeLabel = cancelScope == "series" ? " (entire series)" : ""
-            let details = matching.map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
+            let details = matching.prefix(15).map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
+            + (matching.count > 15 ? ["...and \(matching.count - 15) more"] : [])
             var action = TaskAction(intent: .cancel, summary: "Cancel \(matching.count) task\(matching.count == 1 ? "" : "s")\(scopeLabel)", details: details, tasks: matching)
             action.rescheduleScope = cancelScope
             return action
 
         case "markDone":
-            let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
-            guard !matchNames.isEmpty else { return nil }
+            var matching: [Item]
 
-            let matching = allTasks.filter { task in
-                (task.isOpen || task.isInReview) && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+            if let filter = parsed.taskFilter, !filter.isEmpty {
+                matching = filterTasks(by: filter, assignee: parsed.filterAssignee ?? parsed.assignee)
+                    .filter { $0.isOpen || $0.isInReview }
+            } else {
+                let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
+                guard !matchNames.isEmpty else { return nil }
+                matching = allTasks.filter { task in
+                    (task.isOpen || task.isInReview) && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+                }
             }
             guard !matching.isEmpty else { return nil }
 
-            let details = matching.map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
+            let details = matching.prefix(15).map { "\($0.emoji) \($0.name)\($0.assignedTo.isEmpty ? "" : " (\($0.assignedTo))")" }
+            + (matching.count > 15 ? ["...and \(matching.count - 15) more"] : [])
             return TaskAction(intent: .markDone, summary: "Mark \(matching.count) task\(matching.count == 1 ? "" : "s") as done", details: details, tasks: matching)
 
         case "update":
@@ -2751,22 +2829,17 @@ struct AIAssistantView: View {
             return action
 
         case "sendReminder":
-            let calendar = Calendar.current
-            let today = calendar.startOfDay(for: Date())
-            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
             let scope = parsed.reminderScope ?? ""
             let assignee = parsed.assignee
 
             var matching: [Item]
-            if scope == "today" {
-                // All open tasks for today, optionally filtered by assignee
-                matching = allTasks.filter { task in
-                    task.isOpen && !task.isArchived &&
-                    task.targetDate >= today && task.targetDate < tomorrow &&
-                    (assignee == nil || task.assignedTo.localizedCaseInsensitiveContains(assignee!))
-                }
+            if let filter = parsed.taskFilter, !filter.isEmpty {
+                matching = filterTasks(by: filter, assignee: parsed.filterAssignee ?? assignee)
+                    .filter { $0.isOpen }
+            } else if scope == "today" {
+                matching = filterTasks(by: "all_today", assignee: assignee)
+                    .filter { $0.isOpen }
             } else {
-                // Match specific tasks by name
                 let matchNames = parsed.matchingTaskNames ?? [parsed.taskName].compactMap { $0 }
                 guard !matchNames.isEmpty else { return nil }
                 matching = allTasks.filter { task in
@@ -2784,9 +2857,48 @@ struct AIAssistantView: View {
             action.reminderScope = scope
             return action
 
+        case "listTasks":
+            let filter = parsed.taskFilter ?? "all_today"
+            let matching = filterTasks(by: filter, assignee: parsed.filterAssignee ?? parsed.assignee)
+            // listTasks doesn't need confirmation — generate response directly
+            return nil  // Handled separately in sendViaClaude
+
         default:
             return nil
         }
+    }
+
+    private func formatTaskList(filter: String, assignee: String?) -> String {
+        let tasks = filterTasks(by: filter, assignee: assignee)
+        if tasks.isEmpty {
+            let filterLabel = filter.replacingOccurrences(of: "all_", with: "").replacingOccurrences(of: "_", with: " ")
+            let assigneeLabel = assignee.map { " for \($0)" } ?? ""
+            return "No \(filterLabel) tasks found\(assigneeLabel)."
+        }
+
+        let filterLabel: String = switch filter {
+        case "all_today": "Today's Tasks"
+        case "all_overdue": "Overdue Tasks"
+        case "all_open": "Open Tasks"
+        case "all_cancelled": "Cancelled Tasks"
+        case "all_missed": "Missed Tasks"
+        case "all_done": "Completed Tasks"
+        case "all_past_open": "Past Open Tasks"
+        default: "Tasks"
+        }
+
+        let assigneeLabel = assignee.map { " for \($0)" } ?? ""
+        var lines: [String] = ["**\(filterLabel)\(assigneeLabel)** (\(tasks.count)):"]
+        for task in tasks.prefix(30) {
+            let status = task.isApproved ? "done" : task.isInReview ? "review" : task.isMissed ? "missed" : task.isCancelled ? "cancelled" : "open"
+            let date = task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+            let who = task.assignedTo.isEmpty ? "" : " [\(task.assignedTo)]"
+            lines.append("\(task.emoji) \(task.name)\(who) — \(date) (\(status))")
+        }
+        if tasks.count > 30 {
+            lines.append("...and \(tasks.count - 30) more")
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Execute Actions
