@@ -276,10 +276,9 @@ final class ClaudeAPIService: Sendable {
 
         VOICE MODE (ACTIVE):
         - The user is speaking via voice. Keep responses SHORT — 1-2 sentences max. No lists, no bullet points, no long explanations.
-        - For actions: describe what you'll do in one brief sentence, then include the action object. The app will auto-execute without waiting for a button tap.
+        - For actions: describe what you'll do in one brief sentence, include the action object, and end with "Shall I go ahead?" so the user can confirm vocally.
         - For status/summary questions: give a brief spoken-friendly answer. Say numbers naturally (e.g. "You have 3 tasks today, 2 are done").
         - Avoid emojis and special formatting — your response will be read aloud.
-        - If the user says "yes", "yeah", "sure", "do it", "go ahead", "confirm" — treat it as confirming the last proposed action.
         """ : "")
         """
         return prompt
@@ -1555,6 +1554,7 @@ struct AIAssistantView: View {
     @State private var isVoiceMode = false
     @State private var pendingSpeechText: String?
     @State private var isEndingVoiceMode = false
+    @State private var pendingVoiceAction: (action: TaskAction, messageId: UUID)?
 
     private var memberNames: [String] {
         var names = [authManager.userName]
@@ -2037,6 +2037,29 @@ struct AIAssistantView: View {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
 
+        // Handle oral confirmation/decline for pending voice actions
+        if let pending = pendingVoiceAction {
+            let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if Self.isConfirmation(lower) {
+                pendingVoiceAction = nil
+                messages.append(AIChatMessage(role: .user, text: text))
+                inputText = ""
+                executeAction(pending.action, messageId: pending.messageId)
+                saveChat()
+                return
+            } else if Self.isDecline(lower) {
+                pendingVoiceAction = nil
+                messages.append(AIChatMessage(role: .user, text: text))
+                inputText = ""
+                cancelAction(messageId: pending.messageId)
+                messages.append(AIChatMessage(role: .assistant, text: "No problem, cancelled."))
+                saveChat()
+                return
+            }
+            // Not a confirmation/decline — treat as a new request and clear pending
+            pendingVoiceAction = nil
+        }
+
         let isFarewell = Self.isFarewellMessage(text)
         if isFarewell && isVoiceMode {
             isEndingVoiceMode = true
@@ -2077,6 +2100,26 @@ struct AIAssistantView: View {
             "good night", "goodnight", "gotta go", "got to go"
         ]
         return farewellPhrases.contains(where: { lower.hasPrefix($0) || lower == $0 })
+    }
+
+    private static func isConfirmation(_ text: String) -> Bool {
+        let confirmPhrases = [
+            "yes", "yeah", "yep", "yup", "sure", "ok", "okay",
+            "confirm", "do it", "go ahead", "go for it",
+            "yes please", "yeah sure", "sounds good", "perfect",
+            "please do", "yes do it", "that's right", "correct",
+            "absolutely", "definitely", "proceed"
+        ]
+        return confirmPhrases.contains(where: { text.hasPrefix($0) || text == $0 })
+    }
+
+    private static func isDecline(_ text: String) -> Bool {
+        let declinePhrases = [
+            "no", "nope", "nah", "cancel", "don't", "dont",
+            "never mind", "nevermind", "skip", "stop",
+            "no thanks", "not now", "forget it", "scratch that"
+        ]
+        return declinePhrases.contains(where: { text.hasPrefix($0) || text == $0 })
     }
 
     private func selectModel(for message: String) -> String {
@@ -2147,9 +2190,9 @@ struct AIAssistantView: View {
                 let msg = AIChatMessage(role: .assistant, text: response.message, action: action)
                 messages.append(msg)
 
-                // In voice mode, auto-execute actions without waiting for confirm button
+                // In voice mode, store pending action for oral confirmation
                 if isVoiceMode, let action = action, !action.isExecuted, !action.isCancelled {
-                    executeAction(action, messageId: msg.id)
+                    pendingVoiceAction = (action: action, messageId: msg.id)
                 }
             } else {
                 messages.append(AIChatMessage(role: .assistant, text: response.message))
