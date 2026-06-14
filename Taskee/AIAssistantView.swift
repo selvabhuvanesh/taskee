@@ -2120,25 +2120,42 @@ struct AIAssistantView: View {
     private func buildTasksSummary() -> String {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let weekAhead = calendar.date(byAdding: .day, value: 7, to: today)!
 
-        let relevantTasks = allTasks.filter {
-            !$0.isArchived && $0.targetDate >= calendar.date(byAdding: .day, value: -7, to: today)! && $0.targetDate < weekAhead
-        }
+        let relevantTasks = allTasks.filter { !$0.isArchived }
+            .sorted { $0.targetDate < $1.targetDate }
 
         if relevantTasks.isEmpty { return "No tasks scheduled." }
 
-        var lines: [String] = []
-        for task in relevantTasks.prefix(30) {
+        // Split into today, upcoming, and past for clarity
+        let todayEnd = calendar.date(byAdding: .day, value: 1, to: today)!
+        let todayTasks = relevantTasks.filter { $0.targetDate >= today && $0.targetDate < todayEnd }
+        let upcomingTasks = relevantTasks.filter { $0.targetDate >= todayEnd }
+        let pastTasks = relevantTasks.filter { $0.targetDate < today }
+
+        func formatTask(_ task: Item) -> String {
             let status = task.isApproved ? "done" : task.isInReview ? "in-review" : task.isMissed ? "missed" : task.isCancelled ? "cancelled" : "open"
             let date = task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
             let who = task.assignedTo.isEmpty ? "" : " [\(task.assignedTo)]"
             let reward = task.reward > 0 ? " \(Int(task.reward))coins" : ""
             let recurring = task.isRecurring ? " [recurring]" : ""
-            lines.append("- \(task.name)\(who) | \(date) | \(status)\(reward)\(recurring)")
+            return "- \(task.name)\(who) | \(date) | \(status)\(reward)\(recurring)"
         }
-        if relevantTasks.count > 30 {
-            lines.append("...and \(relevantTasks.count - 30) more tasks")
+
+        var lines: [String] = []
+
+        if !todayTasks.isEmpty {
+            lines.append("TODAY:")
+            for task in todayTasks { lines.append(formatTask(task)) }
+        }
+        if !upcomingTasks.isEmpty {
+            lines.append("UPCOMING:")
+            for task in upcomingTasks.prefix(30) { lines.append(formatTask(task)) }
+            if upcomingTasks.count > 30 { lines.append("...and \(upcomingTasks.count - 30) more upcoming") }
+        }
+        if !pastTasks.isEmpty {
+            lines.append("RECENT PAST:")
+            for task in pastTasks.suffix(20) { lines.append(formatTask(task)) }
+            if pastTasks.count > 20 { lines.append("...and \(pastTasks.count - 20) more past tasks") }
         }
         return lines.joined(separator: "\n")
     }
@@ -2325,14 +2342,14 @@ struct AIAssistantView: View {
             let cancelScope = parsed.rescheduleScope ?? "instance"
 
             var matching = allTasks.filter { task in
-                task.isOpen && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
+                !task.isArchived && matchNames.contains(where: { task.name.localizedCaseInsensitiveContains($0) })
             }
 
             if cancelScope == "series" {
                 let seriesNames = Set(matching.map { $0.name })
                 let seriesAssignees = Set(matching.map { $0.assignedTo })
                 let seriesTasks = allTasks.filter { task in
-                    task.isOpen && task.isRecurring &&
+                    !task.isArchived && task.isRecurring &&
                     seriesNames.contains(task.name) &&
                     seriesAssignees.contains(task.assignedTo) &&
                     !matching.contains(where: { $0.id == task.id })
@@ -2777,22 +2794,28 @@ struct AIAssistantView: View {
             let familyCode = authManager.familyCode
             Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
         } else {
+            var taskIDs: [UUID] = []
             for task in action.tasks {
-                guard task.isOpen else {
-                    skipped += 1
-                    continue
+                if task.isOpen {
+                    task.status = "cancelled"
+                    notificationManager.cancelTaskReminder(taskId: task.id)
+                    cancelled += 1
+                } else {
+                    // Already cancelled/missed/done — delete outright
+                    notificationManager.cancelTaskReminder(taskId: task.id)
+                    taskIDs.append(task.id)
+                    withAnimation { modelContext.delete(task) }
+                    deleted += 1
                 }
-                task.status = "cancelled"
-                notificationManager.cancelTaskReminder(taskId: task.id)
-                cancelled += 1
             }
             try? modelContext.save()
             let familyCode = authManager.familyCode
-            let snapshots = action.tasks.map { CloudKitManager.TaskSnapshot($0) }
+            let snapshots = action.tasks.filter { !taskIDs.contains($0.id) }.map { CloudKitManager.TaskSnapshot($0) }
             Task {
                 for snap in snapshots {
                     await cloudKitManager.pushTaskSnapshot(snap, familyCode: familyCode)
                 }
+                await cloudKitManager.deleteRemoteTasks(taskIDs)
             }
         }
 
@@ -2805,11 +2828,10 @@ struct AIAssistantView: View {
             }
             messages.append(AIChatMessage(role: .assistant, text: response))
         } else {
-            var response = "✅ \(cancelled) task\(cancelled == 1 ? "" : "s") cancelled."
-            if skipped > 0 {
-                response += " \(skipped) task\(skipped == 1 ? " was" : "s were") already completed or cancelled."
-            }
-            messages.append(AIChatMessage(role: .assistant, text: response))
+            var parts: [String] = []
+            if cancelled > 0 { parts.append("\(cancelled) task\(cancelled == 1 ? "" : "s") cancelled") }
+            if deleted > 0 { parts.append("\(deleted) task\(deleted == 1 ? "" : "s") deleted") }
+            messages.append(AIChatMessage(role: .assistant, text: "✅ \(parts.joined(separator: ", "))."))
         }
     }
 
