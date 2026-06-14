@@ -1869,8 +1869,7 @@ struct AIAssistantView: View {
                 // Voice mode: listening area + keyboard toggle
                 HStack(spacing: 12) {
                     Button {
-                        isVoiceMode = false
-                        if speechManager.isListening { speechManager.stopListening() }
+                        exitVoiceMode()
                     } label: {
                         Image(systemName: "keyboard")
                             .font(.system(size: 18))
@@ -2030,6 +2029,15 @@ struct AIAssistantView: View {
         }
     }
 
+    private func exitVoiceMode() {
+        isVoiceMode = false
+        isVoiceOutputEnabled = false
+        isEndingVoiceMode = false
+        pendingVoiceAction = nil
+        speechManager.stopListening()
+        speechManager.stopSpeaking()
+    }
+
     private func sendMessage() {
         if speechManager.isListening {
             speechManager.stopListening()
@@ -2078,10 +2086,7 @@ struct AIAssistantView: View {
                     try? await Task.sleep(nanoseconds: 200_000_000)
                 }
                 await MainActor.run {
-                    isVoiceMode = false
-                    isVoiceOutputEnabled = false
-                    isEndingVoiceMode = false
-                    speechManager.stopListening()
+                    exitVoiceMode()
                 }
             }
         }
