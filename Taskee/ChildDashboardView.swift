@@ -71,8 +71,6 @@ struct ChildDashboardView: View {
     @State private var showGoalsTab = false
     @State private var showStatsPopup = false
     @State private var selectedHomeGoal: Goal?
-    @State private var childGoalStripAnimated = false
-
     private var myMember: FamilyMember? {
         allMembers.first { $0.appleUserID == authManager.appleUserID }
     }
@@ -801,6 +799,12 @@ struct ChildDashboardView: View {
         celebrationReward = task.reward
         showCelebration = true
         launchFlyingCoins(count: Int(task.reward))
+
+    }
+
+    private func isTaskGoalLocked(_ task: Item) -> Bool {
+        guard !task.goalId.isEmpty else { return false }
+        return allGoals.first(where: { $0.id.uuidString == task.goalId })?.isLocked ?? false
     }
 
     private func launchFlyingCoins(count: Int) {
@@ -1210,7 +1214,6 @@ struct ChildDashboardView: View {
                 goals: allGoals,
                 tasks: Array(allTasks),
                 theme: childTheme,
-                animate: !childGoalStripAnimated,
                 onAddGoal: { showGoalPicker = true },
                 onTapGoal: { goal in selectedHomeGoal = goal }
             )
@@ -1218,13 +1221,6 @@ struct ChildDashboardView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .onAppear {
-            if !childGoalStripAnimated {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    childGoalStripAnimated = true
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -1423,6 +1419,8 @@ struct ChildDashboardView: View {
                     return
                 }
                 guard task.isOpen else { return }
+                // Block if the task's goal is locked (pending approval or completed)
+                if isTaskGoalLocked(task) { return }
                 if !task.canComplete {
                     tooEarlyTask = task
                     showTooEarlyAlert = true
@@ -1472,10 +1470,10 @@ struct ChildDashboardView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(task.isApproved || task.isCancelled)
+            .disabled(task.isApproved || task.isCancelled || isTaskGoalLocked(task))
 
             Button {
-                taskToEdit = task
+                if !isTaskGoalLocked(task) { taskToEdit = task }
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -1571,7 +1569,7 @@ struct ChildDashboardView: View {
                 .buttonStyle(.plain)
             }
 
-            if task.createdByChild && task.isOpen {
+            if task.createdByChild && task.isOpen && !isTaskGoalLocked(task) {
                 Button {
                     taskToDelete = task
                 } label: {

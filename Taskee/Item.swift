@@ -2975,6 +2975,8 @@ final class Goal {
     var isActive: Bool { status == "active" }
     var isCompleted: Bool { status == "completed" }
     var isPaused: Bool { status == "paused" }
+    var isPendingApproval: Bool { status == "pendingApproval" }
+    var isLocked: Bool { status == "pendingApproval" }
 
     func progress(from tasks: [Item]) -> Double {
         let goalTasks = tasks.filter { $0.goalId == id.uuidString }

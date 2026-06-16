@@ -366,6 +366,33 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         saveNotification(title: title, body: body, category: "TASK_APPROVED")
     }
 
+    func sendGoalApprovalNotification(goalName: String, childName: String) {
+        let title = "Goal Plan Ready for Review"
+        let body = "\(childName) has planned tasks for \"\(goalName)\". Review and approve to let them begin."
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "GOAL_APPROVAL"
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "GOAL_APPROVAL", senderName: childName)
+    }
+
+    func sendGoalApprovedNotification(goalName: String) {
+        let title = "Plan Approved!"
+        let body = "Your plan for \"\(goalName)\" has been approved! You can now start working on the tasks."
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "GOAL_APPROVED")
+    }
+
     func sendTaskRejectedNotification(taskName: String, childName: String) {
         let title = "Task Needs Redo"
         let body = "Your task \"\(taskName)\" was sent back. Please try again."

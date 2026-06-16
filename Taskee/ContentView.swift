@@ -378,7 +378,6 @@ struct ContentView: View {
     @State private var showGoalPicker = false
     @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
     @State private var selectedHomeGoal: Goal?
-    @State private var parentGoalStripAnimated = false
     @State private var giftTaskToReveal: Item?
     @State private var taskListVersion = 0
 
@@ -1472,7 +1471,6 @@ struct ContentView: View {
                 goals: allGoals,
                 tasks: Array(tasks),
                 theme: parentTheme,
-                animate: !parentGoalStripAnimated,
                 onAddGoal: { showGoalPicker = true },
                 onTapGoal: { goal in selectedHomeGoal = goal }
             )
@@ -1480,13 +1478,6 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .onAppear {
-            if !parentGoalStripAnimated {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    parentGoalStripAnimated = true
-                }
-            }
-        }
     }
 
     private var familyStrip: some View {
@@ -2651,7 +2642,6 @@ struct DateTasksView: View {
     @State private var selectedCalendarDate = Date()
     @State private var showGoalPickerForMember = false
     @State private var selectedMemberGoal: Goal?
-    @State private var goalStripAnimated = false
 
     private var memberTotalEarned: Int {
         allTasks
@@ -2866,7 +2856,6 @@ struct DateTasksView: View {
                 goals: allGoals,
                 tasks: Array(allTasks),
                 theme: theme,
-                animate: !goalStripAnimated,
                 onAddGoal: { showGoalPickerForMember = true },
                 onTapGoal: { goal in selectedMemberGoal = goal }
             )
@@ -2874,13 +2863,6 @@ struct DateTasksView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .onAppear {
-            if !goalStripAnimated {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    goalStripAnimated = true
-                }
-            }
-        }
     }
 
     private var memberHeader: some View {
@@ -3280,6 +3262,7 @@ struct DateTasksView: View {
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
         showCelebration = true
+
     }
 
     private func handleRejection(task: Item) {
@@ -3343,7 +3326,6 @@ struct ChildTasksView: View {
     @State private var pendingEditTask: Item?
     @State private var showGoalPickerForChild = false
     @State private var selectedChildGoal: Goal?
-    @State private var childGoalStripAnimated = false
 
     private var childCalendarDayTasks: [Item] {
         let calendar = Calendar.current
@@ -3794,7 +3776,6 @@ struct ChildTasksView: View {
                 goals: allGoals,
                 tasks: Array(allTasks),
                 theme: theme,
-                animate: !childGoalStripAnimated,
                 onAddGoal: { showGoalPickerForChild = true },
                 onTapGoal: { goal in selectedChildGoal = goal }
             )
@@ -3802,13 +3783,6 @@ struct ChildTasksView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .onAppear {
-            if !childGoalStripAnimated {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    childGoalStripAnimated = true
-                }
-            }
-        }
     }
 
     private var childHeader: some View {
@@ -3931,6 +3905,7 @@ struct ChildTasksView: View {
         SoundManager.shared.playApplause()
         celebrationReward = task.reward
         showCelebration = true
+
     }
 
     private func handleChildRejection(task: Item) {

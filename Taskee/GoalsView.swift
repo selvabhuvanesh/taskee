@@ -258,12 +258,14 @@ struct GoalProgressCard: View {
     let tasks: [Item]
     let theme: ChildTheme
 
+    @State private var animatedProgress: Double = 0
+
     private var progress: Double { goal.progress(from: tasks) }
     private var done: Int { goal.tasksDone(from: tasks) }
     private var total: Int { goal.totalTasks(from: tasks) }
     private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
 
-    private var dialColor: Color { progress >= 1.0 ? .green : .teal }
+    private var dialColor: Color { animatedProgress >= 1.0 ? .green : .teal }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -294,10 +296,10 @@ struct GoalProgressCard: View {
                 Circle()
                     .stroke(dialColor.opacity(0.18), lineWidth: 7)
                 Circle()
-                    .trim(from: 0, to: progress)
+                    .trim(from: 0, to: animatedProgress)
                     .stroke(dialColor, style: StrokeStyle(lineWidth: 7, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text("\(Int(progress * 100))%")
+                Text("\(Int(animatedProgress * 100))%")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(dialColor)
             }
@@ -305,6 +307,22 @@ struct GoalProgressCard: View {
         }
         .padding(12)
         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+        .onAppear {
+            animatedProgress = 0
+            withAnimation(.easeOut(duration: 0.6).delay(0.2)) {
+                animatedProgress = 1.0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    animatedProgress = progress
+                }
+            }
+        }
+        .onChange(of: progress) { _, newValue in
+            withAnimation(.easeOut(duration: 0.4)) {
+                animatedProgress = newValue
+            }
+        }
     }
 }
 
@@ -322,28 +340,46 @@ struct MiniGoalDial: View {
     private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
     private var dialColor: Color { targetProgress >= 1.0 ? .green : category.color }
 
+    private var shortName: String {
+        let name = goal.name
+        if name.count <= 8 { return name }
+        // Take first word, truncate if too long
+        let firstWord = String(name.prefix(while: { $0 != " " }))
+        if firstWord.count <= 8 { return firstWord }
+        return String(firstWord.prefix(7)) + "…"
+    }
+
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(dialColor.opacity(0.3), lineWidth: 4.5)
-            Circle()
-                .trim(from: 0, to: animatedProgress)
-                .stroke(dialColor, style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .shadow(color: dialColor.opacity(0.6), radius: 3, x: 0, y: 0)
-            Image(systemName: goal.icon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(dialColor)
-                .shadow(color: dialColor.opacity(0.3), radius: 2)
+        VStack(spacing: 2) {
+            ZStack {
+                Circle()
+                    .stroke(dialColor.opacity(0.3), lineWidth: 4.5)
+                Circle()
+                    .trim(from: 0, to: animatedProgress)
+                    .stroke(dialColor, style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: dialColor.opacity(0.6), radius: 3, x: 0, y: 0)
+                Text("\(Int(animatedProgress * 100))%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(dialColor)
+            }
+            .frame(width: 46, height: 46)
+            Text(shortName)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(theme.secondaryTextColor)
+                .lineLimit(1)
         }
-        .frame(width: 46, height: 46)
         .onAppear {
-            if animationDelay >= 0 {
-                withAnimation(.easeOut(duration: 0.8).delay(animationDelay)) {
+            // Animate to 100% first, then settle back to actual progress
+            animatedProgress = 0
+            let stagger = animationDelay >= 0 ? animationDelay : 0
+            withAnimation(.easeOut(duration: 0.6).delay(stagger)) {
+                animatedProgress = 1.0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + stagger + 0.7) {
+                withAnimation(.easeInOut(duration: 0.8)) {
                     animatedProgress = targetProgress
                 }
-            } else {
-                animatedProgress = targetProgress
             }
         }
         .onChange(of: targetProgress) { _, newValue in
@@ -359,23 +395,22 @@ struct MemberGoalStrip: View {
     let goals: [Goal]
     let tasks: [Item]
     let theme: ChildTheme
-    let animate: Bool
     let onAddGoal: () -> Void
     let onTapGoal: (Goal) -> Void
 
     private var activeGoals: [Goal] {
-        goals.filter { $0.assignedTo == memberName && $0.isActive }
+        goals.filter { $0.assignedTo == memberName && ($0.isActive || $0.isPendingApproval) }
     }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Image(systemName: "target")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.accentColor.opacity(0.7))
-                Text("Goal Meter")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(theme.secondaryTextColor)
+                Text("Goal\nMeter")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundStyle(theme.accentColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize()
             
 
                 ForEach(Array(activeGoals.enumerated()), id: \.element.id) { index, goal in
@@ -384,7 +419,7 @@ struct MemberGoalStrip: View {
                             goal: goal,
                             tasks: tasks,
                             theme: theme,
-                            animationDelay: animate ? 0.3 + Double(index) * 0.15 : -1
+                            animationDelay: 0.3 + Double(index) * 0.15
                         )
                     }
                     .buttonStyle(.plain)
@@ -875,8 +910,19 @@ struct GoalPickerView: View {
             isCustom: true,
             templateId: ""
         )
+        if authManager.role == "child" {
+            goal.status = "pendingApproval"
+        }
         modelContext.insert(goal)
         try? modelContext.save()
+
+        // Notify parent if child created this goal
+        if authManager.role == "child" {
+            notificationManager.sendGoalApprovalNotification(
+                goalName: goalName,
+                childName: authManager.userName
+            )
+        }
         dismiss()
     }
 
@@ -891,6 +937,10 @@ struct GoalPickerView: View {
             isCustom: isCustom,
             templateId: templateId
         )
+        // If a child creates this goal, it needs parent approval before they can start
+        if authManager.role == "child" {
+            goal.status = "pendingApproval"
+        }
         modelContext.insert(goal)
 
         let calendar = Calendar.current
@@ -921,6 +971,14 @@ struct GoalPickerView: View {
         }
 
         try? modelContext.save()
+
+        // Notify parent if child created this goal for plan review
+        if authManager.role == "child" {
+            notificationManager.sendGoalApprovalNotification(
+                goalName: name,
+                childName: authManager.userName
+            )
+        }
 
         Task {
             for item in createdItems {
@@ -1334,6 +1392,8 @@ struct TaskEditDraft {
 struct GoalDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(NotificationManager.self) private var notificationManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
 
     let goal: Goal
@@ -1347,6 +1407,7 @@ struct GoalDetailView: View {
     @State private var taskToDelete: Item?
     @State private var isEditingTasks = false
     @State private var taskEdits: [UUID: TaskEditDraft] = [:]
+    @State private var animatedDetailProgress: Double = 0
 
     private var goalTasks: [Item] {
         allTasks.filter { $0.goalId == goal.id.uuidString }
@@ -1362,6 +1423,7 @@ struct GoalDetailView: View {
 
     private var progress: Double { goal.progress(from: allTasks) }
     private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
+    private var isChildLocked: Bool { goal.isLocked && authManager.role != "parent" }
 
     var body: some View {
         NavigationStack {
@@ -1391,118 +1453,87 @@ struct GoalDetailView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Menu {
-                            Button {
-                                editName = goal.name
-                                editCategory = GoalCategory(rawValue: goal.category) ?? .lifestyle
-                                editTargetDate = goal.targetDate
-                                withAnimation { isEditing = true }
-                            } label: {
-                                Label("Edit Goal", systemImage: "pencil")
-                            }
-                            if goal.isActive {
-                                Button { goal.status = "paused"; try? modelContext.save() } label: {
-                                    Label("Pause", systemImage: "pause.circle")
-                                }
-                                Button { goal.status = "completed"; try? modelContext.save() } label: {
-                                    Label("Mark Complete", systemImage: "checkmark.circle")
-                                }
-                            } else if goal.isPaused {
-                                Button { goal.status = "active"; try? modelContext.save() } label: {
-                                    Label("Resume", systemImage: "play.circle")
-                                }
-                            }
-                            Button(role: .destructive) {
-                                showDeleteConfirm = true
-                            } label: {
-                                Label("Delete Goal", systemImage: "trash")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle.fill")
-                                .font(.system(size: 26, weight: .semibold))
-                                .foregroundStyle(theme.accentColor)
-                        }
+                        goalDetailMenu
                     }
 
                     if isEditing {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Category")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 6) {
-                                ForEach(GoalCategory.allCases) { cat in
-                                    Button {
-                                        editCategory = cat
-                                    } label: {
-                                        HStack(spacing: 3) {
-                                            Image(systemName: cat.icon)
-                                                .font(.caption2)
-                                            Text(cat.rawValue)
-                                                .font(.caption2)
-                                        }
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 5)
-                                        .frame(maxWidth: .infinity)
-                                        .background(editCategory == cat ? cat.color.opacity(0.2) : Color.primary.opacity(0.05), in: Capsule())
-                                        .overlay(Capsule().strokeBorder(editCategory == cat ? cat.color : .clear, lineWidth: 1.5))
-                                        .foregroundStyle(editCategory == cat ? cat.color : .primary.opacity(0.6))
-                                    }
-                                }
-                            }
-
-                            Text("Target Date")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            DatePicker("", selection: $editTargetDate, displayedComponents: .date)
-                                .labelsHidden()
-
-                            HStack(spacing: 12) {
-                                Button {
-                                    goal.name = editName
-                                    goal.category = editCategory.rawValue
-                                    goal.icon = editCategory.icon
-                                    goal.targetDate = editTargetDate
-                                    try? modelContext.save()
-                                    withAnimation { isEditing = false }
-                                } label: {
-                                    Text("Save")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 20)
-                                        .padding(.vertical, 8)
-                                        .background(theme.accentColor, in: Capsule())
-                                }
-                                .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                                Button {
-                                    withAnimation { isEditing = false }
-                                } label: {
-                                    Text("Cancel")
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(12)
-                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                        goalEditSection
                     }
 
                     // Progress
                     VStack(spacing: 8) {
-                        ProgressView(value: progress)
-                            .tint(progress >= 1.0 ? .green : category.color)
+                        ProgressView(value: animatedDetailProgress)
+                            .tint(animatedDetailProgress >= 1.0 ? .green : category.color)
                             .scaleEffect(y: 1.5)
                         HStack {
                             Text("\(doneTasks.count)/\(goalTasks.count) tasks done")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(Int(progress * 100))%")
+                            Text("\(Int(animatedDetailProgress * 100))%")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(progress >= 1.0 ? .green : category.color)
+                                .foregroundStyle(animatedDetailProgress >= 1.0 ? .green : category.color)
                         }
                     }
                     .padding(.vertical, 4)
+                    .onAppear {
+                        animatedDetailProgress = 0
+                        withAnimation(.easeOut(duration: 0.6).delay(0.3)) {
+                            animatedDetailProgress = 1.0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            withAnimation(.easeInOut(duration: 0.8)) {
+                                animatedDetailProgress = progress
+                            }
+                        }
+                    }
+                    .onChange(of: progress) { _, newValue in
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            animatedDetailProgress = newValue
+                        }
+                    }
+
+                    // Pending Approval banner
+                    if goal.isPendingApproval {
+                        VStack(spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock.badge.checkmark.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Plan Awaiting Approval")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.orange)
+                                    Text(authManager.role == "parent"
+                                         ? "Review the planned tasks and approve to let the child begin."
+                                         : "Waiting for parent to review and approve your plan.")
+                                        .font(.caption)
+                                        .foregroundStyle(theme.secondaryTextColor)
+                                }
+                                Spacer()
+                            }
+
+                            if authManager.role == "parent" {
+                                Button {
+                                    withAnimation(.snappy) {
+                                        goal.status = "active"
+                                    }
+                                    try? modelContext.save()
+                                    notificationManager.sendGoalApprovedNotification(goalName: goal.name)
+                                    SoundManager.shared.playApplause()
+                                } label: {
+                                    Label("Approve Plan", systemImage: "checkmark.seal.fill")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(.green, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    }
 
                     Divider()
 
@@ -1543,8 +1574,9 @@ struct GoalDetailView: View {
                                         Text("Edit All")
                                             .font(.caption.weight(.semibold))
                                     }
-                                    .foregroundStyle(category.color)
+                                    .foregroundStyle(isChildLocked ? .gray : category.color)
                                 }
+                                .disabled(isChildLocked)
                             }
                         }
 
@@ -1697,6 +1729,109 @@ struct GoalDetailView: View {
         taskEdits.removeAll()
         for task in openTasks {
             taskEdits[task.id] = TaskEditDraft(name: task.name, targetDate: task.targetDate, reward: task.reward)
+        }
+    }
+
+    private var goalEditSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Category")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 6) {
+                ForEach(GoalCategory.allCases) { cat in
+                    Button {
+                        editCategory = cat
+                    } label: {
+                        let isSelected = editCategory == cat
+                        HStack(spacing: 3) {
+                            Image(systemName: cat.icon)
+                                .font(.caption2)
+                            Text(cat.rawValue)
+                                .font(.caption2)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity)
+                        .background(isSelected ? cat.color.opacity(0.2) : Color.primary.opacity(0.05), in: Capsule())
+                        .overlay(Capsule().strokeBorder(isSelected ? cat.color : .clear, lineWidth: 1.5))
+                        .foregroundStyle(isSelected ? cat.color : .primary.opacity(0.6))
+                    }
+                }
+            }
+
+            Text("Target Date")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            DatePicker("", selection: $editTargetDate, displayedComponents: .date)
+                .labelsHidden()
+
+            HStack(spacing: 12) {
+                Button {
+                    goal.name = editName
+                    goal.category = editCategory.rawValue
+                    goal.icon = editCategory.icon
+                    goal.targetDate = editTargetDate
+                    try? modelContext.save()
+                    withAnimation { isEditing = false }
+                } label: {
+                    Text("Save")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(theme.accentColor, in: Capsule())
+                }
+                .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                Button {
+                    withAnimation { isEditing = false }
+                } label: {
+                    Text("Cancel")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var goalDetailMenu: some View {
+        Menu {
+            if !isChildLocked {
+                Button {
+                    editName = goal.name
+                    editCategory = GoalCategory(rawValue: goal.category) ?? .lifestyle
+                    editTargetDate = goal.targetDate
+                    withAnimation { isEditing = true }
+                } label: {
+                    Label("Edit Goal", systemImage: "pencil")
+                }
+            }
+            if goal.isActive && !isChildLocked {
+                Button { goal.status = "paused"; try? modelContext.save() } label: {
+                    Label("Pause", systemImage: "pause.circle")
+                }
+                Button { goal.status = "completed"; try? modelContext.save() } label: {
+                    Label("Mark Complete", systemImage: "checkmark.circle")
+                }
+            } else if goal.isPaused && !isChildLocked {
+                Button { goal.status = "active"; try? modelContext.save() } label: {
+                    Label("Resume", systemImage: "play.circle")
+                }
+            }
+            if !isChildLocked {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete Goal", systemImage: "trash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle.fill")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(theme.accentColor)
         }
     }
 
