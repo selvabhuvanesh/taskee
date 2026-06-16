@@ -70,6 +70,8 @@ struct ChildDashboardView: View {
     @State private var showGoalPicker = false
     @State private var showGoalsTab = false
     @State private var showStatsPopup = false
+    @State private var selectedHomeGoal: Goal?
+    @State private var childGoalStripAnimated = false
 
     private var myMember: FamilyMember? {
         allMembers.first { $0.appleUserID == authManager.appleUserID }
@@ -464,6 +466,9 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showGoalPicker) {
                 GoalPickerView(audience: .child, assignee: authManager.userName, theme: childTheme)
+            }
+            .sheet(item: $selectedHomeGoal) { goal in
+                GoalDetailView(goal: goal, theme: childTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -1198,7 +1203,34 @@ struct ChildDashboardView: View {
     }
 
     @ViewBuilder
+    private var childHomeGoalStrip: some View {
+        HStack(spacing: 6) {
+            MemberGoalStrip(
+                memberName: authManager.userName,
+                goals: allGoals,
+                tasks: Array(allTasks),
+                theme: childTheme,
+                animate: !childGoalStripAnimated,
+                onAddGoal: { showGoalPicker = true },
+                onTapGoal: { goal in selectedHomeGoal = goal }
+            )
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .onAppear {
+            if !childGoalStripAnimated {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    childGoalStripAnimated = true
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var childTasksContent: some View {
+        childHomeGoalStrip
+
         if showCalendarView {
             dashboardViewModeToggle
             WeekCalendarStrip(

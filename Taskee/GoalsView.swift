@@ -22,6 +22,9 @@ struct GoalsTabContent: View {
     private var myGoals: [Goal] { goals.filter { $0.assignedTo == userName } }
     private var activeGoals: [Goal] { myGoals.filter { $0.isActive } }
     private var completedGoals: [Goal] { myGoals.filter { $0.isCompleted } }
+    private var familyGoals: [Goal] { goals.filter { $0.assignedTo != userName } }
+    private var familyActiveGoals: [Goal] { familyGoals.filter { $0.isActive } }
+    private var familyCompletedGoals: [Goal] { familyGoals.filter { $0.isCompleted } }
 
     @State private var selectedGoal: Goal?
     @State private var goalToDelete: Goal?
@@ -101,6 +104,57 @@ struct GoalsTabContent: View {
                         }
                     }
 
+                }
+
+                // Family Goals (parent view)
+                if audience == .parent && !familyGoals.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    Text("Family Goals")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(theme.textColor)
+                        .padding(.top, 4)
+
+                    if !familyActiveGoals.isEmpty {
+                        ForEach(familyActiveGoals) { goal in
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button { selectedGoal = goal } label: {
+                                        Label("Edit Goal", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+
+                    if !familyCompletedGoals.isEmpty {
+                        Text("Completed")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(theme.secondaryTextColor)
+                            .padding(.top, 8)
+
+                        ForEach(familyCompletedGoals) { goal in
+                            GoalProgressCard(goal: goal, tasks: allTasks, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedGoal = goal }
+                                .contextMenu {
+                                    Button { selectedGoal = goal } label: {
+                                        Label("View Details", systemImage: "info.circle")
+                                    }
+                                    Button(role: .destructive) { goalToDelete = goal } label: {
+                                        Label("Delete Goal", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -222,9 +276,16 @@ struct GoalProgressCard: View {
                 Text(goal.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(theme.textColor)
-                Text("\(done)/\(total) tasks done")
-                    .font(.caption2)
-                    .foregroundStyle(theme.secondaryTextColor)
+                HStack(spacing: 4) {
+                    Text(goal.assignedTo)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(category.color.opacity(0.8))
+                    Text("·")
+                        .foregroundStyle(theme.tertiaryTextColor)
+                    Text("\(done)/\(total) tasks done")
+                        .foregroundStyle(theme.secondaryTextColor)
+                }
+                .font(.caption2)
             }
 
             Spacer()
@@ -244,6 +305,101 @@ struct GoalProgressCard: View {
         }
         .padding(12)
         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Mini Goal Dial (for avatar strip)
+
+struct MiniGoalDial: View {
+    let goal: Goal
+    let tasks: [Item]
+    let theme: ChildTheme
+    let animationDelay: Double
+
+    @State private var animatedProgress: Double = 0
+
+    private var targetProgress: Double { goal.progress(from: tasks) }
+    private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
+    private var dialColor: Color { targetProgress >= 1.0 ? .green : category.color }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(dialColor.opacity(0.3), lineWidth: 4.5)
+            Circle()
+                .trim(from: 0, to: animatedProgress)
+                .stroke(dialColor, style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: dialColor.opacity(0.6), radius: 3, x: 0, y: 0)
+            Image(systemName: goal.icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(dialColor)
+                .shadow(color: dialColor.opacity(0.3), radius: 2)
+        }
+        .frame(width: 46, height: 46)
+        .onAppear {
+            if animationDelay >= 0 {
+                withAnimation(.easeOut(duration: 0.8).delay(animationDelay)) {
+                    animatedProgress = targetProgress
+                }
+            } else {
+                animatedProgress = targetProgress
+            }
+        }
+        .onChange(of: targetProgress) { _, newValue in
+            withAnimation(.easeOut(duration: 0.4)) {
+                animatedProgress = newValue
+            }
+        }
+    }
+}
+
+struct MemberGoalStrip: View {
+    let memberName: String
+    let goals: [Goal]
+    let tasks: [Item]
+    let theme: ChildTheme
+    let animate: Bool
+    let onAddGoal: () -> Void
+    let onTapGoal: (Goal) -> Void
+
+    private var activeGoals: [Goal] {
+        goals.filter { $0.assignedTo == memberName && $0.isActive }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Image(systemName: "target")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.accentColor.opacity(0.7))
+                Text("Goal Meter")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(theme.secondaryTextColor)
+            
+
+                ForEach(Array(activeGoals.enumerated()), id: \.element.id) { index, goal in
+                    Button { onTapGoal(goal) } label: {
+                        MiniGoalDial(
+                            goal: goal,
+                            tasks: tasks,
+                            theme: theme,
+                            animationDelay: animate ? 0.3 + Double(index) * 0.15 : -1
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button(action: onAddGoal) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(theme.accentColor)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(theme.accentColor.opacity(0.3), lineWidth: 1.5))
+                }
+            }
+            .padding(.vertical, 4)
+        }
     }
 }
 
@@ -275,6 +431,7 @@ struct GoalPickerView: View {
     @State private var currentTasks: [GoalTaskEntry] = []
     @State private var sparkleRotation: Double = 0
     @State private var sparkleScale: CGFloat = 0.5
+    @State private var showTaskChoiceDialog = false
     @FocusState private var isInputFocused: Bool
     @FocusState private var isRefineFocused: Bool
 
@@ -588,7 +745,11 @@ struct GoalPickerView: View {
                 HStack(spacing: 12) {
                     Button {
                         editableTasks = currentTasks.map { EditableSuggestedTask(from: $0) }
-                        showTaskPreview = true
+                        if assignee != authManager.userName {
+                            showTaskChoiceDialog = true
+                        } else {
+                            showTaskPreview = true
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark")
@@ -600,6 +761,15 @@ struct GoalPickerView: View {
                         .padding(.vertical, 12)
                         .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 10))
                     }
+                }
+                .confirmationDialog("How should tasks be created?", isPresented: $showTaskChoiceDialog, titleVisibility: .visible) {
+                    Button("Create tasks now") {
+                        showTaskPreview = true
+                    }
+                    Button("Let \(assignee) plan tasks") {
+                        createGoalOnly()
+                    }
+                    Button("Cancel", role: .cancel) { }
                 }
             }
         }
@@ -692,6 +862,22 @@ struct GoalPickerView: View {
                 }
             }
         }
+    }
+
+    private func createGoalOnly() {
+        let goal = Goal(
+            name: goalName,
+            category: aiCategory.rawValue,
+            icon: aiIcon,
+            assignedTo: assignee,
+            createdBy: authManager.userName,
+            targetDate: Calendar.current.date(byAdding: .day, value: goalDuration, to: Date()) ?? Date(),
+            isCustom: true,
+            templateId: ""
+        )
+        modelContext.insert(goal)
+        try? modelContext.save()
+        dismiss()
     }
 
     private func createGoalWithTasks(name: String, icon: String, category: GoalCategory, templateId: String, isCustom: Bool) {
@@ -1232,9 +1418,9 @@ struct GoalDetailView: View {
                                 Label("Delete Goal", systemImage: "trash")
                             }
                         } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "ellipsis.circle.fill")
+                                .font(.system(size: 26, weight: .semibold))
+                                .foregroundStyle(theme.accentColor)
                         }
                     }
 

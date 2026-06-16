@@ -91,6 +91,7 @@ final class ClaudeAPIService: Sendable {
         let durationDays: Int?
         let isCustomGoal: Bool?
         let goalTasks: [[String: Any]]?
+        let newGoalName: String?
         // Shopping & wish list fields
         let itemNames: [String]?
         // Project fields
@@ -198,7 +199,7 @@ final class ClaudeAPIService: Sendable {
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update|setGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder|listTasks",
+                "intent": "create|reschedule|cancel|markDone|update|setGoal|editGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder|listTasks",
 
                 // Task fields (create/reschedule/cancel/markDone/update)
                 "taskName": "string or null",
@@ -216,8 +217,9 @@ final class ClaudeAPIService: Sendable {
                 "newAssignee": "string or null",
                 "tasks": [{"taskName":"","assignee":"","date":"","reward":0,"recurrence":"","occurrences":0}] or null,
 
-                // Goal fields (setGoal)
+                // Goal fields (setGoal/editGoal)
                 "goalName": "string or null",
+                "newGoalName": "string or null",
                 "goalTemplateId": "string or null",
                 "assignees": ["names"] or null,
                 "category": "string or null",
@@ -258,6 +260,7 @@ final class ClaudeAPIService: Sendable {
         - For "listTasks": use "taskFilter" to specify which tasks to show (e.g. all_today, all_overdue, all_open, all_cancelled, all_missed, all_done). Optionally add "filterAssignee". The app formats and displays the task list — you just provide a brief intro message. ALWAYS use listTasks with taskFilter when the user asks to see/list/show tasks.
 
         GOAL MANAGEMENT:
+        - "editGoal": modify an existing goal. Use "goalName" to match, then set fields to change: "newGoalName" (rename), "category" (new category), "durationDays" (new target date = today + days). Match against CURRENT GOALS data.
         - "deleteGoal": delete a goal and its open tasks. Use "goalName" to match. Match against CURRENT GOALS data.
         - "pauseGoal": pause an active goal. Use "goalName".
         - "resumeGoal": resume a paused goal. Use "goalName".
@@ -349,6 +352,7 @@ final class ClaudeAPIService: Sendable {
                 durationDays: actionJson["durationDays"] as? Int,
                 isCustomGoal: actionJson["isCustom"] as? Bool,
                 goalTasks: actionJson["goalTasks"] as? [[String: Any]],
+                newGoalName: actionJson["newGoalName"] as? String,
                 itemNames: actionJson["itemNames"] as? [String],
                 projectName: actionJson["projectName"] as? String,
                 projectDescription: actionJson["projectDescription"] as? String,
@@ -707,6 +711,7 @@ struct TaskAction: Identifiable {
 
     // Goal fields
     var goalName: String?
+    var newGoalName: String?
     var goalTemplateId: String?
     var goalCategory: String?
     var goalDurationDays: Int?
@@ -738,6 +743,7 @@ enum TaskIntent {
     case update
     case setGoal
     // Goal management
+    case editGoal
     case deleteGoal
     case pauseGoal
     case resumeGoal
@@ -2696,6 +2702,24 @@ struct AIAssistantView: View {
             action.goalTasks = goalTaskEntries
             return action
 
+        case "editGoal":
+            guard let name = parsed.goalName, !name.isEmpty else { return nil }
+            let matching = allGoals.filter { $0.name.localizedCaseInsensitiveContains(name) }
+            guard let goal = matching.first else { return nil }
+            var changes: [String] = []
+            if let newName = parsed.newGoalName, !newName.isEmpty { changes.append("Rename to \"\(newName)\"") }
+            if let cat = parsed.category, !cat.isEmpty { changes.append("Category → \(cat)") }
+            if let days = parsed.durationDays { changes.append("Target date → \(days) days from today") }
+            if changes.isEmpty { return nil }
+            let details = ["🎯 \(goal.name) [\(goal.assignedTo)]"] + changes.map { "  ✏️ \($0)" }
+            var action = TaskAction(intent: .editGoal, summary: "Edit goal \"\(goal.name)\"", details: details)
+            action.matchingGoals = [goal]
+            action.goalName = name
+            if let newName = parsed.newGoalName { action.newGoalName = newName }
+            if let cat = parsed.category { action.goalCategory = cat }
+            if let days = parsed.durationDays { action.goalDurationDays = days }
+            return action
+
         case "deleteGoal", "pauseGoal", "resumeGoal", "completeGoal":
             guard let name = parsed.goalName, !name.isEmpty else { return nil }
             let matching = allGoals.filter { $0.name.localizedCaseInsensitiveContains(name) }
@@ -2917,6 +2941,8 @@ struct AIAssistantView: View {
             executeUpdate(action, messageId: messageId)
         case .setGoal:
             executeSetGoal(action, messageId: messageId)
+        case .editGoal:
+            executeEditGoal(action, messageId: messageId)
         case .deleteGoal, .pauseGoal, .resumeGoal, .completeGoal:
             executeGoalAction(action, messageId: messageId)
         case .addToCart:
@@ -3317,6 +3343,39 @@ struct AIAssistantView: View {
 
     // MARK: - Goal Management Actions
 
+    private func executeEditGoal(_ action: TaskAction, messageId: UUID) {
+        guard let goal = action.matchingGoals.first else {
+            messages.append(AIChatMessage(role: .assistant, text: "Couldn't find that goal. Please try again."))
+            return
+        }
+
+        var changes: [String] = []
+
+        if let newName = action.newGoalName, !newName.isEmpty {
+            goal.name = newName
+            changes.append("Renamed to \"\(newName)\"")
+        }
+        if let cat = action.goalCategory, !cat.isEmpty {
+            let goalCat = GoalCategory(rawValue: cat) ?? .lifestyle
+            goal.category = goalCat.rawValue
+            goal.icon = goalCat.icon
+            changes.append("Category → \(goalCat.rawValue)")
+        }
+        if let days = action.goalDurationDays, days > 0 {
+            let newDate = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
+            goal.targetDate = newDate
+            let df = DateFormatter()
+            df.dateStyle = .medium
+            changes.append("Target date → \(df.string(from: newDate))")
+        }
+
+        try? modelContext.save()
+        markActionExecuted(messageId: messageId)
+
+        let summary = changes.isEmpty ? "No changes made." : "Updated \"\(goal.name)\":\n" + changes.map { "  ✏️ \($0)" }.joined(separator: "\n")
+        messages.append(AIChatMessage(role: .assistant, text: summary))
+    }
+
     private func executeGoalAction(_ action: TaskAction, messageId: UUID) {
         guard !action.matchingGoals.isEmpty else {
             messages.append(AIChatMessage(role: .assistant, text: "Couldn't find that goal. Please try again."))
@@ -3669,6 +3728,7 @@ struct AIAssistantView: View {
         case .cancel: return "xmark.circle.fill"
         case .markDone: return "checkmark.circle.fill"
         case .setGoal: return "target"
+        case .editGoal: return "pencil.circle.fill"
         case .deleteGoal: return "trash.circle.fill"
         case .pauseGoal: return "pause.circle.fill"
         case .resumeGoal: return "play.circle.fill"
@@ -3694,7 +3754,7 @@ struct AIAssistantView: View {
         case .reschedule: return .orange
         case .cancel, .deleteGoal, .deleteProject, .removeFromCart, .removeFromWishList: return .red
         case .markDone, .completeGoal, .markBought: return .green
-        case .setGoal, .resumeGoal: return theme.accentColor
+        case .setGoal, .editGoal, .resumeGoal: return theme.accentColor
         case .pauseGoal: return .orange
         case .addToCart, .addToWishList: return theme.accentColor
         case .createProject, .editProject, .updateProjectStatus, .addProjectIdea: return theme.accentColor

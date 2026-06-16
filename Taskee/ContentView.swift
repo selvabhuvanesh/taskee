@@ -377,6 +377,8 @@ struct ContentView: View {
     @State private var showParentGifts = false
     @State private var showGoalPicker = false
     @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
+    @State private var selectedHomeGoal: Goal?
+    @State private var parentGoalStripAnimated = false
     @State private var giftTaskToReveal: Item?
     @State private var taskListVersion = 0
 
@@ -774,6 +776,9 @@ struct ContentView: View {
                     assignee: authManager.userName,
                     theme: parentTheme
                 )
+            }
+            .sheet(item: $selectedHomeGoal) { goal in
+                GoalDetailView(goal: goal, theme: parentTheme)
             }
             .onChange(of: showNotificationCenter) { _, showing in
                 if !showing {
@@ -1460,6 +1465,30 @@ struct ContentView: View {
         Task { await cloudKitManager.pushChatMessage(message, familyCode: familyCode) }
     }
 
+    private var parentHomeGoalStrip: some View {
+        HStack(spacing: 6) {
+            MemberGoalStrip(
+                memberName: authManager.userName,
+                goals: allGoals,
+                tasks: Array(tasks),
+                theme: parentTheme,
+                animate: !parentGoalStripAnimated,
+                onAddGoal: { showGoalPicker = true },
+                onTapGoal: { goal in selectedHomeGoal = goal }
+            )
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .onAppear {
+            if !parentGoalStripAnimated {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    parentGoalStripAnimated = true
+                }
+            }
+        }
+    }
+
     private var familyStrip: some View {
         HStack {
             HStack(spacing: 10) {
@@ -1734,6 +1763,8 @@ struct ContentView: View {
             familyStrip
                 .padding(.top, 6)
         }
+
+        parentHomeGoalStrip
 
         if !upcomingReminders.isEmpty {
             Button { showAnnualReminders = true } label: {
@@ -2597,6 +2628,7 @@ struct DateTasksView: View {
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allRedemptions: [RewardRedemption]
+    @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
     let dateLabel: String
     let tasks: [Item]
     let children: [FamilyMember]
@@ -2617,6 +2649,9 @@ struct DateTasksView: View {
     @State private var isExpanded = true
     @State private var showCalendarView = false
     @State private var selectedCalendarDate = Date()
+    @State private var showGoalPickerForMember = false
+    @State private var selectedMemberGoal: Goal?
+    @State private var goalStripAnimated = false
 
     private var memberTotalEarned: Int {
         allTasks
@@ -2824,6 +2859,30 @@ struct DateTasksView: View {
         }
     }
 
+    private var memberGoalStripSection: some View {
+        HStack(spacing: 6) {
+            MemberGoalStrip(
+                memberName: memberName,
+                goals: allGoals,
+                tasks: Array(allTasks),
+                theme: theme,
+                animate: !goalStripAnimated,
+                onAddGoal: { showGoalPickerForMember = true },
+                onTapGoal: { goal in selectedMemberGoal = goal }
+            )
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .onAppear {
+            if !goalStripAnimated {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    goalStripAnimated = true
+                }
+            }
+        }
+    }
+
     private var memberHeader: some View {
         HStack(spacing: 14) {
             AvatarView(avatarId: otherParent?.avatar ?? "", size: 56)
@@ -2908,6 +2967,8 @@ struct DateTasksView: View {
                     )
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
+
+                    memberGoalStripSection
                 }
 
                 dateViewModeToggle
@@ -3029,6 +3090,16 @@ struct DateTasksView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("\(memberName) has been reminded about today's tasks.")
+        }
+        .sheet(isPresented: $showGoalPickerForMember) {
+            GoalPickerView(
+                audience: children.contains(where: { $0.name == memberName }) ? .child : .parent,
+                assignee: memberName,
+                theme: theme
+            )
+        }
+        .sheet(item: $selectedMemberGoal) { goal in
+            GoalDetailView(goal: goal, theme: theme)
         }
         .overlay {
             CelebrationOverlay(
@@ -3249,6 +3320,7 @@ struct ChildTasksView: View {
     @Environment(AuthManager.self) private var authManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allRedemptions: [RewardRedemption]
+    @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
     let child: FamilyMember
     let tasks: [Item]
     let allChildren: [FamilyMember]
@@ -3269,6 +3341,9 @@ struct ChildTasksView: View {
     @State private var showReminderSent = false
     @State private var showEditChoice = false
     @State private var pendingEditTask: Item?
+    @State private var showGoalPickerForChild = false
+    @State private var selectedChildGoal: Goal?
+    @State private var childGoalStripAnimated = false
 
     private var childCalendarDayTasks: [Item] {
         let calendar = Calendar.current
@@ -3484,6 +3559,8 @@ struct ChildTasksView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
 
+                childGoalStripSection
+
                 childViewModeToggle
 
                 if showCalendarView {
@@ -3584,6 +3661,16 @@ struct ChildTasksView: View {
             if let task = tooEarlyTask {
                 Text("This task is scheduled for \(task.dueDateLabel). It can be completed when the day arrives!")
             }
+        }
+        .sheet(isPresented: $showGoalPickerForChild) {
+            GoalPickerView(
+                audience: .child,
+                assignee: child.name,
+                theme: theme
+            )
+        }
+        .sheet(item: $selectedChildGoal) { goal in
+            GoalDetailView(goal: goal, theme: theme)
         }
         .overlay {
             CelebrationOverlay(
@@ -3698,6 +3785,30 @@ struct ChildTasksView: View {
 
     private var todayOpenTasks: [Item] {
         tasks.filter { $0.isOpen && Calendar.current.isDateInToday($0.targetDate) }
+    }
+
+    private var childGoalStripSection: some View {
+        HStack(spacing: 6) {
+            MemberGoalStrip(
+                memberName: child.name,
+                goals: allGoals,
+                tasks: Array(allTasks),
+                theme: theme,
+                animate: !childGoalStripAnimated,
+                onAddGoal: { showGoalPickerForChild = true },
+                onTapGoal: { goal in selectedChildGoal = goal }
+            )
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .onAppear {
+            if !childGoalStripAnimated {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    childGoalStripAnimated = true
+                }
+            }
+        }
     }
 
     private var childHeader: some View {
