@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import StoreKit
 import PhotosUI
+import EventKit
 
 // Shared gradient background used across all screens.
 struct AppBackground: View {
@@ -141,11 +142,92 @@ func rescheduleTask(_ task: Item, toSameDayAs referenceDate: Date) {
     }
 }
 
+// MARK: - Calendar Timeline Item
+
+enum CalendarTimelineItem: Identifiable {
+    case task(Item)
+    case event(EKEvent)
+
+    var id: String {
+        switch self {
+        case .task(let item): return item.id.uuidString
+        case .event(let event): return event.eventIdentifier
+        }
+    }
+
+    var sortDate: Date {
+        switch self {
+        case .task(let item): return item.targetDate
+        case .event(let event): return event.startDate
+        }
+    }
+
+    var isAllDay: Bool {
+        switch self {
+        case .task: return false
+        case .event(let event): return event.isAllDay
+        }
+    }
+}
+
+// MARK: - Calendar Event Row
+
+struct CalendarEventRow: View {
+    let event: EKEvent
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    private var timeRange: String {
+        if event.isAllDay { return "All Day" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return "\(formatter.string(from: event.startDate)) – \(formatter.string(from: event.endDate))"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(Color(cgColor: event.calendar.cgColor))
+                .frame(width: 10, height: 10)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title ?? "Untitled")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(timeRange)
+                        .font(.caption)
+                        .foregroundStyle(.primary.opacity(0.5))
+
+                    Text("·")
+                        .foregroundStyle(.primary.opacity(0.3))
+
+                    Text(event.calendar.title)
+                        .font(.caption)
+                        .foregroundStyle(.primary.opacity(0.5))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color(cgColor: event.calendar.cgColor).opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Week Calendar Strip
 
 struct WeekCalendarStrip: View {
     @Binding var selectedDate: Date
     let tasks: [Item]
+    var calendarManager: CalendarManager? = nil
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     @State private var weekOffset = 0
 
@@ -167,7 +249,9 @@ struct WeekCalendarStrip: View {
 
     private func taskCount(for date: Date) -> Int {
         let calendar = Calendar.current
-        return tasks.filter { calendar.isDate($0.targetDate, inSameDayAs: date) }.count
+        let tCount = tasks.filter { calendar.isDate($0.targetDate, inSameDayAs: date) }.count
+        let eCount = calendarManager?.eventCount(for: date) ?? 0
+        return tCount + eCount
     }
 
     private func dayLabel(for date: Date) -> String {
@@ -298,6 +382,7 @@ struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(CalendarManager.self) private var calendarManager
     @Query(sort: \Item.targetDate) private var tasks: [Item]
     @Query private var allMembers: [FamilyMember]
     @Query(sort: \AnnualReminder.dueDate) private var annualReminders: [AnnualReminder]
@@ -330,6 +415,7 @@ struct ContentView: View {
     @State private var showSubscription = false
     @State private var showRedemptionApprovals = false
     @State private var showRewardsHistory = false
+    @State private var showCalendarPrompt = false
     @State private var showEditProfile = false
     @State private var showSettings = false
     @State private var stickyNote: (message: String, color: Color)?
@@ -476,6 +562,14 @@ struct ContentView: View {
             .sorted { $0.targetDate < $1.targetDate }
     }
 
+    private var calendarDayTimeline: [CalendarTimelineItem] {
+        let taskItems: [CalendarTimelineItem] = calendarDayTasks.map { .task($0) }
+        let eventItems: [CalendarTimelineItem] = calendarManager.events.map { .event($0) }
+        let allDay = (taskItems + eventItems).filter { $0.isAllDay }
+        let timed = (taskItems + eventItems).filter { !$0.isAllDay }.sorted { $0.sortDate < $1.sortDate }
+        return timed + allDay
+    }
+
     private var pendingReviewCount: Int {
         activeTasks.filter { $0.isInReview }.count
     }
@@ -507,6 +601,28 @@ struct ContentView: View {
     private var todayGroupIndex: Int {
         let startOfToday = Calendar.current.startOfDay(for: Date())
         return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
+    }
+
+    private static func dateLabelForDate(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
+        return date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    private var eventOnlyDateGroups: [(key: String, events: [EKEvent], date: Date)] {
+        let cal = Calendar.current
+        let taskDates = Set(groupedTasks.compactMap { $0.tasks.first.map { cal.startOfDay(for: $0.targetDate) } })
+        var seen = Set<Date>()
+        var groups: [(key: String, events: [EKEvent], date: Date)] = []
+        for event in calendarManager.listEvents {
+            let dayStart = cal.startOfDay(for: event.startDate)
+            guard !taskDates.contains(dayStart), !seen.contains(dayStart) else { continue }
+            seen.insert(dayStart)
+            let label = Self.dateLabelForDate(event.startDate)
+            groups.append((key: label, events: calendarManager.listEventsForDate(event.startDate), date: dayStart))
+        }
+        return groups.sorted { $0.date < $1.date }
     }
 
     @ViewBuilder
@@ -779,6 +895,15 @@ struct ContentView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView(theme: parentTheme)
             }
+            .sheet(isPresented: $showCalendarPrompt) {
+                CalendarPromptSheet(theme: parentTheme)
+                    .presentationDetents([.medium])
+            }
+            .onAppear {
+                if isIndividual && !calendarManager.hasSeenPrompt {
+                    showCalendarPrompt = true
+                }
+            }
             .sheet(isPresented: $showThemePicker) {
                 ChildThemePickerView(theme: $parentTheme)
             }
@@ -936,6 +1061,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 withAnimation { isAIMode = true }
             } label: {
                 Image(systemName: "sparkles")
@@ -996,6 +1122,7 @@ struct ContentView: View {
 
     private var pillTasksButton: some View {
         Button {
+            UISelectionFeedbackGenerator().selectionChanged()
             withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = false }
         } label: {
             Image(systemName: "checklist")
@@ -1009,6 +1136,7 @@ struct ContentView: View {
 
     private var pillGoalsButton: some View {
         Button {
+            UISelectionFeedbackGenerator().selectionChanged()
             withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab = true }
         } label: {
             ZStack(alignment: .topTrailing) {
@@ -1157,6 +1285,7 @@ struct ContentView: View {
             (name: name, tasks: todayTasks.filter { $0.assignedTo == name }.sorted { $0.targetDate < $1.targetDate })
         }
         let totalCount = todayTasks.count
+        let todayEvents = calendarManager.listEventsForDate(Date())
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -1167,7 +1296,7 @@ struct ContentView: View {
                     .font(.headline.weight(.bold))
                     .foregroundStyle(parentTheme.textColor)
                 Spacer()
-                Text("\(totalCount) task\(totalCount == 1 ? "" : "s")")
+                Text("\(totalCount) task\(totalCount == 1 ? "" : "s")\(todayEvents.isEmpty ? "" : " · \(todayEvents.count) event\(todayEvents.count == 1 ? "" : "s")")")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(parentTheme.secondaryTextColor)
                 Button {
@@ -1189,11 +1318,16 @@ struct ContentView: View {
                     ForEach(grouped, id: \.name) { group in
                         dayPreviewMemberSection(name: group.name, tasks: group.tasks)
                     }
+
+                    if !todayEvents.isEmpty {
+                        dayPreviewEventsSection(events: todayEvents)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
             }
         }
+        .onAppear { calendarManager.fetchListEvents() }
         .alert("Share to Family Chat", isPresented: $showSharePreviewConfirm) {
             Button("Share") {
                 shareDayPreviewToChat(grouped: grouped, totalCount: totalCount)
@@ -1218,6 +1352,7 @@ struct ContentView: View {
             (name: name, tasks: todayTasks.filter { $0.assignedTo == name }.sorted { $0.targetDate < $1.targetDate })
         }
         let totalCount = todayTasks.count
+        let todayEvents = calendarManager.listEventsForDate(Date())
 
         return ZStack {
             Color.black.opacity(0.4)
@@ -1235,7 +1370,7 @@ struct ContentView: View {
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.white)
                     Spacer()
-                    Text("\(totalCount) task\(totalCount == 1 ? "" : "s")")
+                    Text("\(totalCount) task\(totalCount == 1 ? "" : "s")\(todayEvents.isEmpty ? "" : " · \(todayEvents.count) event\(todayEvents.count == 1 ? "" : "s")")")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.5))
                     Button {
@@ -1263,6 +1398,10 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         ForEach(grouped, id: \.name) { group in
                             dayPreviewMemberSection(name: group.name, tasks: group.tasks)
+                        }
+
+                        if !todayEvents.isEmpty {
+                            dayPreviewEventsSection(events: todayEvents)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -1347,6 +1486,45 @@ struct ContentView: View {
                     }
                     .padding(.leading, 4)
                 }
+            }
+        }
+    }
+
+    private func dayPreviewEventsSection(events: [EKEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(parentTheme.accentColor)
+                Text("My Calendars")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+
+            ForEach(events, id: \.eventIdentifier) { event in
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color(cgColor: event.calendar.cgColor))
+                        .frame(width: 6, height: 6)
+
+                    Text(event.title ?? "Untitled")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if event.isAllDay {
+                        Text("All Day")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                    } else {
+                        Text(event.startDate, format: .dateTime.hour().minute())
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
+                .padding(.leading, 4)
             }
         }
     }
@@ -1789,13 +1967,23 @@ struct ContentView: View {
                         WeekCalendarStrip(
                             selectedDate: $selectedCalendarDate,
                             tasks: filteredTasks,
+                            calendarManager: calendarManager,
                             theme: parentTheme
                         )
-                        if calendarDayTasks.isEmpty {
+                        if calendarDayTimeline.isEmpty {
                             calendarEmptyState
                         } else {
                             calendarTaskList
                         }
+                    }
+                    .onAppear {
+                        calendarManager.fetchEvents(for: selectedCalendarDate)
+                    }
+                    .onChange(of: selectedCalendarDate) { _, newDate in
+                        calendarManager.fetchEvents(for: newDate)
+                    }
+                    .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+                        if isEnabled { calendarManager.fetchEvents(for: selectedCalendarDate) }
                     }
                 } else if filteredTasks.isEmpty {
                     emptyState
@@ -1806,6 +1994,12 @@ struct ContentView: View {
                         } else {
                             groupListContent
                         }
+                    }
+                    .onAppear {
+                        calendarManager.fetchListEvents()
+                    }
+                    .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+                        if isEnabled { calendarManager.fetchListEvents() }
                     }
                 }
             }
@@ -1938,7 +2132,7 @@ struct ContentView: View {
             Image(systemName: "calendar.badge.checkmark")
                 .font(.system(size: 40))
                 .foregroundStyle(.primary.opacity(0.3))
-            Text("No tasks on this day")
+            Text("No tasks or events on this day")
                 .font(.headline)
                 .foregroundStyle(.primary.opacity(0.5))
         }
@@ -1948,53 +2142,58 @@ struct ContentView: View {
 
     private var calendarTaskList: some View {
         LazyVStack(spacing: 10) {
-            ForEach(calendarDayTasks) { task in
-                HStack(spacing: 0) {
-                    TaskRow(
-                        task: task,
-                        showAssignee: false,
-                        currentUserName: authManager.userName,
-                        theme: parentTheme,
-                        onApprove: {
-                            if !task.canComplete {
-                                tooEarlyTask = task
-                                showTooEarlyAlert = true
-                            } else {
-                                taskToApprove = task
+            ForEach(calendarDayTimeline) { item in
+                switch item {
+                case .task(let task):
+                    HStack(spacing: 0) {
+                        TaskRow(
+                            task: task,
+                            showAssignee: false,
+                            currentUserName: authManager.userName,
+                            theme: parentTheme,
+                            onApprove: {
+                                if !task.canComplete {
+                                    tooEarlyTask = task
+                                    showTooEarlyAlert = true
+                                } else {
+                                    taskToApprove = task
+                                }
+                            },
+                            onEdit: {
+                                if task.isRecurring {
+                                    pendingEditTask = task
+                                    showEditChoice = true
+                                } else {
+                                    editRequest = TaskEditRequest(task: task, editAll: false)
+                                }
+                            },
+                            onDelete: { taskToDelete = task },
+                            onMarkMissed: {
+                                task.status = "missed"
+                                let familyCode = authManager.familyCode
+                                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
+                            },
+                            onCancel: {
+                                task.status = "cancelled"
+                                let familyCode = authManager.familyCode
+                                Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
                             }
-                        },
-                        onEdit: {
-                            if task.isRecurring {
-                                pendingEditTask = task
-                                showEditChoice = true
-                            } else {
-                                editRequest = TaskEditRequest(task: task, editAll: false)
-                            }
-                        },
-                        onDelete: { taskToDelete = task },
-                        onMarkMissed: {
-                            task.status = "missed"
-                            let familyCode = authManager.familyCode
-                            Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                        },
-                        onCancel: {
-                            task.status = "cancelled"
-                            let familyCode = authManager.familyCode
-                            Task { await cloudKitManager.pushTask(task, familyCode: familyCode) }
-                        }
-                    )
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 2)
-                .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(
-                            task.isMissed ? Color.red.opacity(0.3) : task.isCancelled ? Color.gray.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
-                            lineWidth: 1
                         )
-                )
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                    .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(
+                                task.isMissed ? Color.red.opacity(0.3) : task.isCancelled ? Color.gray.opacity(0.3) : task.isInReview ? Color.orange.opacity(0.3) : Color.primary.opacity(0.25),
+                                lineWidth: 1
+                            )
+                    )
+                case .event(let event):
+                    CalendarEventRow(event: event, theme: parentTheme)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -2086,6 +2285,12 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                     }
+
+                    if let refDate = group.tasks.first?.targetDate {
+                        ForEach(calendarManager.listEventsForDate(refDate), id: \.eventIdentifier) { event in
+                            CalendarEventRow(event: event, theme: parentTheme)
+                        }
+                    }
                 }
                 .id(index == todayGroupIndex ? "Today" : group.key)
                 .dropDestination(for: TaskTransfer.self) { items, _ in
@@ -2094,6 +2299,19 @@ struct ContentView: View {
                     return handleTaskDrop(taskId: transfer.id, toDate: refDate)
                 } isTargeted: { isTargeted in
                     // visual feedback handled by system
+                }
+            }
+
+            ForEach(eventOnlyDateGroups, id: \.key) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.key)
+                        .font(parentTheme.font(.subheadline.weight(.bold)).weight(.semibold))
+                        .foregroundStyle(.primary.opacity(0.6))
+                        .padding(.leading, 4)
+
+                    ForEach(group.events, id: \.eventIdentifier) { event in
+                        CalendarEventRow(event: event, theme: parentTheme)
+                    }
                 }
             }
         }
@@ -2108,6 +2326,7 @@ struct ContentView: View {
                     PastTasksDivider(count: pastTaskCount)
                 }
 
+                let evtCount = group.tasks.first.map { calendarManager.listEventsForDate($0.targetDate).count } ?? 0
                 NavigationLink(destination: DateTasksView(
                     dateLabel: group.key,
                     tasks: group.tasks,
@@ -2115,10 +2334,14 @@ struct ContentView: View {
                     otherParent: otherParent,
                     theme: parentTheme
                 )) {
-                    GroupCard(dateLabel: group.key, count: group.tasks.count, theme: parentTheme)
+                    GroupCard(dateLabel: group.key, count: group.tasks.count, eventCount: evtCount, theme: parentTheme)
                 }
                 .buttonStyle(.plain)
                 .id(index == todayGroupIndex ? "Today" : group.key)
+            }
+
+            ForEach(eventOnlyDateGroups, id: \.key) { group in
+                GroupCard(dateLabel: group.key, count: 0, eventCount: group.events.count, theme: parentTheme)
             }
         }
         .padding(.horizontal, 16)
@@ -2509,7 +2732,16 @@ struct ContentView: View {
 struct GroupCard: View {
     let dateLabel: String
     let count: Int
+    var eventCount: Int = 0
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if count > 0 { parts.append("\(count) task\(count == 1 ? "" : "s")") }
+        if eventCount > 0 { parts.append("\(eventCount) event\(eventCount == 1 ? "" : "s")") }
+        if parts.isEmpty { return "No items" }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         HStack {
@@ -2519,7 +2751,7 @@ struct GroupCard: View {
                     .foregroundStyle(theme.textColor)
                     .lineLimit(1)
 
-                Text("\(count) task\(count == 1 ? "" : "s")")
+                Text(subtitle)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
             }
@@ -2572,6 +2804,7 @@ struct DateTasksView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(CalendarManager.self) private var calendarManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allRedemptions: [RewardRedemption]
     @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
@@ -2663,6 +2896,14 @@ struct DateTasksView: View {
         return filteredTasks
             .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
             .sorted { $0.targetDate < $1.targetDate }
+    }
+
+    private var dateCalendarDayTimeline: [CalendarTimelineItem] {
+        let taskItems: [CalendarTimelineItem] = dateCalendarDayTasks.map { .task($0) }
+        let eventItems: [CalendarTimelineItem] = calendarManager.events.map { .event($0) }
+        let allDay = (taskItems + eventItems).filter { $0.isAllDay }
+        let timed = (taskItems + eventItems).filter { !$0.isAllDay }.sorted { $0.sortDate < $1.sortDate }
+        return timed + allDay
     }
 
     private func dateTaskRowView(_ task: Item) -> some View {
@@ -2914,15 +3155,16 @@ struct DateTasksView: View {
                     WeekCalendarStrip(
                         selectedDate: $selectedCalendarDate,
                         tasks: filteredTasks,
+                        calendarManager: calendarManager,
                         theme: theme
                     )
-                    if dateCalendarDayTasks.isEmpty {
+                    if dateCalendarDayTimeline.isEmpty {
                         Spacer()
                         VStack(spacing: 10) {
                             Image(systemName: "calendar.badge.checkmark")
                                 .font(.system(size: 40))
                                 .foregroundStyle(.primary.opacity(0.3))
-                            Text("No tasks on this day")
+                            Text("No tasks or events on this day")
                                 .font(.headline)
                                 .foregroundStyle(.primary.opacity(0.5))
                         }
@@ -2930,8 +3172,13 @@ struct DateTasksView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 12) {
-                                ForEach(dateCalendarDayTasks) { task in
-                                    dateTaskRowView(task)
+                                ForEach(dateCalendarDayTimeline) { item in
+                                    switch item {
+                                    case .task(let task):
+                                        dateTaskRowView(task)
+                                    case .event(let event):
+                                        CalendarEventRow(event: event, theme: theme)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -2955,6 +3202,15 @@ struct DateTasksView: View {
 
                 Color.clear.frame(height: 70)
             }
+        }
+        .onChange(of: selectedCalendarDate) { _, newDate in
+            calendarManager.fetchEvents(for: newDate)
+        }
+        .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+            if isEnabled { calendarManager.fetchEvents(for: selectedCalendarDate) }
+        }
+        .onAppear {
+            calendarManager.fetchEvents(for: selectedCalendarDate)
         }
         .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, theme.colorScheme)
@@ -3161,6 +3417,7 @@ struct DateTasksView: View {
 
     private func deleteSingleTask(_ task: Item) {
         guard !task.isApproved && !task.isInReview else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
         notificationManager.cancelTaskReminder(taskId: task.id)
         let taskID = task.id
         withAnimation { modelContext.delete(task) }
@@ -3215,6 +3472,7 @@ struct DateTasksView: View {
             await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode)
         }
         SoundManager.shared.playApplause()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         celebrationReward = task.reward
         showCelebration = true
 
@@ -3256,6 +3514,7 @@ struct ChildTasksView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Environment(AuthManager.self) private var authManager
+    @Environment(CalendarManager.self) private var calendarManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allRedemptions: [RewardRedemption]
     @Query(sort: \Goal.createdAt) private var allGoals: [Goal]
@@ -3287,6 +3546,14 @@ struct ChildTasksView: View {
         return filteredTasks
             .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
             .sorted { $0.targetDate < $1.targetDate }
+    }
+
+    private var childCalendarDayTimeline: [CalendarTimelineItem] {
+        let taskItems: [CalendarTimelineItem] = childCalendarDayTasks.map { .task($0) }
+        let eventItems: [CalendarTimelineItem] = calendarManager.events.map { .event($0) }
+        let allDay = (taskItems + eventItems).filter { $0.isAllDay }
+        let timed = (taskItems + eventItems).filter { !$0.isAllDay }.sorted { $0.sortDate < $1.sortDate }
+        return timed + allDay
     }
 
     private var childTotalEarned: Int {
@@ -3504,14 +3771,15 @@ struct ChildTasksView: View {
                     WeekCalendarStrip(
                         selectedDate: $selectedCalendarDate,
                         tasks: filteredTasks,
+                        calendarManager: calendarManager,
                         theme: theme
                     )
-                    if childCalendarDayTasks.isEmpty {
+                    if childCalendarDayTimeline.isEmpty {
                         VStack(spacing: 10) {
                             Image(systemName: "calendar.badge.checkmark")
                                 .font(.system(size: 40))
                                 .foregroundStyle(.primary.opacity(0.3))
-                            Text("No tasks on this day")
+                            Text("No tasks or events on this day")
                                 .font(.headline)
                                 .foregroundStyle(.primary.opacity(0.5))
                         }
@@ -3519,8 +3787,13 @@ struct ChildTasksView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 10) {
-                                ForEach(childCalendarDayTasks) { task in
-                                    childTaskRowView(task)
+                                ForEach(childCalendarDayTimeline) { item in
+                                    switch item {
+                                    case .task(let task):
+                                        childTaskRowView(task)
+                                    case .event(let event):
+                                        CalendarEventRow(event: event, theme: theme)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -3544,6 +3817,15 @@ struct ChildTasksView: View {
                 Color.clear.frame(height: 70)
             }
 
+        }
+        .onChange(of: selectedCalendarDate) { _, newDate in
+            calendarManager.fetchEvents(for: newDate)
+        }
+        .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+            if isEnabled { calendarManager.fetchEvents(for: selectedCalendarDate) }
+        }
+        .onAppear {
+            calendarManager.fetchEvents(for: selectedCalendarDate)
         }
         .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, theme.colorScheme)
@@ -7108,6 +7390,7 @@ struct ParentOnboardingView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(CalendarManager.self) private var calendarManager
     @Query private var allMembers: [FamilyMember]
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
     var onComplete: () -> Void
@@ -7219,6 +7502,50 @@ struct ParentOnboardingView: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .strokeBorder(.orange.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+
+                        // Connect My Calendars
+                        if !calendarManager.hasSeenPrompt {
+                            VStack(spacing: 12) {
+                                Image(systemName: "calendar.badge.plus")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(theme.accentColor)
+
+                                Text("Connect My Calendars")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+
+                                Text("See your Google, iCloud, Outlook, and school calendars right alongside your tasks.")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.primary.opacity(0.5))
+                                    .multilineTextAlignment(.center)
+
+                                Button {
+                                    calendarManager.hasSeenPrompt = true
+                                    Task { await calendarManager.requestAccess() }
+                                } label: {
+                                    Text("Connect Now")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 14)
+                                        .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 14))
+                                }
+
+                                Button {
+                                    calendarManager.hasSeenPrompt = true
+                                } label: {
+                                    Text("Maybe Later")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.primary.opacity(0.5))
+                                }
+                            }
+                            .padding(20)
+                            .background(.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
                             )
                         }
 
@@ -7916,6 +8243,7 @@ struct FamilySetupSheet: View {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CalendarManager.self) private var calendarManager
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
     var body: some View {
@@ -8075,6 +8403,101 @@ struct SettingsView: View {
                             )
                         }
 
+                        // MARK: - My Calendars
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("My Calendars")
+                                .font(.caption)
+                                .foregroundStyle(.primary.opacity(0.7))
+
+                            HStack {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.primary.opacity(0.6))
+                                    .frame(width: 24)
+                                Text("Calendar Sync")
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { calendarManager.isEnabled },
+                                    set: { newValue in
+                                        if newValue && calendarManager.authorizationStatus != .fullAccess {
+                                            Task {
+                                                let granted = await calendarManager.requestAccess()
+                                                if !granted {
+                                                    calendarManager.isEnabled = false
+                                                }
+                                            }
+                                        } else {
+                                            calendarManager.isEnabled = newValue
+                                            if newValue { calendarManager.loadCalendars() }
+                                        }
+                                    }
+                                ))
+                                .labelsHidden()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                            )
+
+                            if calendarManager.isEnabled && calendarManager.authorizationStatus == .fullAccess {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(calendarManager.availableCalendars.enumerated()), id: \.element.calendarIdentifier) { index, cal in
+                                        HStack(spacing: 10) {
+                                            Circle()
+                                                .fill(CalendarManager.color(for: cal))
+                                                .frame(width: 10, height: 10)
+
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(cal.title)
+                                                    .font(.body)
+                                                    .foregroundStyle(.primary)
+                                                Text(cal.source.title)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.primary.opacity(0.5))
+                                            }
+
+                                            Spacer()
+
+                                            Toggle("", isOn: Binding(
+                                                get: { calendarManager.isCalendarEnabled(cal) },
+                                                set: { _ in calendarManager.toggleCalendar(cal) }
+                                            ))
+                                            .labelsHidden()
+                                        }
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+
+                                        if index < calendarManager.availableCalendars.count - 1 {
+                                            Divider()
+                                                .padding(.leading, 38)
+                                        }
+                                    }
+                                }
+                                .background(.primary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+
+                            if calendarManager.isEnabled && calendarManager.authorizationStatus == .denied {
+                                Text("Calendar access was denied. Go to Settings > Taskoot > Calendars to enable.")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange.opacity(0.8))
+                            }
+
+                            if !calendarManager.isEnabled {
+                                Text("Show device calendar events alongside your tasks in calendar view.")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary.opacity(0.5))
+                            }
+                        }
+
                         Spacer()
                     }
                     .padding(.horizontal, 24)
@@ -8093,6 +8516,80 @@ struct SettingsView: View {
         .presentationDetents([.large])
     }
 
+}
+
+// MARK: - Calendar Prompt Sheet
+
+struct CalendarPromptSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CalendarManager.self) private var calendarManager
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 24) {
+                    Spacer()
+
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 56))
+                        .foregroundStyle(theme.accentColor)
+
+                    Text("Connect My Calendars")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.primary)
+
+                    Text("See your Google, iCloud, Outlook, and school calendars right alongside your tasks.")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+
+                    Button {
+                        calendarManager.hasSeenPrompt = true
+                        Task {
+                            _ = await calendarManager.requestAccess()
+                            dismiss()
+                        }
+                    } label: {
+                        Text("Connect Now")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .padding(.horizontal, 40)
+
+                    Button {
+                        calendarManager.hasSeenPrompt = true
+                        dismiss()
+                    } label: {
+                        Text("Maybe Later")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary.opacity(0.5))
+                    }
+
+                    Spacer()
+                }
+            }
+            .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+            .environment(\.colorScheme, theme.colorScheme)
+            .navigationTitle("Calendars")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Skip") {
+                        calendarManager.hasSeenPrompt = true
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Edit Profile View
@@ -8457,6 +8954,7 @@ struct RedemptionApprovalsView: View {
     }
 
     private func approveRedemption(_ r: RewardRedemption) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         r.status = "approved"
         r.resolvedAt = Date()
         let familyCode = authManager.familyCode

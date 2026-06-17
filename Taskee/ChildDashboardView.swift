@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EventKit
 
 struct ChildDashboardView: View {
     @Environment(\.modelContext) private var modelContext
@@ -14,6 +15,7 @@ struct ChildDashboardView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(CloudKitManager.self) private var cloudKitManager
+    @Environment(CalendarManager.self) private var calendarManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
     @Query private var allMembers: [FamilyMember]
     @State private var showAll = false
@@ -38,6 +40,7 @@ struct ChildDashboardView: View {
     @State private var showMyGifts = false
     @State private var showEditProfile = false
     @State private var showSettings = false
+    @State private var showCalendarPrompt = false
     @State private var showShareSheet = false
     @State private var showPrivacyPolicy = false
     @State private var showThemePicker = false
@@ -158,11 +161,41 @@ struct ChildDashboardView: View {
         return groupedTasks.firstIndex { ($0.tasks.first?.targetDate ?? .distantPast) >= startOfToday } ?? groupedTasks.count
     }
 
+    private static func dateLabelForDate(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
+        return date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    private var eventOnlyDateGroups: [(key: String, events: [EKEvent], date: Date)] {
+        let cal = Calendar.current
+        let taskDates = Set(groupedTasks.compactMap { $0.tasks.first.map { cal.startOfDay(for: $0.targetDate) } })
+        var seen = Set<Date>()
+        var groups: [(key: String, events: [EKEvent], date: Date)] = []
+        for event in calendarManager.listEvents {
+            let dayStart = cal.startOfDay(for: event.startDate)
+            guard !taskDates.contains(dayStart), !seen.contains(dayStart) else { continue }
+            seen.insert(dayStart)
+            let label = Self.dateLabelForDate(event.startDate)
+            groups.append((key: label, events: calendarManager.listEventsForDate(event.startDate), date: dayStart))
+        }
+        return groups.sorted { $0.date < $1.date }
+    }
+
     private var childCalendarDayTasks: [Item] {
         let calendar = Calendar.current
         return myTasks
             .filter { calendar.isDate($0.targetDate, inSameDayAs: selectedCalendarDate) }
             .sorted { $0.targetDate < $1.targetDate }
+    }
+
+    private var childCalendarDayTimeline: [CalendarTimelineItem] {
+        let taskItems: [CalendarTimelineItem] = childCalendarDayTasks.map { .task($0) }
+        let eventItems: [CalendarTimelineItem] = calendarManager.events.map { .event($0) }
+        let allDay = (taskItems + eventItems).filter { $0.isAllDay }
+        let timed = (taskItems + eventItems).filter { !$0.isAllDay }.sorted { $0.sortDate < $1.sortDate }
+        return timed + allDay
     }
 
     var body: some View {
@@ -246,6 +279,15 @@ struct ChildDashboardView: View {
                     }
 
                 }
+                .onChange(of: selectedCalendarDate) { _, newDate in
+                    calendarManager.fetchEvents(for: newDate)
+                }
+                .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+                    if isEnabled { calendarManager.fetchEvents(for: selectedCalendarDate) }
+                }
+                .onAppear {
+                    calendarManager.fetchEvents(for: selectedCalendarDate)
+                }
                 .safeAreaInset(edge: .bottom) {
                     Color.clear.frame(height: 60)
                 }
@@ -301,6 +343,7 @@ struct ChildDashboardView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     withAnimation { isAIMode = true }
                 } label: {
                     Image(systemName: "sparkles")
@@ -381,6 +424,15 @@ struct ChildDashboardView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(theme: childTheme)
+            }
+            .sheet(isPresented: $showCalendarPrompt) {
+                CalendarPromptSheet(theme: childTheme)
+                    .presentationDetents([.medium])
+            }
+            .onAppear {
+                if !calendarManager.hasSeenPrompt {
+                    showCalendarPrompt = true
+                }
             }
             .sheet(isPresented: $showThemePicker) {
                 ChildThemePickerView(theme: $childTheme)
@@ -778,6 +830,7 @@ struct ChildDashboardView: View {
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
         SoundManager.shared.playApplause()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         celebrationReward = task.reward
         showCelebration = true
         launchFlyingCoins(count: Int(task.reward))
@@ -1214,14 +1267,15 @@ struct ChildDashboardView: View {
             WeekCalendarStrip(
                 selectedDate: $selectedCalendarDate,
                 tasks: myTasks,
+                calendarManager: calendarManager,
                 theme: childTheme
             )
-            if childCalendarDayTasks.isEmpty {
+            if childCalendarDayTimeline.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "calendar.badge.checkmark")
                         .font(.system(size: 40))
                         .foregroundStyle(.primary.opacity(0.3))
-                    Text("No tasks on this day")
+                    Text("No tasks or events on this day")
                         .font(.headline)
                         .foregroundStyle(.primary.opacity(0.5))
                 }
@@ -1229,8 +1283,13 @@ struct ChildDashboardView: View {
                 .padding(.top, 40)
             } else {
                 LazyVStack(spacing: 10) {
-                    ForEach(childCalendarDayTasks) { task in
-                        childTaskRow(task: task)
+                    ForEach(childCalendarDayTimeline) { item in
+                        switch item {
+                        case .task(let task):
+                            childTaskRow(task: task)
+                        case .event(let event):
+                            CalendarEventRow(event: event, theme: childTheme)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1307,8 +1366,15 @@ struct ChildDashboardView: View {
                                         childTaskRow(task: task)
                                             .draggable(TaskTransfer(id: task.id))
                                     }
+
+                                    if let refDate = group.tasks.first?.targetDate {
+                                        ForEach(calendarManager.listEventsForDate(refDate), id: \.eventIdentifier) { event in
+                                            CalendarEventRow(event: event, theme: childTheme)
+                                        }
+                                    }
                                 } else {
-                                    GroupCard(dateLabel: group.key, count: group.tasks.count, theme: childTheme)
+                                    let evtCount = group.tasks.first.map { calendarManager.listEventsForDate($0.targetDate).count } ?? 0
+                                    GroupCard(dateLabel: group.key, count: group.tasks.count, eventCount: evtCount, theme: childTheme)
                                 }
                             }
                             .id(group.key)
@@ -1318,12 +1384,32 @@ struct ChildDashboardView: View {
                                 return dashboardHandleTaskDrop(taskId: transfer.id, toDate: refDate)
                             } isTargeted: { _ in }
                         }
+
+                        if isExpanded {
+                            ForEach(eventOnlyDateGroups, id: \.key) { group in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(group.key)
+                                        .font(childTheme.font(.subheadline.weight(.bold)).weight(.semibold))
+                                        .foregroundStyle(.primary.opacity(0.6))
+                                        .padding(.leading, 4)
+
+                                    ForEach(group.events, id: \.eventIdentifier) { event in
+                                        CalendarEventRow(event: event, theme: childTheme)
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(eventOnlyDateGroups, id: \.key) { group in
+                                GroupCard(dateLabel: group.key, count: 0, eventCount: group.events.count, theme: childTheme)
+                            }
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
                 }
             }
             .onAppear {
+                calendarManager.fetchListEvents()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     withAnimation { proxy.scrollTo("Today", anchor: .top) }
                 }
@@ -1332,6 +1418,9 @@ struct ChildDashboardView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     withAnimation { proxy.scrollTo("Today", anchor: .top) }
                 }
+            }
+            .onChange(of: calendarManager.isEnabled) { _, isEnabled in
+                if isEnabled { calendarManager.fetchListEvents() }
             }
         }
         .refreshable {

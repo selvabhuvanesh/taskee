@@ -1521,6 +1521,7 @@ struct GoalDetailView: View {
                                     try? modelContext.save()
                                     notificationManager.sendGoalApprovedNotification(goalName: goal.name)
                                     SoundManager.shared.playApplause()
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                                 } label: {
                                     Label("Approve Plan", systemImage: "checkmark.seal.fill")
                                         .font(.subheadline.weight(.bold))
@@ -1813,7 +1814,7 @@ struct GoalDetailView: View {
                 Button { goal.status = "paused"; try? modelContext.save() } label: {
                     Label("Pause", systemImage: "pause.circle")
                 }
-                Button { goal.status = "completed"; try? modelContext.save() } label: {
+                Button { goal.status = "completed"; try? modelContext.save(); UINotificationFeedbackGenerator().notificationOccurred(.success) } label: {
                     Label("Mark Complete", systemImage: "checkmark.circle")
                 }
             } else if goal.isPaused && !isChildLocked {

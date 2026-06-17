@@ -95,6 +95,8 @@ struct CelebrationOverlay: View {
             )
         }
 
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+
         withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
             showBanner = true
         }

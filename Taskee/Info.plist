@@ -12,6 +12,8 @@
 	<string>Taskoot uses speech recognition to let you speak to the AI assistant instead of typing.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Taskoot needs microphone access for voice input to the AI assistant.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Taskoot shows your device calendars alongside your tasks so you can see everything in one place.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

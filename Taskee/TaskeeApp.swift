@@ -29,6 +29,7 @@ struct TaskeeApp: App {
     @State private var notificationManager = NotificationManager()
     @State private var subscriptionManager = SubscriptionManager()
     @State private var cloudKitManager = CloudKitManager()
+    @State private var calendarManager = CalendarManager()
     @State private var showOnboarding = false
     @State private var isCheckingExistingUser = false
     @State private var hasStartedRestore = false
@@ -133,6 +134,7 @@ struct TaskeeApp: App {
             .environment(notificationManager)
             .environment(subscriptionManager)
             .environment(cloudKitManager)
+            .environment(calendarManager)
             .onAppear {
                 if ScreenshotHelper.isScreenshotMode {
                     ScreenshotHelper.populateMockData(context: sharedModelContainer.mainContext)
@@ -208,6 +210,7 @@ struct TaskeeApp: App {
                 .environment(notificationManager)
                 .environment(subscriptionManager)
                 .environment(cloudKitManager)
+                .environment(calendarManager)
             }
             .onChange(of: authManager.isLoggedIn) { old, loggedIn in
                 guard old != loggedIn, loggedIn, !ScreenshotHelper.isScreenshotMode else { return }
