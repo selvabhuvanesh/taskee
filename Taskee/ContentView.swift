@@ -629,24 +629,6 @@ struct ContentView: View {
                             }
                         }
 
-                        Button {
-                            showNotificationCenter = true
-                        } label: {
-                            Image(systemName: "bell.fill")
-                                .font(.subheadline.weight(.bold))
-                                .overlay(alignment: .topTrailing) {
-                                    let badgeCount = unreadNotifCount + pendingActionCount
-                                    if badgeCount > 0 {
-                                        Text("\(badgeCount)")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(.primary)
-                                            .frame(minWidth: 14, minHeight: 14)
-                                            .background(.red, in: Circle())
-                                            .offset(x: 6, y: -6)
-                                    }
-                                }
-                        }
-
                         if !isIndividual {
                             Button {
                                 showingChildren = true
@@ -957,9 +939,9 @@ struct ContentView: View {
                 withAnimation { isAIMode = true }
             } label: {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
+                    .frame(width: 64, height: 64)
                     .background(
                         LinearGradient(
                             colors: [.purple, .blue],
@@ -968,7 +950,8 @@ struct ContentView: View {
                         ),
                         in: Circle()
                     )
-                    .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
+                    .shadow(color: .purple.opacity(0.7), radius: 18, y: 2)
+                    .shadow(color: .blue.opacity(0.5), radius: 30, y: 4)
             }
             .padding(.trailing, 20)
             .padding(.bottom, 80)
@@ -1019,7 +1002,8 @@ struct ContentView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(showGoalsTab ? .white.opacity(0.15) : .green.opacity(0.5), in: Circle())
+                .background(showGoalsTab ? .white.opacity(0.15) : parentTheme.accentColor, in: Circle())
+                .shadow(color: showGoalsTab ? .clear : parentTheme.accentColor.opacity(0.5), radius: 6)
         }
     }
 
@@ -1032,7 +1016,8 @@ struct ContentView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(!showGoalsTab ? .white.opacity(0.15) : .green.opacity(0.5), in: Circle())
+                    .background(!showGoalsTab ? .white.opacity(0.15) : parentTheme.accentColor, in: Circle())
+                    .shadow(color: !showGoalsTab ? .clear : parentTheme.accentColor.opacity(0.5), radius: 6)
 
                 let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
                 if activeCount > 0 {
@@ -1525,21 +1510,6 @@ struct ContentView: View {
                             }
                         }
 
-                        let pEarned = tasks
-                            .filter { $0.assignedTo == parent.name && $0.isApproved && $0.reward > 0 }
-                            .reduce(0) { $0 + Int($1.reward) }
-                        let pRedeemed = deduplicatedRedeemed(for: parent.name)
-                        let pAvail = max(0, pEarned - pRedeemed)
-
-                        HStack(spacing: 2) {
-                            Image(systemName: "star.circle.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.yellow)
-                            Text("\(pAvail)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.yellow.opacity(0.85))
-                        }
-
                         let parentTodayCount = activeTasks.filter {
                             $0.assignedTo == parent.name && $0.isOpen
                             && Calendar.current.isDateInToday($0.targetDate)
@@ -1592,21 +1562,6 @@ struct ContentView: View {
                                     .foregroundStyle(parentTheme.secondaryTextColor)
                                     .lineLimit(1)
                             }
-                        }
-
-                        let childEarned = tasks
-                            .filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }
-                            .reduce(0) { $0 + Int($1.reward) }
-                        let childRedeemed = deduplicatedRedeemed(for: child.name)
-                        let childAvail = max(0, childEarned - childRedeemed)
-
-                        HStack(spacing: 2) {
-                            Image(systemName: "star.circle.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.yellow)
-                            Text("\(childAvail)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.yellow.opacity(0.85))
                         }
 
                         let todayTaskCount = activeTasks.filter {
@@ -4199,9 +4154,11 @@ struct TaskRow: View {
                                 .foregroundStyle(.primary)
                         }
                     }
-                    Text(statusLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.primary)
+                    if statusLabel != "To Do" {
+                        Text(statusLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -6551,11 +6508,7 @@ struct ChildrenManagementView: View {
                             pendingRequestsSection
                         }
 
-                        if !parents.isEmpty {
-                            memberSection(title: "Parents (\(parents.count)/2)", members: parents, canRemove: false)
-                        }
-
-                        memberSection(title: "Children (\(children.count)/\(subscriptionManager.maxMembers))", members: children, canRemove: true)
+                        familyTreeSection
 
                         if !subscriptionManager.canAddMember(currentCount: allMembers.count) {
                             memberLimitUpgrade
@@ -6592,6 +6545,153 @@ struct ChildrenManagementView: View {
                     Text("Remove \(member.name) from your family?")
                 }
             }
+        }
+    }
+
+    private var familyTreeSection: some View {
+        VStack(spacing: 0) {
+            // MARK: Parents row
+            if parents.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.primary.opacity(0.25))
+                    Text("No parents yet")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary.opacity(0.35))
+                }
+                .padding(.vertical, 16)
+            } else {
+                HStack(spacing: 12) {
+                    if parents.count == 2 {
+                        treeParentNode(parent: parents[0])
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.pink)
+                        treeParentNode(parent: parents[1])
+                    } else {
+                        treeParentNode(parent: parents[0])
+                    }
+                }
+            }
+
+            // MARK: Trunk + branch + children
+            if !parents.isEmpty && !children.isEmpty {
+                // Vertical trunk from parents down
+                Rectangle()
+                    .fill(.primary.opacity(0.2))
+                    .frame(width: 2, height: 28)
+
+                // Children with branch lines
+                childrenBranchView
+            } else if children.isEmpty {
+                VStack(spacing: 8) {
+                    if !parents.isEmpty {
+                        Rectangle()
+                            .fill(.primary.opacity(0.2))
+                            .frame(width: 2, height: 20)
+                    }
+                    Image(systemName: "person.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.primary.opacity(0.25))
+                    Text("No children yet")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary.opacity(0.35))
+                }
+                .padding(.top, parents.isEmpty ? 0 : 0)
+                .padding(.bottom, 16)
+            } else {
+                // Children exist but no parents
+                childrenBranchView
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    private func treeParentNode(parent: FamilyMember) -> some View {
+        VStack(spacing: 4) {
+            AvatarView(avatarId: parent.avatar, size: 48)
+            Text(parent.name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text("Parent")
+                .font(.caption)
+                .foregroundStyle(.primary.opacity(0.4))
+        }
+    }
+
+    @ViewBuilder
+    private var childrenBranchView: some View {
+        let childSpacing: CGFloat = 24
+        let avatarSize: CGFloat = 44
+
+        if children.count == 1 {
+            // Single child: just a vertical drop, no horizontal branch
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(.primary.opacity(0.2))
+                    .frame(width: 2, height: 16)
+                treeChildNode(child: children[0])
+            }
+        } else {
+            // Multiple children: horizontal branch + vertical drops
+            HStack(alignment: .top, spacing: childSpacing) {
+                ForEach(children) { child in
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.primary.opacity(0.2))
+                            .frame(width: 2, height: 16)
+                        treeChildNode(child: child)
+                    }
+                    .frame(width: avatarSize + 16)
+                }
+            }
+            .overlay(alignment: .top) {
+                // Horizontal branch line across all children
+                GeometryReader { geo in
+                    let childWidth = avatarSize + 16
+                    let totalChildren = CGFloat(children.count)
+                    let totalWidth = totalChildren * childWidth + (totalChildren - 1) * childSpacing
+                    let firstCenter = childWidth / 2
+                    let lastCenter = totalWidth - childWidth / 2
+                    let branchWidth = lastCenter - firstCenter
+
+                    Rectangle()
+                        .fill(.primary.opacity(0.2))
+                        .frame(width: branchWidth, height: 2)
+                        .offset(x: firstCenter, y: 0)
+                }
+                .frame(height: 2)
+            }
+        }
+    }
+
+    private func treeChildNode(child: FamilyMember) -> some View {
+        let earned = allTasks.filter { $0.assignedTo == child.name && $0.isApproved && $0.reward > 0 }.reduce(0) { $0 + Int($1.reward) }
+        return VStack(spacing: 4) {
+            AvatarView(avatarId: child.avatar, size: 44)
+            Text(child.name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text("Earned: \(earned)")
+                .font(.caption)
+                .foregroundStyle(.yellow.opacity(0.8))
+            Button {
+                memberToRemove = child
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.primary.opacity(0.3))
+            }
+            .padding(.top, 2)
         }
     }
 

@@ -333,24 +333,6 @@ struct ChildDashboardView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
-                        Button {
-                            showNotificationCenter = true
-                        } label: {
-                            Image(systemName: "bell.fill")
-                                .font(.subheadline.weight(.bold))
-                                .overlay(alignment: .topTrailing) {
-                                    let badgeCount = unreadNotifCount + todayOpenCount
-                                    if badgeCount > 0 {
-                                        Text("\(badgeCount)")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(.primary)
-                                            .frame(minWidth: 14, minHeight: 14)
-                                            .background(.red, in: Circle())
-                                            .offset(x: 6, y: -6)
-                                    }
-                                }
-                        }
-
                         Menu {
                             Text(authManager.userName)
                             if !authManager.email.isEmpty {
@@ -1464,9 +1446,11 @@ struct ChildDashboardView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
-                    Text(statusLabel(for: task))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.primary)
+                    if statusLabel(for: task) != "To Do" {
+                        Text(statusLabel(for: task))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
             .buttonStyle(.plain)
