@@ -106,7 +106,7 @@ struct TaskeeApp: App {
                                     .tint(.white)
                                     .scaleEffect(1.2)
                                 Text("Loading your profile...")
-                                    .font(.subheadline)
+                                    .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.white.opacity(0.6))
                             }
                         }
@@ -592,7 +592,7 @@ struct PendingApprovalView: View {
                     .foregroundStyle(.white)
 
                 Text("Your request to join the family has been sent. Ask your parent to open Taskoot and approve your request.")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -621,7 +621,7 @@ struct PendingApprovalView: View {
                     authManager.logout()
                 } label: {
                     Text("Sign Out")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white.opacity(0.4))
                 }
                 .padding(.bottom, 32)

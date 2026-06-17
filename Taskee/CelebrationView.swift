@@ -58,7 +58,7 @@ struct CelebrationOverlay: View {
 
                         if !subtitle.isEmpty {
                             Text(subtitle)
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.white.opacity(0.7))
                         }
 

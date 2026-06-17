@@ -60,7 +60,7 @@ struct LoginView: View {
                 .foregroundStyle(.white)
 
             Text("Welcome! The fun way for families to manage tasks, earn coins, and celebrate together.")
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)

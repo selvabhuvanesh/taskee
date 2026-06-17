@@ -1710,9 +1710,9 @@ struct AIAssistantView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "sparkles")
-                            .font(.caption2)
-                        Text(prompt)
                             .font(.caption)
+                        Text(prompt)
+                            .font(.subheadline.weight(.medium))
                             .multilineTextAlignment(.leading)
                     }
                     .foregroundStyle(.primary.opacity(0.85))
@@ -1774,7 +1774,7 @@ struct AIAssistantView: View {
     private var typingIndicator: some View {
         HStack(spacing: 4) {
             Text("Thinking...")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.primary.opacity(0.5))
             ProgressView()
                 .tint(.primary.opacity(0.5))
@@ -1796,7 +1796,7 @@ struct AIAssistantView: View {
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 8) {
                 Text(message.text)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(isUser ? .white : .primary)
                     .padding(12)
                     .background(
@@ -1811,7 +1811,7 @@ struct AIAssistantView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Text("Done!")
-                            .font(.caption.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.green)
                     }
                     .padding(8)
@@ -1820,7 +1820,7 @@ struct AIAssistantView: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.gray)
                         Text("Cancelled")
-                            .font(.caption.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.gray)
                     }
                     .padding(8)
@@ -1840,13 +1840,13 @@ struct AIAssistantView: View {
                 Image(systemName: iconForIntent(action.intent))
                     .foregroundStyle(colorForIntent(action.intent))
                 Text(action.summary)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.bold))
                     .foregroundStyle(.primary)
             }
 
             ForEach(action.details, id: \.self) { detail in
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.primary.opacity(0.8))
             }
 
@@ -1858,7 +1858,7 @@ struct AIAssistantView: View {
                         Image(systemName: "checkmark")
                         Text("Confirm")
                     }
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -1872,7 +1872,7 @@ struct AIAssistantView: View {
                         Image(systemName: "xmark")
                         Text("Cancel")
                     }
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary.opacity(0.7))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -1913,7 +1913,7 @@ struct AIAssistantView: View {
                                 .opacity(speechManager.isListening ? 1 : 0.3)
                                 .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: speechManager.isListening)
                             Text(inputText.isEmpty ? "Listening..." : inputText)
-                                .font(.subheadline)
+                                .font(.body)
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
                         }
@@ -1925,7 +1925,7 @@ struct AIAssistantView: View {
                             ProgressView()
                                 .scaleEffect(0.7)
                             Text("Thinking...")
-                                .font(.subheadline)
+                                .font(.body)
                                 .foregroundStyle(.primary.opacity(0.6))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1937,7 +1937,7 @@ struct AIAssistantView: View {
                                 .font(.system(size: 18))
                                 .foregroundStyle(theme.accentColor)
                             Text("Speak now...")
-                                .font(.subheadline)
+                                .font(.body)
                                 .foregroundStyle(.primary.opacity(0.6))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1948,7 +1948,7 @@ struct AIAssistantView: View {
             } else {
                 // Text mode
                 TextField("Ask me anything...", text: $inputText)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(.primary)
                     .padding(12)
                     .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 20))

@@ -99,7 +99,7 @@ struct PrivacyPolicyView: View {
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white)
             Text(body)
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.white.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -532,7 +532,7 @@ struct ContentView: View {
                         withAnimation { isAIMode = false }
                     } label: {
                         Text("Done")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
                     }
                 }
@@ -625,7 +625,7 @@ struct ContentView: View {
                                 showWishList = true
                             } label: {
                                 Image(systemName: "wand.and.stars")
-                                    .font(.subheadline)
+                                    .font(.subheadline.weight(.bold))
                             }
                         }
 
@@ -633,7 +633,7 @@ struct ContentView: View {
                             showNotificationCenter = true
                         } label: {
                             Image(systemName: "bell.fill")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .overlay(alignment: .topTrailing) {
                                     let badgeCount = unreadNotifCount + pendingActionCount
                                     if badgeCount > 0 {
@@ -652,7 +652,7 @@ struct ContentView: View {
                                 showingChildren = true
                             } label: {
                                 Image(systemName: "person.3.fill")
-                                    .font(.subheadline)
+                                    .font(.subheadline.weight(.bold))
                                     .overlay(alignment: .topTrailing) {
                                         if !pendingChildren.isEmpty {
                                             Circle()
@@ -1327,7 +1327,7 @@ struct ContentView: View {
                             .frame(width: 6, height: 6)
 
                         Text(task.name)
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white.opacity(task.isApproved ? 0.5 : 0.85))
                             .strikethrough(task.isApproved)
                             .lineLimit(1)
@@ -1412,7 +1412,7 @@ struct ContentView: View {
                                         .fill(task.isApproved ? .green : task.isInReview ? .orange : task.isMissed ? .red : task.isCancelled ? .gray : .white.opacity(0.3))
                                         .frame(width: 6, height: 6)
                                     Text(task.name)
-                                        .font(.subheadline)
+                                        .font(.subheadline.weight(.bold))
                                         .foregroundStyle(.white.opacity(task.isApproved ? 0.5 : 0.85))
                                         .strikethrough(task.isApproved)
                                         .lineLimit(1)
@@ -1797,7 +1797,7 @@ struct ContentView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                     TextField("Search tasks...", text: $searchText)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     if !searchText.isEmpty {
@@ -1819,7 +1819,7 @@ struct ContentView: View {
                         isSearching = false
                     }
                 }
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
@@ -1889,7 +1889,7 @@ struct ContentView: View {
             HStack(spacing: 5) {
                 Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 Text(showOpenOnly ? "Open Tasks" : "All Tasks")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
             }
         }
     }
@@ -1931,7 +1931,7 @@ struct ContentView: View {
                 .font(.title3)
                 .foregroundStyle(.primary.opacity(0.7))
             Text(showOpenOnly ? "No open tasks remaining." : "Tap the button below to get started.")
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary.opacity(0.4))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2055,7 +2055,7 @@ struct ContentView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(group.key)
-                        .font(parentTheme.font(.subheadline).weight(.semibold))
+                        .font(parentTheme.font(.subheadline.weight(.bold)).weight(.semibold))
                         .foregroundStyle(.primary.opacity(0.6))
                         .padding(.leading, 4)
 
@@ -2565,7 +2565,7 @@ struct GroupCard: View {
                     .lineLimit(1)
 
                 Text("\(count) task\(count == 1 ? "" : "s")")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
             }
 
@@ -2812,7 +2812,7 @@ struct DateTasksView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 if isExpanded {
                                     Text(group.key)
-                                        .font(theme.font(.subheadline).weight(.semibold))
+                                        .font(theme.font(.subheadline.weight(.bold)).weight(.semibold))
                                         .foregroundStyle(.primary.opacity(0.6))
                                         .padding(.leading, 4)
 
@@ -3489,7 +3489,7 @@ struct ChildTasksView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             if isExpanded {
                                 Text(group.key)
-                                    .font(theme.font(.subheadline).weight(.semibold))
+                                    .font(theme.font(.subheadline.weight(.bold)).weight(.semibold))
                                     .foregroundStyle(.primary.opacity(0.6))
                                     .padding(.leading, 4)
 
@@ -3672,7 +3672,7 @@ struct ChildTasksView: View {
                 HStack(spacing: 5) {
                     Image(systemName: showOpenOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     Text(showOpenOnly ? "Open Tasks" : "All Tasks")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                 }
             }
         }
@@ -4471,7 +4471,7 @@ struct TaskDetailView: View {
                                         onEdit?()
                                     } label: {
                                         Label("Edit", systemImage: "pencil")
-                                            .font(.subheadline.weight(.semibold))
+                                            .font(.subheadline.weight(.bold))
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 12)
                                             .background(calmAccent.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
@@ -4488,7 +4488,7 @@ struct TaskDetailView: View {
                                         onDelete?()
                                     } label: {
                                         Label("Delete", systemImage: "trash")
-                                            .font(.subheadline.weight(.semibold))
+                                            .font(.subheadline.weight(.bold))
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 12)
                                             .background(.red.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
@@ -4607,7 +4607,7 @@ struct WishListView: View {
                                 .font(.headline)
                                 .foregroundStyle(.primary.opacity(0.5))
                             Text("Add things you'd love to receive!")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.primary.opacity(0.3))
                         }
                         Spacer()
@@ -5265,7 +5265,7 @@ struct AddTaskView: View {
                         Text("\(occurrences) \(recurrenceUnitLabel)")
                             .foregroundStyle(.primary.opacity(0.7))
                     }
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                 }
                 .tint(.primary)
                 .padding(12)
@@ -5376,7 +5376,7 @@ struct AddTaskView: View {
                         Image(systemName: "wand.and.stars")
                         Text("Parse")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -5391,7 +5391,7 @@ struct AddTaskView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Text("Parsed Result")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary)
                         Spacer()
                     }
@@ -5422,7 +5422,7 @@ struct AddTaskView: View {
                         Image(systemName: "plus.circle.fill")
                         Text("Create Task")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -5444,7 +5444,7 @@ struct AddTaskView: View {
                 .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 70, alignment: .leading)
             Text(value)
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
             Spacer()
         }
@@ -5572,7 +5572,7 @@ struct AddTaskView: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? calmAccent : Color.primary.opacity(0.3))
                 Text(name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                 Spacer()
             }
@@ -5645,7 +5645,7 @@ struct TaskDictionaryView: View {
                                             .frame(width: 32, height: 32)
                                             .background(category.color.opacity(0.15), in: Circle())
                                         Text(category.name)
-                                            .font(.subheadline.weight(.semibold))
+                                            .font(.subheadline.weight(.bold))
                                             .foregroundStyle(.primary)
                                         Spacer()
                                         Text("\(category.tasks.count)")
@@ -6422,7 +6422,7 @@ struct EditTaskView: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? calmAccent : Color.primary.opacity(0.3))
                 Text(name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                 Spacer()
             }
@@ -6673,7 +6673,7 @@ struct ChildrenManagementView: View {
                         }
                     } label: {
                         Text("Accept")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
@@ -6704,7 +6704,7 @@ struct ChildrenManagementView: View {
                             .font(.title2)
                             .foregroundStyle(.primary.opacity(0.25))
                         Text("No members yet")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.35))
                     }
                     .padding(.vertical, 24)
@@ -6763,7 +6763,7 @@ struct ChildrenManagementView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Member limit reached")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
                     Text("Your \(subscriptionManager.tier.displayName) plan allows up to \(subscriptionManager.maxMembers) members.")
                         .font(.caption)
@@ -6780,7 +6780,7 @@ struct ChildrenManagementView: View {
                     Image(systemName: "crown.fill")
                         .font(.caption)
                     Text("Upgrade to add more members")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption2)
@@ -6830,7 +6830,7 @@ struct PendingApprovalsView: View {
                             .font(.title3)
                             .foregroundStyle(.primary.opacity(0.7))
                         Text("No tasks pending approval.")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.4))
                     }
                 } else {
@@ -7042,7 +7042,7 @@ struct ParentOnboardingView: View {
                                 .foregroundStyle(.primary)
 
                             Text("Share the invite code below with your family members so they can join. You can also add children here to get started right away!")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.primary.opacity(0.5))
                                 .multilineTextAlignment(.center)
                         }
@@ -7520,7 +7520,7 @@ struct WeeklyPulseView: View {
                         .frame(width: 24)
 
                     Text(insight.text)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white.opacity(0.85))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -7606,7 +7606,7 @@ struct FamilySetupSheet: View {
                             .foregroundStyle(.white)
 
                         Text("Start your own family using your existing code, or join another family with an invite code.")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
 
@@ -7626,7 +7626,7 @@ struct FamilySetupSheet: View {
                                     }
                                     Spacer()
                                 }
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .padding(12)
                                 .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                             }
@@ -7646,7 +7646,7 @@ struct FamilySetupSheet: View {
                                     }
                                     Spacer()
                                 }
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .padding(12)
                                 .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                             }
@@ -7941,14 +7941,14 @@ struct SettingsView: View {
 
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Let Siri read your task reminders aloud through AirPods, CarPlay, or HomePod — even when the app is closed.")
-                                    .font(.subheadline)
+                                    .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.primary.opacity(0.7))
 
                                 VStack(alignment: .leading, spacing: 6) {
                                     Label("Turn on Announce Notifications", systemImage: "1.circle.fill")
                                     Label("Select Taskoot from the app list", systemImage: "2.circle.fill")
                                 }
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.primary.opacity(0.8))
 
                                 Button {
@@ -7960,7 +7960,7 @@ struct SettingsView: View {
                                         Image(systemName: "speaker.wave.2.fill")
                                         Text("Open Notification Settings")
                                     }
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
@@ -8215,7 +8215,7 @@ struct RedemptionApprovalsView: View {
                             .font(.title3)
                             .foregroundStyle(.primary.opacity(0.85))
                         Text("All reward requests have been handled.")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.6))
                     }
                 } else {
@@ -8603,11 +8603,11 @@ struct SubscriptionView: View {
                 ForEach(plan.features, id: \.text) { feature in
                     HStack(spacing: 10) {
                         Image(systemName: feature.included ? "checkmark.circle.fill" : "xmark.circle")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(feature.included ? Color.green : Color.primary.opacity(0.25))
 
                         Text(feature.text)
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(Color.primary.opacity(feature.included ? 0.8 : 0.3))
 
                         Spacer()
@@ -8692,7 +8692,7 @@ struct SubscriptionView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "xmark.circle")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                     Text("Cancel Subscription")
                         .font(.subheadline.weight(.medium))
                 }
@@ -8723,7 +8723,7 @@ struct SubscriptionView: View {
             }
         } label: {
             Text("Restore Purchases")
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary.opacity(0.7))
                 .padding(.vertical, 8)
         }
@@ -8782,7 +8782,7 @@ struct NotificationCenterView: View {
                             .font(.title3)
                             .foregroundStyle(.primary.opacity(0.85))
                         Text("You're all caught up!")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.6))
                     }
                 } else {
@@ -8812,7 +8812,7 @@ struct NotificationCenterView: View {
                             showClearAllConfirm = true
                         } label: {
                             Text("Clear All")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.red)
                         }
                     }
@@ -8881,7 +8881,7 @@ struct NotificationCenterView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(notif.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
 
                 Text(notif.body)
@@ -9012,7 +9012,7 @@ struct ShoppingBagView: View {
                                 .font(.system(size: 48))
                                 .foregroundStyle(.primary.opacity(0.3))
                             Text("Shopping bag is empty")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.primary.opacity(0.4))
                             Text("Add items your family needs to buy")
                                 .font(.caption)

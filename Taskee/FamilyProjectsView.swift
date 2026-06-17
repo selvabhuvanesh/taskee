@@ -62,7 +62,7 @@ struct FamilyProjectsListView: View {
                                 if !completedProjects.isEmpty {
                                     HStack {
                                         Text("Completed")
-                                            .font(.subheadline.weight(.semibold))
+                                            .font(.subheadline.weight(.bold))
                                             .foregroundStyle(theme.secondaryTextColor)
                                         Spacer()
                                     }
@@ -215,7 +215,7 @@ struct FamilyProjectsListView: View {
                     showAddProject = true
                 } label: {
                     Text("Create Project")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 10)
@@ -309,7 +309,7 @@ struct AddProjectView: View {
                                 Image(systemName: "calendar")
                                     .foregroundStyle(theme.secondaryTextColor)
                                 Text("Target Date")
-                                    .font(.subheadline)
+                                    .font(.subheadline.weight(.bold))
                                     .foregroundStyle(theme.textColor)
                             }
                         }
@@ -522,7 +522,7 @@ struct ProjectDetailView: View {
 
             if !project.descriptionText.isEmpty {
                 Text(project.descriptionText)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -609,7 +609,7 @@ struct ProjectDetailView: View {
                 HStack(spacing: 8) {
                     TextField("Add an idea...", text: $newIdeaText)
                         .textFieldStyle(.roundedBorder)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
 
                     Button {
                         submitIdea()
@@ -635,7 +635,7 @@ struct ProjectDetailView: View {
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(idea.text)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.textColor)
                 Text(idea.submittedBy)
                     .font(.caption2)
@@ -723,7 +723,7 @@ struct ProjectDetailView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.textColor)
                     .strikethrough(task.isApproved || task.isCancelled)
 
@@ -1044,12 +1044,12 @@ struct AddProjectTaskView: View {
                         }
 
                         DatePicker("Due Date", selection: $targetDate, displayedComponents: [.date, .hourAndMinute])
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(theme.textColor)
 
                         HStack {
                             Text("Reward")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(theme.textColor)
                             Spacer()
                             TextField("0", value: $reward, format: .number)

@@ -37,7 +37,7 @@ struct GoalsTabContent: View {
                         Spacer()
                         Button(action: onDone) {
                             Text("Done")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 7)
@@ -55,7 +55,7 @@ struct GoalsTabContent: View {
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(theme.textColor)
                         Text("Tap 'Add Goal' to pick a goal and create a plan with tasks, schedule, and rewards.")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(theme.secondaryTextColor)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
@@ -166,7 +166,7 @@ struct GoalsTabContent: View {
                     Image(systemName: "plus.circle.fill")
                     Text("Add Goal")
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 10)
@@ -276,7 +276,7 @@ struct GoalProgressCard: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(goal.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.textColor)
                 HStack(spacing: 4) {
                     Text(goal.assignedTo)
@@ -510,7 +510,7 @@ struct GoalPickerView: View {
                             withAnimation { phase = .input }
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                         }
                     }
                 }
@@ -557,7 +557,7 @@ struct GoalPickerView: View {
             // Duration picker
             VStack(alignment: .leading, spacing: 8) {
                 Text("Duration")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
                 Picker("", selection: $goalDuration) {
                     Text("2 weeks").tag(14)
@@ -591,7 +591,7 @@ struct GoalPickerView: View {
             // Example chips
             VStack(alignment: .leading, spacing: 10) {
                 Text("Ideas for you")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
 
                 FlowLayout(spacing: 8) {
@@ -657,7 +657,7 @@ struct GoalPickerView: View {
                 .foregroundStyle(theme.textColor)
 
             Text("\"\(goalName)\"")
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
 
@@ -696,7 +696,7 @@ struct GoalPickerView: View {
                     .foregroundStyle(theme.accentColor)
                     .padding(.top, 2)
                 Text("Here's a plan to help you achieve your goal. You can refine it or go ahead!")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(theme.secondaryTextColor)
             }
 
@@ -756,7 +756,7 @@ struct GoalPickerView: View {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
                     TextField("Ask AI to adjust tasks...", text: $refinementText)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                         .padding(10)
                         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
                         .focused($isRefineFocused)
@@ -789,7 +789,7 @@ struct GoalPickerView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark")
                             Text("Looks Good")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.subheadline.weight(.bold))
                         }
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -1127,7 +1127,7 @@ struct GoalTaskPreviewView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create \(totalTaskCount) Tasks") { onConfirm() }
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                         .disabled(editableTasks.filter { $0.isEnabled && !$0.name.isEmpty }.isEmpty)
                 }
             }
@@ -1143,7 +1143,7 @@ struct GoalTaskPreviewView: View {
                     .scaleEffect(0.8)
 
                 TextField("Task name", text: task.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .disabled(!task.wrappedValue.isEnabled)
@@ -1288,7 +1288,7 @@ struct GoalsListView: View {
                         Text("No goals yet")
                             .font(.title3.weight(.semibold))
                         Text("Tap 'Add Goal' to pick a goal and create a plan with tasks, schedule, and rewards.")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
@@ -1651,7 +1651,7 @@ struct GoalDetailView: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.green)
                 Text(task.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.secondary)
                     .strikethrough()
             } else {
@@ -1659,7 +1659,7 @@ struct GoalDetailView: View {
                     .font(.system(size: 14))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.name)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.bold))
                     Text(task.targetDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1697,7 +1697,7 @@ struct GoalDetailView: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 TextField("Task name", text: draft.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .textFieldStyle(.roundedBorder)
                 Button(role: .destructive) { taskToDelete = task } label: {
                     Image(systemName: "trash")
@@ -1775,7 +1775,7 @@ struct GoalDetailView: View {
                     withAnimation { isEditing = false }
                 } label: {
                     Text("Save")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 8)

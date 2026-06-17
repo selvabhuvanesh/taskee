@@ -76,7 +76,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
 
                 Text("Let's get you set up. Are you a parent managing tasks or a child completing them?")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             } else if selectedRole == "parent" {
@@ -89,7 +89,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
 
                 Text("Create your family or join an existing one. Once set up, you'll get an invite code to share with your family members so they can join too!")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             } else if !parentalConsentPassed {
@@ -102,7 +102,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
 
                 Text("A parent or guardian must verify and consent before a child can use Taskoot.")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             } else {
@@ -115,7 +115,7 @@ struct RoleSelectionView: View {
                     .foregroundStyle(.white)
 
                 Text("Enter your name and the invite code from your parent to join your family and start completing tasks!")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             }
@@ -322,7 +322,7 @@ struct RoleSelectionView: View {
                             .foregroundStyle(.white)
                         Spacer()
                     }
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .padding(12)
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 }
@@ -337,7 +337,7 @@ struct RoleSelectionView: View {
                             .foregroundStyle(.white)
                         Spacer()
                     }
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .padding(12)
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 }
@@ -428,7 +428,7 @@ struct RoleSelectionView: View {
                 withAnimation(.snappy) { selectedRole = "" }
             } label: {
                 Text("Back")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
@@ -501,7 +501,7 @@ struct RoleSelectionView: View {
                 withAnimation(.snappy) { selectedRole = "" }
             } label: {
                 Text("Back")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
@@ -578,7 +578,7 @@ struct RoleSelectionView: View {
         VStack(spacing: 24) {
             VStack(spacing: 16) {
                 Text("Please ask your parent or guardian to answer this question:")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
 
@@ -665,7 +665,7 @@ struct RoleSelectionView: View {
                 withAnimation(.snappy) { selectedRole = "" }
             } label: {
                 Text("Back")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
@@ -793,7 +793,7 @@ struct RoleSelectionView: View {
                 withAnimation(.snappy) { selectedRole = "" }
             } label: {
                 Text("Back")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.5))
             }
         }

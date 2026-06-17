@@ -337,7 +337,7 @@ struct ChildDashboardView: View {
                             showNotificationCenter = true
                         } label: {
                             Image(systemName: "bell.fill")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.bold))
                                 .overlay(alignment: .topTrailing) {
                                     let badgeCount = unreadNotifCount + todayOpenCount
                                     if badgeCount > 0 {
@@ -1120,7 +1120,7 @@ struct ChildDashboardView: View {
             HStack(spacing: 5) {
                 Image(systemName: showAll ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 Text(showAll ? "All Tasks" : "Active")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
             }
         }
     }
@@ -1136,7 +1136,7 @@ struct ChildDashboardView: View {
                     .font(childTheme.font(.title3))
                     .foregroundStyle(.primary.opacity(0.7))
                 Text(showAll ? "Your parent hasn't assigned any tasks yet." : "You've completed all your active tasks.")
-                    .font(childTheme.font(.subheadline))
+                    .font(childTheme.font(.subheadline.weight(.bold)))
                     .foregroundStyle(.primary.opacity(0.4))
                     .multilineTextAlignment(.center)
             }
@@ -1317,7 +1317,7 @@ struct ChildDashboardView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 if isExpanded {
                                     Text(group.key)
-                                        .font(childTheme.font(.subheadline).weight(.semibold))
+                                        .font(childTheme.font(.subheadline.weight(.bold)).weight(.semibold))
                                         .foregroundStyle(.primary.opacity(0.6))
                                         .padding(.leading, 4)
 
@@ -2032,7 +2032,7 @@ struct AddChildTaskView: View {
                         Text("\(occurrences) \(recurrenceUnitLabel)")
                             .foregroundStyle(.primary.opacity(0.7))
                     }
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                 }
                 .tint(.primary)
                 .padding(12)
@@ -2080,7 +2080,7 @@ struct AddChildTaskView: View {
                         Image(systemName: "wand.and.stars")
                         Text("Parse")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -2095,7 +2095,7 @@ struct AddChildTaskView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Text("Parsed Result")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary)
                         Spacer()
                     }
@@ -2123,7 +2123,7 @@ struct AddChildTaskView: View {
                         Image(systemName: "plus.circle.fill")
                         Text("Create Task")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -2145,7 +2145,7 @@ struct AddChildTaskView: View {
                 .foregroundStyle(.primary.opacity(0.5))
                 .frame(width: 70, alignment: .leading)
             Text(value)
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
             Spacer()
         }
@@ -2254,7 +2254,7 @@ struct AddChildTaskView: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? calmAccent : theme.tertiaryTextColor)
                 Text(name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
                 Spacer()
             }
@@ -2609,7 +2609,7 @@ struct RewardsHistoryView: View {
                             .font(.title3)
                             .foregroundStyle(.primary.opacity(0.85))
                         Text(isParent ? "Coin activity will appear here as tasks are completed." : "Complete tasks and redeem your coins!")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.6))
                             .multilineTextAlignment(.center)
                     }
@@ -2760,7 +2760,7 @@ struct RewardsHistoryView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
 
@@ -2951,7 +2951,7 @@ struct MyGiftsView: View {
                             .font(.title3)
                             .foregroundStyle(.primary.opacity(0.7))
                         Text("Complete tasks with surprise gifts to see them here!")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.bold))
                             .foregroundStyle(.primary.opacity(0.4))
                             .multilineTextAlignment(.center)
                     }
@@ -3370,7 +3370,7 @@ struct ChildThemePickerView: View {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 14))
                             Text("Add Task")
-                                .font(theme.font(.subheadline).weight(.semibold))
+                                .font(theme.font(.subheadline.weight(.bold)).weight(.semibold))
                         }
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
@@ -3381,7 +3381,7 @@ struct ChildThemePickerView: View {
                             Image(systemName: "gift.fill")
                                 .font(.system(size: 13))
                             Text("Redeem")
-                                .font(theme.font(.subheadline).weight(.semibold))
+                                .font(theme.font(.subheadline.weight(.bold)).weight(.semibold))
                         }
                         .foregroundStyle(theme.accentColor)
                         .padding(.horizontal, 16)
@@ -3410,7 +3410,7 @@ struct ChildThemePickerView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(iconColor)
                 Text(value)
-                    .font(theme.font(.subheadline).weight(.bold))
+                    .font(theme.font(.subheadline.weight(.bold)).weight(.bold))
                     .foregroundStyle(theme.textColor)
             }
             Text(label)
