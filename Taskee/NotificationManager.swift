@@ -393,6 +393,56 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         saveNotification(title: title, body: body, category: "GOAL_APPROVED")
     }
 
+    // MARK: - Coaching Notifications
+
+    func sendCoachingMissedAlert(taskName: String, childName: String) {
+        let title = "Missed Practice"
+        let body = "\(childName) missed \"\(taskName)\". A gentle reminder might help — tomorrow is a fresh start!"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "COACHING_MISSED"
+        content.interruptionLevel = .timeSensitive
+
+        let request = UNNotificationRequest(identifier: "coaching-missed-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: body, category: "COACHING_MISSED", senderName: childName)
+    }
+
+    func scheduleCoachingWeeklyPlanReminder(goalName: String, childName: String) {
+        let title = "Time to Plan Your Week!"
+        let body = "Let's set up this week's \(goalName) tasks together. Tap to get started!"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "COACHING_WEEKLY_PLAN"
+
+        // Schedule for Sunday at 6 PM
+        var components = DateComponents()
+        components.weekday = 1 // Sunday
+        components.hour = 18
+        components.minute = 0
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+
+        let request = UNNotificationRequest(identifier: "coaching-weekly-\(childName)-\(goalName)", content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    func sendCoachingDailyDigest(summary: String, parentName: String) {
+        let title = "Today's Coaching Update"
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = summary
+        content.sound = .default
+        content.categoryIdentifier = "COACHING_DAILY_DIGEST"
+
+        let request = UNNotificationRequest(identifier: "coaching-digest-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        saveNotification(title: title, body: summary, category: "COACHING_DAILY_DIGEST")
+    }
+
     func sendTaskRejectedNotification(taskName: String, childName: String) {
         let title = "Task Needs Redo"
         let body = "Your task \"\(taskName)\" was sent back. Please try again."

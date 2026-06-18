@@ -18,7 +18,7 @@ final class Item {
     var targetDate: Date
     var assignedTo: String
     var reward: Double
-    // "open", "inReview", "approved", "missed", "cancelled"
+    // "open", "inProgress", "inReview", "approved", "missed", "cancelled"
     var status: String
     var createdByChild: Bool
     var isArchived: Bool
@@ -31,6 +31,10 @@ final class Item {
     var transportType: String = "none"
     var projectId: String = ""
     var goalId: String = ""
+    var timeSpentMinutes: Int = 0
+    var startedAt: Date?
+    var completedAt: Date?
+    var coachingVerified: Bool = false
 
     var belongsToGoal: Bool { !goalId.isEmpty }
 
@@ -166,6 +170,7 @@ final class Item {
     }
 
     var isOpen: Bool { status == "open" }
+    var isInProgress: Bool { status == "inProgress" }
     var isInReview: Bool { status == "inReview" }
     var isApproved: Bool { status == "approved" }
     var isMissed: Bool { status == "missed" }
@@ -2957,8 +2962,12 @@ final class Goal {
     var createdAt: Date
     var isCustom: Bool
     var templateId: String
+    var isCoaching: Bool = false
+    var weekNumber: Int = 0
+    var lastPlanDate: Date?
+    var coachingNotes: String = ""
 
-    init(id: UUID = UUID(), name: String, category: String, icon: String, assignedTo: String, createdBy: String, targetDate: Date = Date(), isCustom: Bool = false, templateId: String = "") {
+    init(id: UUID = UUID(), name: String, category: String, icon: String, assignedTo: String, createdBy: String, targetDate: Date = Date(), isCustom: Bool = false, templateId: String = "", isCoaching: Bool = false) {
         self.id = id
         self.name = name
         self.category = category
@@ -2970,6 +2979,7 @@ final class Goal {
         self.createdAt = Date()
         self.isCustom = isCustom
         self.templateId = templateId
+        self.isCoaching = isCoaching
     }
 
     var isActive: Bool { status == "active" }
@@ -2977,6 +2987,12 @@ final class Goal {
     var isPaused: Bool { status == "paused" }
     var isPendingApproval: Bool { status == "pendingApproval" }
     var isLocked: Bool { status == "pendingApproval" }
+
+    var needsWeeklyPlan: Bool {
+        guard isCoaching && isActive else { return false }
+        guard let lastPlan = lastPlanDate else { return true }
+        return Date().timeIntervalSince(lastPlan) >= 7 * 24 * 60 * 60
+    }
 
     func progress(from tasks: [Item]) -> Double {
         let goalTasks = tasks.filter { $0.goalId == id.uuidString }

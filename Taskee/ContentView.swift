@@ -172,6 +172,90 @@ enum CalendarTimelineItem: Identifiable {
 
 // MARK: - Calendar Event Row
 
+// MARK: - Coaching Digest Card
+
+struct CoachingDigestCard: View {
+    let childName: String
+    let completedCount: Int
+    let totalCount: Int
+    let missedCount: Int
+    let inProgressCount: Int
+    let totalMinutes: Int
+    var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.spring(duration: 0.3)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "brain.head.profile.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.cyan)
+
+                    Text("Coaching: \(childName)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        Text("\(completedCount)/\(totalCount)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                        if totalMinutes > 0 {
+                            Text("·")
+                                .foregroundStyle(.white.opacity(0.3))
+                            Text("\(totalMinutes)m")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.cyan.opacity(0.8))
+                        }
+                    }
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    if completedCount > 0 {
+                        Label("\(completedCount) completed", systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                    }
+                    if inProgressCount > 0 {
+                        Label("\(inProgressCount) in progress", systemImage: "figure.run")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.yellow)
+                    }
+                    if missedCount > 0 {
+                        Label("\(missedCount) missed", systemImage: "exclamationmark.circle")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.orange)
+                    }
+                    if totalCount == 0 {
+                        Text("No coaching tasks today")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(.leading, 26)
+            }
+        }
+        .padding(12)
+        .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.cyan.opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
 struct CalendarEventRow: View {
     let event: EKEvent
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
@@ -1322,6 +1406,9 @@ struct ContentView: View {
                     if !todayEvents.isEmpty {
                         dayPreviewEventsSection(events: todayEvents)
                     }
+
+                    // Coaching digest cards
+                    coachingDigestSection(todayTasks: todayTasks)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
@@ -1525,6 +1612,34 @@ struct ContentView: View {
                     }
                 }
                 .padding(.leading, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func coachingDigestSection(todayTasks: [Item]) -> some View {
+        let coachingGoals = allGoals.filter { $0.isCoaching && $0.isActive }
+        if !coachingGoals.isEmpty {
+            let childNames = Set(coachingGoals.map { $0.assignedTo })
+            ForEach(Array(childNames), id: \.self) { childName in
+                let childGoals = coachingGoals.filter { $0.assignedTo == childName }
+                let childTasks = todayTasks.filter { task in
+                    childGoals.contains { $0.id.uuidString == task.goalId }
+                }
+                let completed = childTasks.filter { $0.isApproved }
+                let missed = childTasks.filter { $0.isMissed }
+                let inProgress = childTasks.filter { $0.isInProgress }
+                let totalTime = completed.reduce(0) { $0 + $1.timeSpentMinutes }
+
+                CoachingDigestCard(
+                    childName: childName,
+                    completedCount: completed.count,
+                    totalCount: childTasks.count,
+                    missedCount: missed.count,
+                    inProgressCount: inProgress.count,
+                    totalMinutes: totalTime,
+                    theme: parentTheme
+                )
             }
         }
     }
@@ -4369,6 +4484,7 @@ struct TaskRow: View {
 
     private var statusColor: Color {
         if task.isApproved { return .green }
+        if task.isInProgress { return .yellow }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
         if task.isCancelled { return .gray }
@@ -4377,6 +4493,7 @@ struct TaskRow: View {
 
     private var statusLabel: String {
         if task.isApproved { return "Done" }
+        if task.isInProgress { return "In Progress" }
         if task.isInReview { return "Review" }
         if task.isMissed { return "Missed" }
         if task.isCancelled { return "Cancelled" }
@@ -4411,6 +4528,13 @@ struct TaskRow: View {
                                 .fill(.green)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
+                        } else if task.isInProgress {
+                            Circle()
+                                .fill(.yellow)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "figure.run")
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(.primary)
                         } else if task.isInReview {
@@ -4462,6 +4586,14 @@ struct TaskRow: View {
                                 Text("Missed")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.red)
+                            } else if task.isInProgress {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "figure.run")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("In Progress")
+                                }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.yellow)
                             } else if task.isInReview {
                                 Text("In Review")
                                     .font(.caption.weight(.semibold))
@@ -7318,6 +7450,14 @@ struct PendingApprovalsView: View {
                             Label("\(Int(task.reward)) coins", systemImage: "star.circle.fill")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.yellow.opacity(0.85))
+                        }
+
+                        if task.coachingVerified && task.timeSpentMinutes > 0 {
+                            Text("•")
+                                .foregroundStyle(.white.opacity(0.3))
+                            Label("\(task.timeSpentMinutes) min", systemImage: "timer")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.cyan.opacity(0.85))
                         }
                     }
                 }

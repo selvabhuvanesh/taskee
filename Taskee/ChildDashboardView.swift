@@ -55,6 +55,10 @@ struct ChildDashboardView: View {
     @State private var showShoppingBag = false
     @State private var showFamilyChat = false
     @State private var showAIAssistant = false
+    @State private var coachingTaskToComplete: Item?
+    @State private var showCoachingCompletion = false
+    @State private var showCoachingPlan = false
+    @State private var coachingGoalToPlan: Goal?
     @AppStorage("isAIMode") private var isAIMode = true
     @State private var showFamilyProjects = false
     @State private var showWishList = false
@@ -499,6 +503,17 @@ struct ChildDashboardView: View {
             .sheet(isPresented: $showGoalPicker) {
                 GoalPickerView(audience: .child, assignee: authManager.userName, theme: childTheme)
             }
+            .sheet(isPresented: $showCoachingPlan) {
+                if let goal = coachingGoalToPlan {
+                    CoachingPlanView(goal: goal, theme: childTheme)
+                }
+            }
+            .sheet(isPresented: $showCoachingCompletion) {
+                if let task = coachingTaskToComplete {
+                    CoachingCompletionSheet(task: task, theme: childTheme)
+                        .presentationDetents([.medium])
+                }
+            }
             .sheet(item: $selectedHomeGoal) { goal in
                 GoalDetailView(goal: goal, theme: childTheme)
             }
@@ -840,6 +855,15 @@ struct ChildDashboardView: View {
     private func isTaskGoalLocked(_ task: Item) -> Bool {
         guard !task.goalId.isEmpty else { return false }
         return allGoals.first(where: { $0.id.uuidString == task.goalId })?.isLocked ?? false
+    }
+
+    private func isCoachingTask(_ task: Item) -> Bool {
+        guard !task.goalId.isEmpty else { return false }
+        return allGoals.first(where: { $0.id.uuidString == task.goalId })?.isCoaching ?? false
+    }
+
+    private var coachingGoalsNeedingPlan: [Goal] {
+        allGoals.filter { $0.isCoaching && $0.isActive && $0.assignedTo == authManager.userName && $0.needsWeeklyPlan }
     }
 
     private func launchFlyingCoins(count: Int) {
@@ -1350,6 +1374,15 @@ struct ChildDashboardView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVStack(spacing: 12) {
+                        // Coaching plan banners
+                        ForEach(coachingGoalsNeedingPlan, id: \.id) { goal in
+                            CoachingPlanBanner(goal: goal, theme: childTheme) {
+                                coachingGoalToPlan = goal
+                                showCoachingPlan = true
+                            }
+                            .padding(.horizontal, 4)
+                        }
+
                         ForEach(Array(groupedTasks.enumerated()), id: \.element.key) { index, group in
                             if index == childDashTodayGroupIndex && childDashPastTaskCount > 0 {
                                 PastTasksDivider(count: childDashPastTaskCount)
@@ -1467,6 +1500,7 @@ struct ChildDashboardView: View {
 
     private func statusColor(for task: Item) -> Color {
         if task.isApproved { return .green }
+        if task.isInProgress { return .yellow }
         if task.isInReview { return .orange }
         if task.isMissed { return .red }
         if task.isCancelled { return .gray }
@@ -1475,6 +1509,7 @@ struct ChildDashboardView: View {
 
     private func statusLabel(for task: Item) -> String {
         if task.isApproved { return "Done" }
+        if task.isInProgress { return "Started" }
         if task.isInReview { return "Review" }
         if task.isMissed { return "Missed" }
         if task.isCancelled { return "Cancelled" }
@@ -1489,9 +1524,20 @@ struct ChildDashboardView: View {
                     showMissedOptions = true
                     return
                 }
+                if task.isInProgress {
+                    coachingTaskToComplete = task
+                    showCoachingCompletion = true
+                    return
+                }
                 guard task.isOpen else { return }
                 // Block if the task's goal is locked (pending approval or completed)
                 if isTaskGoalLocked(task) { return }
+                // Coaching tasks: tap to start instead of complete
+                if isCoachingTask(task) {
+                    task.status = "inProgress"
+                    task.startedAt = Date()
+                    return
+                }
                 if !task.canComplete {
                     tooEarlyTask = task
                     showTooEarlyAlert = true
@@ -1510,6 +1556,13 @@ struct ChildDashboardView: View {
                                 .fill(.green)
                                 .frame(width: 32, height: 32)
                             Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
+                        } else if task.isInProgress {
+                            Circle()
+                                .fill(.yellow)
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "figure.run")
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(.primary)
                         } else if task.isInReview {
@@ -1561,6 +1614,14 @@ struct ChildDashboardView: View {
                                 Text("Missed")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.red)
+                            } else if task.isInProgress {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "figure.run")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("In Progress")
+                                }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.yellow)
                             } else if task.isInReview {
                                 Text("In Review")
                                     .font(.caption.weight(.semibold))

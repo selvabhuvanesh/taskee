@@ -199,7 +199,7 @@ final class ClaudeAPIService: Sendable {
         {
             "message": "Your conversational response to the user",
             "action": null or {
-                "intent": "create|reschedule|cancel|markDone|update|setGoal|editGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder|listTasks",
+                "intent": "create|reschedule|cancel|markDone|update|setGoal|editGoal|deleteGoal|pauseGoal|resumeGoal|completeGoal|planCoachingWeek|addToCart|removeFromCart|markBought|addToWishList|removeFromWishList|createProject|editProject|deleteProject|updateProjectStatus|addProjectIdea|sendReminder|listTasks",
 
                 // Task fields (create/reschedule/cancel/markDone/update)
                 "taskName": "string or null",
@@ -285,6 +285,15 @@ final class ClaudeAPIService: Sendable {
         REMINDERS (parent mode only):
         - "sendReminder": send a reminder notification to a family member for their tasks. Use "matchingTaskNames" to specify tasks, OR set "reminderScope" to "today" to remind about all of today's open tasks. Optionally use "assignee" to target a specific member.
         - This pushes a notification to the member's device. Only available for parents.
+
+        COACHING GOALS:
+        - "planCoachingWeek": trigger weekly task planning for a coaching goal. Use "goalName" to match. The app will open the weekly planning flow.
+        - When interacting with children about coaching goals, ALWAYS be encouraging and positive.
+        - Never judge or assess performance — celebrate effort and progress instead.
+        - Use phrases like "Great job!", "You're doing amazing!", "Keep it up!", "You're getting better every day!"
+        - When reporting to parents, maintain a positive posture — focus on what was accomplished.
+        - If a child missed tasks, frame it supportively: "Tomorrow is a fresh start!" or "Every champion has off days!"
+        - Coaching goals repeat weekly until the parent pauses or stops them.
 
         GENERAL:
         - Be conversational, friendly, and concise. Ask clarifying questions when ambiguous.
@@ -585,6 +594,140 @@ final class ClaudeAPIService: Sendable {
         return parseGoalSuggestion(text, durationDays: durationDays)
     }
 
+    // MARK: - Coaching Week Tasks
+
+    func generateCoachingWeekTasks(
+        goalName: String,
+        childName: String,
+        weekNumber: Int,
+        previousWeekSummary: String = ""
+    ) async throws -> GoalSuggestion {
+        var prompt = """
+        You are a warm, encouraging family coach helping a child plan their week. Generate 5-7 practical tasks for this week's coaching goal.
+
+        Goal: "\(goalName)"
+        Child: \(childName)
+        Week: \(weekNumber)
+        """
+
+        if !previousWeekSummary.isEmpty {
+            prompt += "\n\nLast week's progress:\n\(previousWeekSummary)\n\nAdjust this week's tasks based on last week — if the child did great, increase slightly. If they struggled, make it more achievable."
+        }
+
+        prompt += """
+
+        Respond with ONLY valid JSON (no markdown, no backticks):
+        {
+            "category": "Education|Well-being|Lifestyle|Finance|Skills|Fitness",
+            "icon": "SF Symbol name",
+            "tasks": [
+                {
+                    "taskName": "specific encouraging task description",
+                    "frequency": "daily|weekly",
+                    "occurrences": number (for 7 days),
+                    "reward": number (1-5),
+                    "hour": number (0-23),
+                    "minute": 0
+                }
+            ]
+        }
+
+        Guidelines:
+        - Use encouraging, kid-friendly language
+        - Mix 3-4 daily habits with 1-2 weekly milestones
+        - Daily occurrences should be 7 (one week)
+        - Weekly occurrences should be 1
+        - Schedule at sensible times for children
+        - Make tasks specific and achievable
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 1024,
+            "system": prompt,
+            "messages": [["role": "user", "content": "Plan my tasks for this week!"]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorBody = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(statusCode, errorBody)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            throw APIError.parseError
+        }
+
+        return parseGoalSuggestion(text, durationDays: 7)
+    }
+
+    // MARK: - Daily Coaching Summary
+
+    func generateDailyCoachingSummary(
+        childName: String,
+        completedTasks: [(name: String, timeSpent: Int)],
+        missedTasks: [String],
+        inProgressTasks: [String],
+        streakDays: Int
+    ) async throws -> String {
+        let completedList = completedTasks.map { "\($0.name) (\($0.timeSpent) min)" }.joined(separator: ", ")
+        let missedList = missedTasks.joined(separator: ", ")
+        let inProgressList = inProgressTasks.joined(separator: ", ")
+
+        let prompt = """
+        You are a supportive family coach writing a brief daily update for a parent about their child's progress. Be warm, positive, and encouraging. NEVER judge or assess the child's performance. Focus on effort and progress. If tasks were missed, mention it gently with encouragement for tomorrow.
+
+        Child: \(childName)
+        Completed today: \(completedList.isEmpty ? "None" : completedList)
+        Missed today: \(missedList.isEmpty ? "None" : missedList)
+        In progress: \(inProgressList.isEmpty ? "None" : inProgressList)
+        Current streak: \(streakDays) day\(streakDays == 1 ? "" : "s")
+
+        Write 2-3 warm sentences. Start with something positive. End with encouragement. Do NOT use bullet points or lists. Keep it conversational and brief.
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 256,
+            "system": prompt,
+            "messages": [["role": "user", "content": "Write today's summary for the parent."]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            return "\(childName) had a productive day! Keep up the great support."
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            return "\(childName) had a productive day! Keep up the great support."
+        }
+
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     enum APIError: Error {
         case httpError(Int, String), parseError
     }
@@ -748,6 +891,7 @@ enum TaskIntent {
     case pauseGoal
     case resumeGoal
     case completeGoal
+    case planCoachingWeek
     // Shopping list
     case addToCart
     case removeFromCart
@@ -2742,6 +2886,16 @@ struct AIAssistantView: View {
             action.goalName = name
             return action
 
+        case "planCoachingWeek":
+            guard let name = parsed.goalName, !name.isEmpty else { return nil }
+            let matching = allGoals.filter { $0.name.localizedCaseInsensitiveContains(name) && $0.isCoaching }
+            guard !matching.isEmpty else { return nil }
+            let details = matching.map { "🧠 \($0.name) [Week \($0.weekNumber + 1)]" }
+            var action = TaskAction(intent: .planCoachingWeek, summary: "Plan coaching week for \(matching.count) goal\(matching.count == 1 ? "" : "s")", details: details)
+            action.matchingGoals = matching
+            action.goalName = name
+            return action
+
         case "addToCart":
             let names = parsed.itemNames ?? [parsed.taskName].compactMap { $0 }
             guard !names.isEmpty else { return nil }
@@ -2945,6 +3099,14 @@ struct AIAssistantView: View {
             executeEditGoal(action, messageId: messageId)
         case .deleteGoal, .pauseGoal, .resumeGoal, .completeGoal:
             executeGoalAction(action, messageId: messageId)
+        case .planCoachingWeek:
+            // Force needsWeeklyPlan to return true so CoachingPlanBanner appears
+            for goal in action.matchingGoals where goal.isCoaching {
+                goal.lastPlanDate = nil
+            }
+            try? modelContext.save()
+            markActionExecuted(messageId: messageId)
+            messages.append(AIChatMessage(role: .assistant, text: "I've queued up weekly planning for your coaching goal. Head to the task list to plan your week!"))
         case .addToCart:
             executeAddToCart(action, messageId: messageId)
         case .removeFromCart:
@@ -3733,6 +3895,7 @@ struct AIAssistantView: View {
         case .pauseGoal: return "pause.circle.fill"
         case .resumeGoal: return "play.circle.fill"
         case .completeGoal: return "checkmark.seal.fill"
+        case .planCoachingWeek: return "brain.head.profile.fill"
         case .addToCart: return "cart.badge.plus"
         case .removeFromCart: return "cart.badge.minus"
         case .markBought: return "bag.fill"
@@ -3754,7 +3917,7 @@ struct AIAssistantView: View {
         case .reschedule: return .orange
         case .cancel, .deleteGoal, .deleteProject, .removeFromCart, .removeFromWishList: return .red
         case .markDone, .completeGoal, .markBought: return .green
-        case .setGoal, .editGoal, .resumeGoal: return theme.accentColor
+        case .setGoal, .editGoal, .resumeGoal, .planCoachingWeek: return theme.accentColor
         case .pauseGoal: return .orange
         case .addToCart, .addToWishList: return theme.accentColor
         case .createProject, .editProject, .updateProjectStatus, .addProjectIdea: return theme.accentColor

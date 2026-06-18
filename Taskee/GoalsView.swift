@@ -467,6 +467,7 @@ struct GoalPickerView: View {
     @State private var sparkleRotation: Double = 0
     @State private var sparkleScale: CGFloat = 0.5
     @State private var showTaskChoiceDialog = false
+    @State private var isCoachingGoal = false
     @FocusState private var isInputFocused: Bool
     @FocusState private var isRefineFocused: Bool
 
@@ -554,37 +555,109 @@ struct GoalPickerView: View {
                     .onSubmit { if !goalName.trimmingCharacters(in: .whitespaces).isEmpty { startGeneration() } }
             }
 
-            // Duration picker
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Duration")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(theme.secondaryTextColor)
-                Picker("", selection: $goalDuration) {
-                    Text("2 weeks").tag(14)
-                    Text("1 month").tag(30)
-                    Text("2 months").tag(60)
-                    Text("3 months").tag(90)
+            // Coaching toggle
+            HStack(spacing: 12) {
+                Image(systemName: isCoachingGoal ? "brain.head.profile.fill" : "brain.head.profile")
+                    .font(.title3)
+                    .foregroundStyle(isCoachingGoal ? theme.accentColor : theme.secondaryTextColor)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI Coaching")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(theme.textColor)
+                    Text("AI plans weekly tasks and tracks progress")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
-                .pickerStyle(.segmented)
+
+                Spacer()
+
+                Toggle("", isOn: $isCoachingGoal)
+                    .labelsHidden()
+                    .tint(theme.accentColor)
+            }
+            .padding(12)
+            .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+
+            // Duration picker (hidden for coaching goals — they repeat indefinitely)
+            if !isCoachingGoal {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Duration")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(theme.secondaryTextColor)
+                    Picker("", selection: $goalDuration) {
+                        Text("2 weeks").tag(14)
+                        Text("1 month").tag(30)
+                        Text("2 months").tag(60)
+                        Text("3 months").tag(90)
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
 
-            // Generate button
-            Button { startGeneration() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                    Text("Generate My Plan")
-                        .font(.body.weight(.semibold))
+            // Action buttons
+            if assignee != authManager.userName {
+                HStack(spacing: 10) {
+                    Button {
+                        guard !goalName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                        createGoalOnly()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.fill")
+                            Text("Let \(assignee) plan")
+                                .font(.subheadline.weight(.bold))
+                        }
+                        .foregroundStyle(theme.accentColor)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            goalName.trimmingCharacters(in: .whitespaces).isEmpty
+                                ? theme.accentColor.opacity(0.08) : theme.accentColor.opacity(0.15),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(theme.accentColor.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .disabled(goalName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    Button { startGeneration() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                            Text("Generate Plan")
+                                .font(.subheadline.weight(.bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            goalName.trimmingCharacters(in: .whitespaces).isEmpty
+                                ? theme.accentColor.opacity(0.4) : theme.accentColor,
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                    }
+                    .disabled(goalName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    goalName.trimmingCharacters(in: .whitespaces).isEmpty
-                        ? theme.accentColor.opacity(0.4) : theme.accentColor,
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
+            } else {
+                Button { startGeneration() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                        Text("Generate My Plan")
+                            .font(.body.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        goalName.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? theme.accentColor.opacity(0.4) : theme.accentColor,
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+                }
+                .disabled(goalName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .disabled(goalName.trimmingCharacters(in: .whitespaces).isEmpty)
 
             Divider().overlay(theme.tertiaryTextColor)
 
@@ -776,15 +849,11 @@ struct GoalPickerView: View {
                     }
                 }
 
-                // Action buttons
+                // Confirm button
                 HStack(spacing: 12) {
                     Button {
                         editableTasks = currentTasks.map { EditableSuggestedTask(from: $0) }
-                        if assignee != authManager.userName {
-                            showTaskChoiceDialog = true
-                        } else {
-                            showTaskPreview = true
-                        }
+                        showTaskPreview = true
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark")
@@ -796,15 +865,6 @@ struct GoalPickerView: View {
                         .padding(.vertical, 12)
                         .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 10))
                     }
-                }
-                .confirmationDialog("How should tasks be created?", isPresented: $showTaskChoiceDialog, titleVisibility: .visible) {
-                    Button("Create tasks now") {
-                        showTaskPreview = true
-                    }
-                    Button("Let \(assignee) plan tasks") {
-                        createGoalOnly()
-                    }
-                    Button("Cancel", role: .cancel) { }
                 }
             }
         }
@@ -906,9 +966,10 @@ struct GoalPickerView: View {
             icon: aiIcon,
             assignedTo: assignee,
             createdBy: authManager.userName,
-            targetDate: Calendar.current.date(byAdding: .day, value: goalDuration, to: Date()) ?? Date(),
+            targetDate: isCoachingGoal ? .distantFuture : Calendar.current.date(byAdding: .day, value: goalDuration, to: Date()) ?? Date(),
             isCustom: true,
-            templateId: ""
+            templateId: "",
+            isCoaching: isCoachingGoal
         )
         if authManager.role == "child" {
             goal.status = "pendingApproval"
@@ -933,10 +994,15 @@ struct GoalPickerView: View {
             icon: icon,
             assignedTo: assignee,
             createdBy: authManager.userName,
-            targetDate: Calendar.current.date(byAdding: .day, value: goalDuration, to: Date()) ?? Date(),
+            targetDate: isCoachingGoal ? .distantFuture : Calendar.current.date(byAdding: .day, value: goalDuration, to: Date()) ?? Date(),
             isCustom: isCustom,
-            templateId: templateId
+            templateId: templateId,
+            isCoaching: isCoachingGoal
         )
+        if isCoachingGoal {
+            goal.lastPlanDate = Date()
+            goal.weekNumber = 1
+        }
         // If a child creates this goal, it needs parent approval before they can start
         if authManager.role == "child" {
             goal.status = "pendingApproval"
@@ -1845,6 +1911,443 @@ struct GoalDetailView: View {
         }
         try? modelContext.save()
         taskEdits.removeAll()
+    }
+}
+
+// MARK: - Encouragement Engine
+
+struct EncouragementEngine {
+    static let startingMessages = [
+        "Let's do this! You've got this!",
+        "Time to shine! Ready, set, go!",
+        "Starting strong — that's the way!",
+        "Every great journey starts with one step!",
+        "You're already winning by showing up!"
+    ]
+
+    static let completionMessages = [
+        "Amazing work! You crushed it!",
+        "That was awesome! Keep it up!",
+        "You did it! So proud of you!",
+        "Incredible effort! You're getting better every day!",
+        "Way to go! That's what dedication looks like!",
+        "Fantastic job! Your hard work is paying off!",
+        "You're on fire! Nothing can stop you!"
+    ]
+
+    static let streakMessages = [
+        "That's 2 days in a row — amazing!",
+        "3 days straight — you're unstoppable!",
+        "Keep that streak going — you're on a roll!",
+        "What a streak! You're building great habits!",
+        "Day after day, you just keep going! Incredible!"
+    ]
+
+    static func randomStarting() -> String {
+        startingMessages.randomElement() ?? startingMessages[0]
+    }
+
+    static func randomCompletion() -> String {
+        completionMessages.randomElement() ?? completionMessages[0]
+    }
+
+    static func streakMessage(days: Int) -> String? {
+        guard days >= 2 else { return nil }
+        if days == 2 { return streakMessages[0] }
+        if days == 3 { return streakMessages[1] }
+        return streakMessages[2...].randomElement()
+    }
+}
+
+// MARK: - Coaching Completion Sheet
+
+struct CoachingCompletionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let task: Item
+    let theme: ChildTheme
+
+    @State private var timeSpent: Int = 15
+    @State private var encouragement: String = EncouragementEngine.randomCompletion()
+    @State private var showConfetti = false
+
+    private let timeOptions = [5, 10, 15, 20, 25, 30, 45, 60]
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.yellow)
+                .symbolEffect(.bounce, value: showConfetti)
+
+            Text("Great job!")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(theme.textColor)
+
+            Text("How long did you spend on \"\(task.name)\"?")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+                .multilineTextAlignment(.center)
+
+            // Time picker
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(timeOptions, id: \.self) { minutes in
+                    Button {
+                        timeSpent = minutes
+                    } label: {
+                        Text("\(minutes) min")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(timeSpent == minutes ? theme.accentColor : theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(timeSpent == minutes ? .white : theme.textColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(encouragement)
+                .font(.body.weight(.medium))
+                .foregroundStyle(theme.accentColor)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button {
+                task.timeSpentMinutes = timeSpent
+                task.completedAt = Date()
+                task.coachingVerified = true
+                task.status = "inReview"
+                showConfetti = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    dismiss()
+                }
+            } label: {
+                Text("Submit for Review")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding(24)
+        .onAppear {
+            showConfetti = true
+        }
+    }
+}
+
+// MARK: - Coaching Plan Banner
+
+struct CoachingPlanBanner: View {
+    let goal: Goal
+    let theme: ChildTheme
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(theme.accentColor.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "brain.head.profile.fill")
+                        .font(.title3)
+                        .foregroundStyle(theme.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Time to plan your week!")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(theme.textColor)
+                    Text("Let's set up your \(goal.name) tasks together")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryTextColor)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(theme.secondaryTextColor)
+            }
+            .padding(14)
+            .background(theme.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(theme.accentColor.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Coaching Plan View
+
+struct CoachingPlanView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+
+    let goal: Goal
+    let theme: ChildTheme
+
+    enum PlanPhase { case generating, review, refining }
+
+    @State private var planPhase: PlanPhase = .generating
+    @State private var editableTasks: [EditableSuggestedTask] = []
+    @State private var generationError: String?
+    @State private var refinementText = ""
+    @State private var currentTasks: [GoalTaskEntry] = []
+    @State private var aiCategory: GoalCategory = .lifestyle
+    @State private var aiIcon: String = "star.fill"
+
+    @Query(sort: \Item.targetDate) private var allTasks: [Item]
+
+    private var previousWeekTasks: [Item] {
+        allTasks.filter { $0.goalId == goal.id.uuidString }
+    }
+
+    private var previousWeekSummary: String {
+        let tasks = previousWeekTasks
+        guard !tasks.isEmpty else { return "" }
+        let completed = tasks.filter { $0.isApproved }.count
+        let missed = tasks.filter { $0.isMissed }.count
+        let totalTime = tasks.reduce(0) { $0 + $1.timeSpentMinutes }
+        return "Completed \(completed)/\(tasks.count) tasks. Missed \(missed). Total time: \(totalTime) min."
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 16) {
+                        switch planPhase {
+                        case .generating:
+                            generatingView
+                        case .review, .refining:
+                            reviewView
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Week \(goal.weekNumber + 1) Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task { await generateTasks() }
+    }
+
+    private var generatingView: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 40)
+
+            Image(systemName: "brain.head.profile.fill")
+                .font(.system(size: 50))
+                .foregroundStyle(theme.accentColor)
+                .symbolEffect(.pulse)
+
+            Text("Planning your week...")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(theme.textColor)
+
+            Text("AI is creating tasks for \(goal.name)")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+
+            if let error = generationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding()
+
+                Button("Try Again") {
+                    generationError = nil
+                    Task { await generateTasks() }
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(theme.accentColor)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var reviewView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Here's your plan for this week!")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(theme.textColor)
+
+            Text("You can adjust anything before we start.")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+
+            ForEach($editableTasks) { $task in
+                HStack(spacing: 12) {
+                    Button {
+                        task.isEnabled.toggle()
+                    } label: {
+                        Image(systemName: task.isEnabled ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(task.isEnabled ? theme.accentColor : theme.secondaryTextColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(task.name)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(theme.textColor)
+                            .strikethrough(!task.isEnabled)
+                        HStack(spacing: 8) {
+                            Text(task.frequency.rawValue.capitalized)
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryTextColor)
+                            Text("\(task.reward) coins")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.yellow)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(10)
+                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if planPhase == .refining {
+                HStack(spacing: 8) {
+                    TextField("What would you like to change?", text: $refinementText)
+                        .font(.body)
+                        .padding(10)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+
+                    Button {
+                        Task { await refineTasks() }
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(theme.accentColor)
+                    }
+                    .disabled(refinementText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation { planPhase = .refining }
+                } label: {
+                    Text("Change something")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                Button {
+                    createWeekTasks()
+                } label: {
+                    Text("Looks good!")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func generateTasks() async {
+        do {
+            let suggestion = try await ClaudeAPIService.shared.generateCoachingWeekTasks(
+                goalName: goal.name,
+                childName: goal.assignedTo,
+                weekNumber: goal.weekNumber,
+                previousWeekSummary: previousWeekSummary
+            )
+            aiCategory = suggestion.category
+            aiIcon = suggestion.icon
+            editableTasks = suggestion.tasks.map {
+                EditableSuggestedTask(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+            }
+            currentTasks = suggestion.tasks
+            withAnimation { planPhase = .review }
+        } catch {
+            generationError = "Couldn't generate tasks. Please try again."
+        }
+    }
+
+    private func refineTasks() async {
+        let feedback = refinementText
+        refinementText = ""
+        do {
+            let suggestion = try await ClaudeAPIService.shared.refineGoalTasks(
+                goalName: goal.name,
+                audience: .child,
+                durationDays: 7,
+                currentTasks: currentTasks,
+                userFeedback: feedback
+            )
+            editableTasks = suggestion.tasks.map {
+                EditableSuggestedTask(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+            }
+            currentTasks = suggestion.tasks
+            withAnimation { planPhase = .review }
+        } catch {
+            generationError = "Couldn't refine tasks. Please try again."
+        }
+    }
+
+    private func createWeekTasks() {
+        let calendar = Calendar.current
+        let startDate = calendar.startOfDay(for: Date())
+        let familyCode = authManager.familyCode
+
+        for task in editableTasks where task.isEnabled {
+            let baseDate = calendar.date(bySettingHour: task.hour, minute: task.minute, second: 0, of: startDate) ?? startDate
+
+            let dates: [Date]
+            switch task.frequency {
+            case .daily:
+                dates = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: baseDate) }
+            case .weekly:
+                dates = [baseDate]
+            default:
+                dates = [baseDate]
+            }
+
+            for date in dates {
+                let item = Item(
+                    name: task.name,
+                    targetDate: date,
+                    assignedTo: goal.assignedTo,
+                    reward: Double(task.reward),
+                    createdBy: goal.createdBy,
+                    createdByID: "",
+                    goalId: goal.id.uuidString
+                )
+                modelContext.insert(item)
+
+                if !familyCode.isEmpty {
+                    let snapshot = CloudKitManager.TaskSnapshot(item)
+                    Task { _ = await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
+                }
+            }
+        }
+
+        goal.weekNumber += 1
+        goal.lastPlanDate = Date()
+        try? modelContext.save()
+        dismiss()
     }
 }
 

@@ -38,7 +38,7 @@ struct TaskeeApp: App {
     @State private var hasCompletedInitialSetup = false
     @State private var showSplash = !ScreenshotHelper.isScreenshotMode
 
-    private static let currentSchemaVersion = 6
+    private static let currentSchemaVersion = 7
 
     var sharedModelContainer: ModelContainer = {
         if ScreenshotHelper.isScreenshotMode {
@@ -287,6 +287,7 @@ struct TaskeeApp: App {
         }
         scheduleDailySummary()
         sweepMissedTasks()
+        sweepCoachingMissedTasks()
     }
 
     private func performInitialSync(familyCode: String) async {
@@ -358,6 +359,35 @@ struct TaskeeApp: App {
                 body: body,
                 category: "TASK_MISSED"
             )
+        }
+    }
+
+    private func sweepCoachingMissedTasks() {
+        let context = sharedModelContainer.mainContext
+        let allTasks = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        let allGoals = (try? context.fetch(FetchDescriptor<Goal>())) ?? []
+        let now = Date()
+
+        // Coaching tasks that are past due (1 day grace period instead of 7)
+        let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: now)!
+        let coachingGoalIds = Set(allGoals.filter { $0.isCoaching && $0.isActive }.map { $0.id.uuidString })
+
+        let missedCoaching = allTasks.filter { task in
+            (task.isOpen || task.isInProgress) && !task.isArchived
+            && !task.goalId.isEmpty && coachingGoalIds.contains(task.goalId)
+            && task.targetDate < oneDayAgo
+        }
+
+        for task in missedCoaching {
+            task.status = "missed"
+            notificationManager.sendCoachingMissedAlert(
+                taskName: task.name,
+                childName: task.assignedTo
+            )
+        }
+
+        if !missedCoaching.isEmpty {
+            try? context.save()
         }
     }
 
