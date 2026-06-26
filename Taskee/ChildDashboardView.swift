@@ -256,19 +256,23 @@ struct ChildDashboardView: View {
                     UserAvatarHeader(name: authManager.userName, avatar: authManager.avatar)
                         .padding(.top, 4)
 
-                    tasksGoalsToggle
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(
-                                    key: EarningsCardCenterKey.self,
-                                    value: CGPoint(
-                                        x: geo.frame(in: .named("childDashboard")).midX + geo.size.width * 0.25,
-                                        y: geo.frame(in: .named("childDashboard")).minY + geo.size.height * 0.35
+                    if !showGoalsTab {
+                        earningsCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 6)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: EarningsCardCenterKey.self,
+                                        value: CGPoint(
+                                            x: geo.frame(in: .named("childDashboard")).midX + geo.size.width * 0.25,
+                                            y: geo.frame(in: .named("childDashboard")).minY + geo.size.height * 0.35
+                                        )
                                     )
-                                )
-                            }
-                        )
-                        .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
+                                }
+                            )
+                            .onPreferenceChange(EarningsCardCenterKey.self) { earningsCardCenter = $0 }
+                    }
 
                     if showGoalsTab {
                         GoalsTabContent(
@@ -322,16 +326,19 @@ struct ChildDashboardView: View {
                         .transition(.scale.combined(with: .opacity))
                     }
 
-                    HStack(spacing: 14) {
-                        pickupButton
-                        familyChatButton
-                        shoppingBagButton
-                        familyProjectsButton
-                        wishListButton
-                        addTaskButton
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            childPillGoalsButton
+                            pickupButton
+                            familyChatButton
+                            shoppingBagButton
+                            familyProjectsButton
+                            wishListButton
+                            addTaskButton
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
                     .background(
                         Capsule()
                             .fill(childTheme.gradientColors.last?.opacity(0.85) ?? Color.black.opacity(0.5))
@@ -1263,6 +1270,32 @@ struct ChildDashboardView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
+    }
+
+    private var childPillGoalsButton: some View {
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.easeInOut(duration: 0.2)) { showGoalsTab.toggle() }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "target")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(showGoalsTab ? childTheme.accentColor : .white.opacity(0.15), in: Circle())
+                    .shadow(color: showGoalsTab ? childTheme.accentColor.opacity(0.5) : .clear, radius: 6)
+
+                let activeCount = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.count
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(.red, in: Circle())
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
     }
 
     @ViewBuilder

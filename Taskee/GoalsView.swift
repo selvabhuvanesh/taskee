@@ -555,45 +555,18 @@ struct GoalPickerView: View {
                     .onSubmit { if !goalName.trimmingCharacters(in: .whitespaces).isEmpty { startGeneration() } }
             }
 
-            // Coaching toggle
-            HStack(spacing: 12) {
-                Image(systemName: isCoachingGoal ? "brain.head.profile.fill" : "brain.head.profile")
-                    .font(.title3)
-                    .foregroundStyle(isCoachingGoal ? theme.accentColor : theme.secondaryTextColor)
-                    .frame(width: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("AI Coaching")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(theme.textColor)
-                    Text("AI plans weekly tasks and tracks progress")
-                        .font(.caption)
-                        .foregroundStyle(theme.secondaryTextColor)
+            // Duration picker
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Duration")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(theme.secondaryTextColor)
+                Picker("", selection: $goalDuration) {
+                    Text("2 weeks").tag(14)
+                    Text("1 month").tag(30)
+                    Text("2 months").tag(60)
+                    Text("3 months").tag(90)
                 }
-
-                Spacer()
-
-                Toggle("", isOn: $isCoachingGoal)
-                    .labelsHidden()
-                    .tint(theme.accentColor)
-            }
-            .padding(12)
-            .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
-
-            // Duration picker (hidden for coaching goals — they repeat indefinitely)
-            if !isCoachingGoal {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Duration")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(theme.secondaryTextColor)
-                    Picker("", selection: $goalDuration) {
-                        Text("2 weeks").tag(14)
-                        Text("1 month").tag(30)
-                        Text("2 months").tag(60)
-                        Text("3 months").tag(90)
-                    }
-                    .pickerStyle(.segmented)
-                }
+                .pickerStyle(.segmented)
             }
 
             // Action buttons
@@ -977,6 +950,10 @@ struct GoalPickerView: View {
         modelContext.insert(goal)
         try? modelContext.save()
 
+        // Push goal to CloudKit
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushGoal(goal, familyCode: familyCode) }
+
         // Notify parent if child created this goal
         if authManager.role == "child" {
             notificationManager.sendGoalApprovalNotification(
@@ -1047,6 +1024,7 @@ struct GoalPickerView: View {
         }
 
         Task {
+            await cloudKitManager.pushGoal(goal, familyCode: familyCode)
             for item in createdItems {
                 await cloudKitManager.pushTask(item, familyCode: familyCode)
             }
@@ -1460,6 +1438,7 @@ struct GoalDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthManager.self) private var authManager
     @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
 
     let goal: Goal
@@ -1474,6 +1453,7 @@ struct GoalDetailView: View {
     @State private var isEditingTasks = false
     @State private var taskEdits: [UUID: TaskEditDraft] = [:]
     @State private var animatedDetailProgress: Double = 0
+    @State private var showPlanSheet = false
 
     private var goalTasks: [Item] {
         allTasks.filter { $0.goalId == goal.id.uuidString }
@@ -1585,6 +1565,8 @@ struct GoalDetailView: View {
                                         goal.status = "active"
                                     }
                                     try? modelContext.save()
+                                    let fc = authManager.familyCode
+                                    Task { await cloudKitManager.pushGoal(goal, familyCode: fc) }
                                     notificationManager.sendGoalApprovedNotification(goalName: goal.name)
                                     SoundManager.shared.playApplause()
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1600,6 +1582,24 @@ struct GoalDetailView: View {
                         }
                         .padding(12)
                         .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    }
+
+                    // AI Plan button — always available for active goals assigned to this user
+                    if goal.isActive && goal.assignedTo == authManager.userName {
+                        Button {
+                            showPlanSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 16, weight: .bold))
+                                Text(goalTasks.isEmpty ? "Generate Plan with AI" : "Add More Tasks with AI")
+                                    .font(.subheadline.weight(.bold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(category.color, in: RoundedRectangle(cornerRadius: 12))
+                        }
                     }
 
                     Divider()
@@ -1676,6 +1676,9 @@ struct GoalDetailView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showPlanSheet) {
+                ChildGoalPlanSheet(goal: goal, theme: theme)
             }
             .alert("Delete Goal?", isPresented: $showDeleteConfirm) {
                 Button("Delete", role: .destructive) {
@@ -1877,14 +1880,14 @@ struct GoalDetailView: View {
                 }
             }
             if goal.isActive && !isChildLocked {
-                Button { goal.status = "paused"; try? modelContext.save() } label: {
+                Button { goal.status = "paused"; try? modelContext.save(); let fc = authManager.familyCode; Task { await cloudKitManager.pushGoal(goal, familyCode: fc) } } label: {
                     Label("Pause", systemImage: "pause.circle")
                 }
-                Button { goal.status = "completed"; try? modelContext.save(); UINotificationFeedbackGenerator().notificationOccurred(.success) } label: {
+                Button { goal.status = "completed"; try? modelContext.save(); UINotificationFeedbackGenerator().notificationOccurred(.success); let fc = authManager.familyCode; Task { await cloudKitManager.pushGoal(goal, familyCode: fc) } } label: {
                     Label("Mark Complete", systemImage: "checkmark.circle")
                 }
             } else if goal.isPaused && !isChildLocked {
-                Button { goal.status = "active"; try? modelContext.save() } label: {
+                Button { goal.status = "active"; try? modelContext.save(); let fc = authManager.familyCode; Task { await cloudKitManager.pushGoal(goal, familyCode: fc) } } label: {
                     Label("Resume", systemImage: "play.circle")
                 }
             }
@@ -2032,6 +2035,296 @@ struct CoachingCompletionSheet: View {
         .padding(24)
         .onAppear {
             showConfetti = true
+        }
+    }
+}
+
+// MARK: - Child Goal Plan Sheet
+
+struct ChildGoalPlanSheet: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AuthManager.self) private var authManager
+    @Environment(NotificationManager.self) private var notificationManager
+    @Environment(CloudKitManager.self) private var cloudKitManager
+
+    let goal: Goal
+    let theme: ChildTheme
+
+    enum PlanPhase { case generating, review, refining }
+
+    @State private var planPhase: PlanPhase = .generating
+    @State private var editableTasks: [EditableSuggestedTask] = []
+    @State private var generationError: String?
+    @State private var refinementText = ""
+    @State private var currentTasks: [GoalTaskEntry] = []
+
+    private var category: GoalCategory { GoalCategory(rawValue: goal.category) ?? .lifestyle }
+    private var durationDays: Int {
+        max(7, Calendar.current.dateComponents([.day], from: Date(), to: goal.targetDate).day ?? 30)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 16) {
+                        switch planPhase {
+                        case .generating:
+                            planGeneratingView
+                        case .review, .refining:
+                            planReviewView
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Plan: \(goal.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task { await generateTasks() }
+    }
+
+    private var planGeneratingView: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 40)
+
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 50))
+                .foregroundStyle(category.color)
+                .symbolEffect(.pulse)
+
+            Text("Creating your plan...")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(theme.textColor)
+
+            Text("AI is generating tasks for \"\(goal.name)\"")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+                .multilineTextAlignment(.center)
+
+            if let error = generationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding()
+
+                Button("Try Again") {
+                    generationError = nil
+                    Task { await generateTasks() }
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(category.color)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var planReviewView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: goal.icon)
+                    .font(.title2)
+                    .foregroundStyle(category.color)
+                Text("Here's your plan!")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(theme.textColor)
+            }
+
+            Text("Toggle tasks on/off, or ask AI to change them.")
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryTextColor)
+
+            ForEach($editableTasks) { $task in
+                HStack(spacing: 12) {
+                    Button {
+                        task.isEnabled.toggle()
+                    } label: {
+                        Image(systemName: task.isEnabled ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(task.isEnabled ? category.color : theme.secondaryTextColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(task.name)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(theme.textColor)
+                            .strikethrough(!task.isEnabled)
+                        HStack(spacing: 8) {
+                            Label(task.frequency.rawValue.capitalized, systemImage: "repeat")
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryTextColor)
+                            Text("\(task.reward) coins")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.yellow)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(10)
+                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if planPhase == .refining {
+                HStack(spacing: 8) {
+                    TextField("What would you like to change?", text: $refinementText)
+                        .font(.body)
+                        .padding(10)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+
+                    Button {
+                        Task { await refineTasks() }
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(category.color)
+                    }
+                    .disabled(refinementText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation { planPhase = .refining }
+                } label: {
+                    Text("Change something")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(theme.textColor)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                Button {
+                    createTasks()
+                } label: {
+                    Text("Looks good!")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(category.color, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func generateTasks() async {
+        do {
+            let audience: GoalAudience = authManager.role == "child" ? .child : .parent
+            let suggestion: GoalSuggestion
+
+            if goal.isCoaching {
+                suggestion = try await ClaudeAPIService.shared.generateCoachingWeekTasks(
+                    goalName: goal.name,
+                    childName: goal.assignedTo,
+                    weekNumber: goal.weekNumber,
+                    previousWeekSummary: ""
+                )
+            } else {
+                suggestion = try await ClaudeAPIService.shared.generateGoalTasks(
+                    goalName: goal.name,
+                    audience: audience,
+                    durationDays: durationDays
+                )
+            }
+
+            editableTasks = suggestion.tasks.map {
+                EditableSuggestedTask(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+            }
+            currentTasks = suggestion.tasks
+            withAnimation { planPhase = .review }
+        } catch {
+            generationError = "Couldn't generate tasks. Please try again."
+        }
+    }
+
+    private func refineTasks() async {
+        let feedback = refinementText
+        refinementText = ""
+        do {
+            let audience: GoalAudience = authManager.role == "child" ? .child : .parent
+            let suggestion = try await ClaudeAPIService.shared.refineGoalTasks(
+                goalName: goal.name,
+                audience: audience,
+                durationDays: durationDays,
+                currentTasks: currentTasks,
+                userFeedback: feedback
+            )
+            editableTasks = suggestion.tasks.map {
+                EditableSuggestedTask(name: $0.name, frequency: $0.frequency, occurrences: $0.occurrences, reward: $0.reward, hour: $0.hour, minute: $0.minute)
+            }
+            currentTasks = suggestion.tasks
+            withAnimation { planPhase = .review }
+        } catch {
+            generationError = "Couldn't refine tasks. Please try again."
+        }
+    }
+
+    private func createTasks() {
+        let calendar = Calendar.current
+        let startDate = calendar.startOfDay(for: Date())
+        let familyCode = authManager.familyCode
+
+        for task in editableTasks where task.isEnabled {
+            let baseDate = calendar.date(bySettingHour: task.hour, minute: task.minute, second: 0, of: startDate) ?? startDate
+            let isRecurring = task.frequency != .none
+            let dates = generateDates(start: baseDate, frequency: task.frequency, count: task.occurrences)
+
+            for date in dates {
+                let item = Item(
+                    name: task.name,
+                    targetDate: date,
+                    assignedTo: goal.assignedTo,
+                    reward: Double(task.reward),
+                    isRecurring: isRecurring,
+                    createdBy: authManager.userName,
+                    createdByID: authManager.appleUserID,
+                    goalId: goal.id.uuidString
+                )
+                modelContext.insert(item)
+                notificationManager.scheduleTaskReminder(taskId: item.id, taskName: item.name, assignedTo: goal.assignedTo, dueDate: date)
+
+                if !familyCode.isEmpty {
+                    let snapshot = CloudKitManager.TaskSnapshot(item)
+                    Task { _ = await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
+                }
+            }
+        }
+
+        if goal.isCoaching {
+            goal.weekNumber += 1
+            goal.lastPlanDate = Date()
+        }
+
+        try? modelContext.save()
+        if !familyCode.isEmpty {
+            Task { await cloudKitManager.pushGoal(goal, familyCode: familyCode) }
+        }
+        dismiss()
+    }
+
+    private func generateDates(start: Date, frequency: RecurrenceType, count: Int) -> [Date] {
+        let cal = Calendar.current
+        switch frequency {
+        case .daily:
+            return (0..<count).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+        case .weekly:
+            return (0..<count).compactMap { cal.date(byAdding: .weekOfYear, value: $0, to: start) }
+        case .monthly:
+            return (0..<count).compactMap { cal.date(byAdding: .month, value: $0, to: start) }
+        case .none:
+            return [start]
         }
     }
 }

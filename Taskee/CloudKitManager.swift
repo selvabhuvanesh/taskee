@@ -493,6 +493,35 @@ final class CloudKitManager {
         return await saveRecord(record, to: familyDatabase)
     }
 
+    // MARK: - Push Goal
+
+    @discardableResult
+    func pushGoal(_ goal: Goal, familyCode: String) async -> Bool {
+        guard !familyCode.isEmpty else { return false }
+
+        let recordID = familyRecordID(name: goal.id.uuidString)
+        let record = CKRecord(recordType: "GoalRecord", recordID: recordID)
+        record["familyCode"] = familyCode
+        record["name"] = goal.name
+        record["category"] = goal.category
+        record["icon"] = goal.icon
+        record["assignedTo"] = goal.assignedTo
+        record["createdBy"] = goal.createdBy
+        record["status"] = goal.status
+        record["targetDate"] = goal.targetDate as NSDate
+        record["createdAt"] = goal.createdAt as NSDate
+        record["isCustom"] = NSNumber(value: goal.isCustom ? 1 : 0)
+        record["templateId"] = goal.templateId
+        record["isCoaching"] = NSNumber(value: goal.isCoaching ? 1 : 0)
+        record["weekNumber"] = NSNumber(value: goal.weekNumber)
+        if let lastPlan = goal.lastPlanDate {
+            record["lastPlanDate"] = lastPlan as NSDate
+        }
+        record["coachingNotes"] = goal.coachingNotes
+
+        return await saveRecord(record, to: familyDatabase)
+    }
+
     // MARK: - Push Member
 
     @discardableResult
@@ -806,6 +835,7 @@ final class CloudKitManager {
             await syncIdeas(context: context, familyCode: familyCode)
             await syncVotes(context: context, familyCode: familyCode)
             await syncWishListItems(context: context, familyCode: familyCode)
+            await syncGoals(context: context, familyCode: familyCode)
         }
 
         let memberChanges = await syncMembers(context: context, familyCode: familyCode)
@@ -1676,6 +1706,26 @@ final class CloudKitManager {
         }
     }
 
+    // MARK: - Sync Goals
+
+    private func syncGoals(context: ModelContext, familyCode: String) async {
+        let remoteRecords = await fetchAllRecords(type: "GoalRecord", familyCode: familyCode, from: familyDatabase, inZone: familyZoneID)
+
+        let descriptor = FetchDescriptor<Goal>()
+        let local = (try? context.fetch(descriptor)) ?? []
+
+        for record in remoteRecords {
+            applyGoalRecord(record, context: context)
+        }
+
+        if !remoteRecords.isEmpty {
+            let remoteIDs = Set(remoteRecords.map { $0.recordID.recordName })
+            for goal in local where !remoteIDs.contains(goal.id.uuidString) {
+                context.delete(goal)
+            }
+        }
+    }
+
     // MARK: - Annual Reminders
 
     @discardableResult
@@ -2272,6 +2322,8 @@ final class CloudKitManager {
                 applyVoteRecord(record, context: context)
             case "WishListRecord":
                 applyWishListRecord(record, context: context)
+            case "GoalRecord":
+                applyGoalRecord(record, context: context)
             default:
                 break
             }
@@ -2386,6 +2438,63 @@ final class CloudKitManager {
             result.changes.append(.taskAssigned(taskName: name, assignedTo: assignedTo, createdBy: createdBy))
         }
         return result
+    }
+
+    private func applyGoalRecord(_ record: CKRecord, context: ModelContext) {
+        let idStr = record.recordID.recordName
+        guard let uuid = UUID(uuidString: idStr) else { return }
+
+        let allGoals = (try? context.fetch(FetchDescriptor<Goal>())) ?? []
+
+        let name = record["name"] as? String ?? ""
+        let category = record["category"] as? String ?? "lifestyle"
+        let icon = record["icon"] as? String ?? "star.fill"
+        let assignedTo = record["assignedTo"] as? String ?? ""
+        let createdBy = record["createdBy"] as? String ?? ""
+        let status = record["status"] as? String ?? "active"
+        let targetDate = record["targetDate"] as? Date ?? Date()
+        let createdAt = record["createdAt"] as? Date ?? Date()
+        let isCustom = (record["isCustom"] as? NSNumber)?.boolValue ?? false
+        let templateId = record["templateId"] as? String ?? ""
+        let isCoaching = (record["isCoaching"] as? NSNumber)?.boolValue ?? false
+        let weekNumber = (record["weekNumber"] as? NSNumber)?.intValue ?? 0
+        let lastPlanDate = record["lastPlanDate"] as? Date
+        let coachingNotes = record["coachingNotes"] as? String ?? ""
+
+        if let local = allGoals.first(where: { $0.id == uuid }) {
+            local.name = name
+            local.category = category
+            local.icon = icon
+            local.assignedTo = assignedTo
+            local.createdBy = createdBy
+            local.status = status
+            local.targetDate = targetDate
+            local.isCustom = isCustom
+            local.templateId = templateId
+            local.isCoaching = isCoaching
+            local.weekNumber = weekNumber
+            local.lastPlanDate = lastPlanDate
+            local.coachingNotes = coachingNotes
+        } else {
+            let goal = Goal(
+                id: uuid,
+                name: name,
+                category: category,
+                icon: icon,
+                assignedTo: assignedTo,
+                createdBy: createdBy,
+                targetDate: targetDate,
+                isCustom: isCustom,
+                templateId: templateId,
+                isCoaching: isCoaching
+            )
+            goal.status = status
+            goal.createdAt = createdAt
+            goal.weekNumber = weekNumber
+            goal.lastPlanDate = lastPlanDate
+            goal.coachingNotes = coachingNotes
+            context.insert(goal)
+        }
     }
 
     private func applyRedemptionRecord(_ record: CKRecord, context: ModelContext) -> [SyncChange] {
@@ -2526,6 +2635,11 @@ final class CloudKitManager {
             let d = FetchDescriptor<WishListItem>()
             if let w = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
                 context.delete(w)
+            }
+        case "GoalRecord":
+            let d = FetchDescriptor<Goal>()
+            if let g = (try? context.fetch(d))?.first(where: { $0.id == uuid }) {
+                context.delete(g)
             }
         default:
             break
