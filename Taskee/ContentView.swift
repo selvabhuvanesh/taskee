@@ -550,6 +550,9 @@ struct ContentView: View {
     @State private var selectedHomeGoal: Goal?
     @State private var giftTaskToReveal: Item?
     @State private var taskListVersion = 0
+    @State private var motivationMessage: String?
+    @AppStorage("lastMotivationDate_parent") private var lastMotivationDate = ""
+    @AppStorage("lastMotivationMsg_parent") private var lastMotivationMsg = ""
 
     private var pendingRedemptions: [RewardRedemption] {
         allRedemptions.filter { $0.isPending }
@@ -778,6 +781,10 @@ struct ContentView: View {
             .onAppear {
                 // scheduleStickyNote(from: parentTips) // Disabled for now
                 deduplicateRedemptions()
+                performRankBonusCheck()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    fetchDailyMotivation()
+                }
             }
             .toolbarColorScheme(parentTheme.colorScheme, for: .navigationBar)
             .environment(\.colorScheme, parentTheme.colorScheme)
@@ -1144,24 +1151,30 @@ struct ContentView: View {
             bottomPillBar
         }
         .overlay(alignment: .bottomTrailing) {
-            Button {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                withAnimation { isAIMode = true }
-            } label: {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 64, height: 64)
-                    .background(
-                        LinearGradient(
-                            colors: [.purple, .blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        in: Circle()
-                    )
-                    .shadow(color: .purple.opacity(0.7), radius: 18, y: 2)
-                    .shadow(color: .blue.opacity(0.5), radius: 30, y: 4)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let msg = motivationMessage {
+                    motivationCallout(msg, theme: parentTheme)
+                        .transition(.scale(scale: 0.3, anchor: .bottomTrailing).combined(with: .opacity))
+                }
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    withAnimation { isAIMode = true }
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 64, height: 64)
+                        .background(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Circle()
+                        )
+                        .shadow(color: .purple.opacity(0.7), radius: 18, y: 2)
+                        .shadow(color: .blue.opacity(0.5), radius: 30, y: 4)
+                }
             }
             .padding(.trailing, 20)
             .padding(.bottom, 80)
@@ -2170,6 +2183,105 @@ struct ContentView: View {
         }
     }
 
+    private func performRankBonusCheck() {
+        let quest = MonthlyQuest.compute(tasks: tasks, userName: authManager.userName)
+        guard let bonus = RankBonusChecker.check(quest: quest, userName: authManager.userName) else { return }
+        if let me = allMembers.first(where: { $0.appleUserID == authManager.appleUserID }) {
+            me.addReward(bonus.coins)
+            let familyCode = authManager.familyCode
+            Task { await cloudKitManager.pushMember(me, familyCode: familyCode) }
+        }
+        try? modelContext.save()
+        celebrationReward = bonus.coins
+        showCelebration = true
+        SoundManager.shared.playApplause()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    @ViewBuilder
+    private func motivationCallout(_ msg: String, theme: ChildTheme) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.yellow)
+            Text(msg)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(theme.textColor)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                withAnimation(.spring(duration: 0.3)) { motivationMessage = nil }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(theme.secondaryTextColor)
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 22)
+        .frame(maxWidth: 280)
+        .background(
+            CalloutBubbleShape()
+                .fill(
+                    LinearGradient(
+                        colors: [theme.gradientColors.first ?? .blue, theme.accentColor.opacity(0.8)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+        )
+    }
+
+    private func fetchDailyMotivation() {
+        let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        if lastMotivationDate == today, !lastMotivationMsg.isEmpty {
+            withAnimation(.spring(duration: 0.4)) { motivationMessage = lastMotivationMsg }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                withAnimation { motivationMessage = nil }
+            }
+            return
+        }
+
+        let quest = MonthlyQuest.compute(tasks: tasks, userName: authManager.userName)
+        let streak = InsightsEngine.computeStreak(tasks: tasks, memberName: authManager.userName, calendar: Calendar.current, today: Date())
+        let cal = Calendar.current
+        let startOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
+        let monthTasks = tasks.filter { $0.assignedTo == authManager.userName && !$0.isArchived && $0.targetDate >= startOfMonth }
+        let completionRate = monthTasks.isEmpty ? 0 : Int(Double(monthTasks.filter { $0.isApproved }.count) / Double(monthTasks.count) * 100)
+        let todayStart = cal.startOfDay(for: Date())
+        let todayEnd = cal.date(byAdding: .day, value: 1, to: todayStart)!
+        let todayCount = tasks.filter { $0.assignedTo == authManager.userName && $0.isOpen && $0.targetDate >= todayStart && $0.targetDate < todayEnd }.count
+        let goalNames = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.map(\.name)
+
+        Task {
+            do {
+                let msg = try await ClaudeAPIService.shared.generateDailyMotivation(
+                    userName: authManager.userName,
+                    todayTaskCount: todayCount,
+                    streakDays: streak,
+                    questRank: quest.rank.rawValue,
+                    completionRate: completionRate,
+                    activeGoalNames: goalNames
+                )
+                await MainActor.run {
+                    lastMotivationDate = today
+                    lastMotivationMsg = msg
+                    withAnimation(.spring(duration: 0.4)) { motivationMessage = msg }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                        withAnimation { motivationMessage = nil }
+                    }
+                }
+            } catch {
+                // Silently fail — motivation toast is non-critical
+            }
+        }
+    }
+
     private func scheduleStickyNote(from tips: [String]) {
         let delay = Double.random(in: 120...300)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -2945,6 +3057,7 @@ struct DateTasksView: View {
     @State private var selectedCalendarDate = Date()
     @State private var showGoalPickerForMember = false
     @State private var selectedMemberGoal: Goal?
+    @Query private var allMembers: [FamilyMember]
 
     private var memberTotalEarned: Int {
         allTasks
@@ -3561,6 +3674,22 @@ struct DateTasksView: View {
         Task { await cloudKitManager.deleteRemoteTasks(taskIDs) }
     }
 
+    private func performRankBonusCheck() {
+        let memberToCheck = memberName.isEmpty ? authManager.userName : memberName
+        let quest = MonthlyQuest.compute(tasks: allTasks, userName: memberToCheck)
+        guard let bonus = RankBonusChecker.check(quest: quest, userName: memberToCheck) else { return }
+        if let me = allMembers.first(where: { $0.name == memberToCheck }) {
+            me.addReward(bonus.coins)
+            let familyCode = authManager.familyCode
+            Task { await cloudKitManager.pushMember(me, familyCode: familyCode) }
+        }
+        try? modelContext.save()
+        celebrationReward = bonus.coins
+        showCelebration = true
+        SoundManager.shared.playApplause()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
     private func handleApproval(task: Item) {
         withAnimation(.snappy) {
             task.status = "approved"
@@ -3590,7 +3719,11 @@ struct DateTasksView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         celebrationReward = task.reward
         showCelebration = true
-
+        // Check rank bonus after approval (delayed to let celebration finish)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self.performRankBonusCheck()
+        }
     }
 
     private func handleRejection(task: Item) {

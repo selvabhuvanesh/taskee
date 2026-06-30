@@ -728,6 +728,54 @@ final class ClaudeAPIService: Sendable {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func generateDailyMotivation(
+        userName: String,
+        todayTaskCount: Int,
+        streakDays: Int,
+        questRank: String,
+        completionRate: Int,
+        activeGoalNames: [String]
+    ) async throws -> String {
+        let goalsText = activeGoalNames.isEmpty ? "none" : activeGoalNames.joined(separator: ", ")
+
+        let prompt = """
+        You are a warm, encouraging family task coach. Generate ONE short sentence (max 15 words) of positive reinforcement for \(userName). Reference their actual stats naturally. Be specific, not generic. Never use emojis.
+
+        Stats: \(todayTaskCount) tasks today, \(streakDays)-day streak, \(questRank) rank, \(completionRate)% completion rate, active goals: \(goalsText).
+
+        Examples of good tone: "Knight rank already — you're crushing this month!", "5-day streak and 3 tasks today — unstoppable!", "Your Reading Goal is making great progress — keep it up!"
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 100,
+            "system": prompt,
+            "messages": [["role": "user", "content": "Give me today's motivation."]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 10
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            return "You're doing great, \(userName) — keep it up!"
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            return "You're doing great, \(userName) — keep it up!"
+        }
+
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     enum APIError: Error {
         case httpError(Int, String), parseError
     }

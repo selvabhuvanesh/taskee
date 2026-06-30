@@ -2947,6 +2947,72 @@ struct QuestProgressBar: View {
     }
 }
 
+// MARK: - Rank Bonus
+
+enum RankBonusResult {
+    case knight
+    case ninja
+
+    var coins: Double { 5 }
+    var title: String {
+        switch self {
+        case .knight: return "Knight Rank Achieved!"
+        case .ninja: return "Ninja Rank Achieved!"
+        }
+    }
+    var subtitle: String { "+5 bonus coins!" }
+}
+
+struct RankBonusChecker {
+    static func check(quest: MonthlyQuest, userName: String) -> RankBonusResult? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        let monthKey = formatter.string(from: Date())
+
+        let ninjaKey = "rankBonus_ninja_\(userName)"
+        let knightKey = "rankBonus_knight_\(userName)"
+
+        // Check ninja first (higher rank)
+        if quest.rank == .ninja && UserDefaults.standard.string(forKey: ninjaKey) != monthKey {
+            UserDefaults.standard.set(monthKey, forKey: ninjaKey)
+            return .ninja
+        }
+
+        if quest.rank == .knight || quest.rank == .ninja {
+            if UserDefaults.standard.string(forKey: knightKey) != monthKey {
+                UserDefaults.standard.set(monthKey, forKey: knightKey)
+                return .knight
+            }
+        }
+
+        return nil
+    }
+}
+
+// MARK: - Callout Bubble Shape
+
+struct CalloutBubbleShape: Shape {
+    var cornerRadius: CGFloat = 16
+    var tailSize: CGFloat = 10
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let bubbleRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height - tailSize)
+        path.addRoundedRect(in: bubbleRect, cornerRadii: .init(topLeading: cornerRadius, bottomLeading: cornerRadius, bottomTrailing: cornerRadius, topTrailing: cornerRadius))
+
+        // Tail pointing bottom-right
+        let tailRight = rect.maxX - 28
+        let tailLeft = tailRight - 18
+        let tailTip = CGPoint(x: tailRight - 2, y: rect.maxY)
+        path.move(to: CGPoint(x: tailLeft, y: bubbleRect.maxY))
+        path.addLine(to: tailTip)
+        path.addLine(to: CGPoint(x: tailRight, y: bubbleRect.maxY))
+        path.closeSubpath()
+
+        return path
+    }
+}
+
 // MARK: - Goal Model
 
 @Model
@@ -3346,7 +3412,7 @@ struct InsightsEngine {
         return "Other"
     }
 
-    private static func computeStreak(tasks: [Item], memberName: String, calendar: Calendar, today: Date) -> Int {
+    static func computeStreak(tasks: [Item], memberName: String, calendar: Calendar, today: Date) -> Int {
         var streak = 0
         var checkDate = calendar.date(byAdding: .day, value: -1, to: today)!
 
