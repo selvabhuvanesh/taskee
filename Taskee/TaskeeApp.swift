@@ -11,14 +11,29 @@ import UIKit
 import Combine
 
 class AppDelegate: NSObject, UIApplicationDelegate {
+    /// Closure set by TaskeeApp to perform sync in the background.
+    /// Returns the sync changes so we can fire local notifications before iOS suspends us.
+    var backgroundSync: (() async -> [CloudKitManager.SyncChange])?
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.registerForRemoteNotifications()
         return true
     }
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        NotificationCenter.default.post(name: .cloudKitDataChanged, object: nil)
-        completionHandler(.newData)
+        guard let backgroundSync else {
+            // Fallback: post notification for foreground handling
+            NotificationCenter.default.post(name: .cloudKitDataChanged, object: nil)
+            completionHandler(.newData)
+            return
+        }
+
+        // Perform actual sync within the background execution window (~30s)
+        // so notifications fire before iOS suspends the app.
+        Task {
+            let changes = await backgroundSync()
+            completionHandler(changes.isEmpty ? .noData : .newData)
+        }
     }
 }
 
@@ -151,6 +166,12 @@ struct TaskeeApp: App {
                 notificationManager.requestPermission()
                 notificationManager.onPickupAcknowledged = { childName in
                     acknowledgePickup(childName: childName)
+                }
+
+                // Wire up background sync so AppDelegate can sync + deliver
+                // notifications within the background execution window.
+                appDelegate.backgroundSync = { [self] in
+                    await self.performBackgroundSync()
                 }
 
                 subscriptionManager.onTierChanged = { newTier in
@@ -288,6 +309,22 @@ struct TaskeeApp: App {
         scheduleDailySummary()
         sweepMissedTasks()
         sweepCoachingMissedTasks()
+    }
+
+    /// Called by AppDelegate from background silent push.
+    /// Performs sync and fires notifications within the ~30s background window.
+    @MainActor
+    private func performBackgroundSync() async -> [CloudKitManager.SyncChange] {
+        let familyCode = authManager.familyCode
+        guard !familyCode.isEmpty else { return [] }
+        if !cloudKitManager.hasFamilyZone {
+            await cloudKitManager.ensureFamilyZoneAccess(familyCode: familyCode, appleUserID: authManager.appleUserID)
+        }
+        let result = await cloudKitManager.syncAll(context: sharedModelContainer.mainContext, familyCode: familyCode, onNewTasks: scheduleRemindersForSyncedTasks)
+        handleSyncChanges(result.changes)
+        sweepMissedTasks()
+        sweepCoachingMissedTasks()
+        return result.changes
     }
 
     private func performInitialSync(familyCode: String) async {

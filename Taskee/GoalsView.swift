@@ -1440,6 +1440,7 @@ struct GoalDetailView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(CloudKitManager.self) private var cloudKitManager
     @Query(sort: \Item.targetDate) private var allTasks: [Item]
+    @Query private var allMembers: [FamilyMember]
 
     let goal: Goal
     let theme: ChildTheme
@@ -1454,6 +1455,7 @@ struct GoalDetailView: View {
     @State private var taskEdits: [UUID: TaskEditDraft] = [:]
     @State private var animatedDetailProgress: Double = 0
     @State private var showPlanSheet = false
+    @State private var completedTaskName: String?
 
     private var goalTasks: [Item] {
         allTasks.filter { $0.goalId == goal.id.uuidString }
@@ -1718,15 +1720,22 @@ struct GoalDetailView: View {
         HStack(spacing: 8) {
             if completed {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 18))
                     .foregroundStyle(.green)
                 Text(task.name)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.secondary)
                     .strikethrough()
             } else {
-                Text(task.emoji)
-                    .font(.system(size: 14))
+                Button {
+                    completeGoalTask(task)
+                } label: {
+                    Image(systemName: "circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(category.color.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.name)
                         .font(.subheadline.weight(.bold))
@@ -1756,6 +1765,44 @@ struct GoalDetailView: View {
             }
         }
         .padding(.vertical, 4)
+        .overlay {
+            if completedTaskName == task.name {
+                Text("Done!")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.green)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+
+    private func completeGoalTask(_ task: Item) {
+        if task.createdByChild || task.reward <= 0 {
+            withAnimation(.snappy) { task.status = "approved" }
+            if task.reward > 0, let me = allMembers.first(where: { $0.appleUserID == authManager.appleUserID }) {
+                me.addReward(task.reward)
+                let familyCode = authManager.familyCode
+                Task { await cloudKitManager.pushMember(me, familyCode: familyCode) }
+            }
+        } else {
+            task.status = "inReview"
+            notificationManager.sendTaskReviewNotification(
+                taskName: task.name,
+                childName: authManager.userName
+            )
+        }
+
+        let snapshot = CloudKitManager.TaskSnapshot(task)
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushTaskSnapshot(snapshot, familyCode: familyCode) }
+        try? modelContext.save()
+
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        withAnimation(.spring(duration: 0.3)) {
+            completedTaskName = task.name
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation { completedTaskName = nil }
+        }
     }
 
     @ViewBuilder
