@@ -734,23 +734,31 @@ final class ClaudeAPIService: Sendable {
         streakDays: Int,
         questRank: String,
         completionRate: Int,
-        activeGoalNames: [String]
+        activeGoalNames: [String],
+        activeProjects: [(name: String, status: String)] = [],
+        shoppingPendingCount: Int = 0,
+        goalProgress: [(name: String, percent: Int)] = [],
+        coinsEarned: Int = 0
     ) async throws -> String {
         let goalsText = activeGoalNames.isEmpty ? "none" : activeGoalNames.joined(separator: ", ")
+        let projectsText = activeProjects.isEmpty ? "none" : activeProjects.map { "\($0.name) (\($0.status))" }.joined(separator: ", ")
+        let goalProgressText = goalProgress.isEmpty ? "none" : goalProgress.map { "\($0.name): \($0.percent)%" }.joined(separator: ", ")
 
         let prompt = """
-        You are a warm, encouraging family task coach. Generate ONE short sentence (max 15 words) of positive reinforcement for \(userName). Reference their actual stats naturally. Be specific, not generic. Never use emojis.
+        You are a warm, encouraging family task coach. Generate 2-3 short sentences of personalized insight for \(userName). Be specific, varied, and interesting. Reference their actual data naturally — pick the most noteworthy stats to highlight. Never use emojis. Each time should feel fresh and different.
 
-        Stats: \(todayTaskCount) tasks today, \(streakDays)-day streak, \(questRank) rank, \(completionRate)% completion rate, active goals: \(goalsText).
+        Stats: \(todayTaskCount) tasks today, \(streakDays)-day streak, \(questRank) rank, \(completionRate)% monthly completion, \(coinsEarned) coins earned.
+        Active goals: \(goalsText). Goal progress: \(goalProgressText).
+        Family projects: \(projectsText). Shopping items pending: \(shoppingPendingCount).
 
-        Examples of good tone: "Knight rank already — you're crushing this month!", "5-day streak and 3 tasks today — unstoppable!", "Your Reading Goal is making great progress — keep it up!"
+        Vary your focus — sometimes highlight streaks, sometimes goals, sometimes projects or shopping. Be encouraging but genuine.
         """
 
         let body: [String: Any] = [
             "model": ClaudeAPIService.haikuModel,
-            "max_tokens": 100,
+            "max_tokens": 150,
             "system": prompt,
-            "messages": [["role": "user", "content": "Give me today's motivation."]]
+            "messages": [["role": "user", "content": "Give me a fresh insight."]]
         ]
 
         var request = URLRequest(url: proxyURL)
@@ -774,6 +782,120 @@ final class ClaudeAPIService: Sendable {
         }
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func generateProjectIdeas(
+        projectName: String,
+        description: String,
+        category: String,
+        existingIdeas: [String]
+    ) async throws -> [String] {
+        let existingText = existingIdeas.isEmpty ? "None yet" : existingIdeas.joined(separator: ", ")
+
+        let prompt = """
+        Generate 5 creative, actionable ideas for a family project. Each idea should be 1 concise sentence. Do NOT repeat existing ideas. Return ONLY a numbered list (1. idea\\n2. idea...). No other text.
+        """
+
+        let userMsg = """
+        Project: \(projectName)
+        Category: \(category)
+        Description: \(description.isEmpty ? "No description" : description)
+        Existing ideas: \(existingText)
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 300,
+            "system": prompt,
+            "messages": [["role": "user", "content": userMsg]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "Failed to generate ideas")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            throw APIError.parseError
+        }
+
+        return text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { line in
+                // Strip numbering like "1. " or "1) "
+                if let range = line.range(of: #"^\d+[\.\)]\s*"#, options: .regularExpression) {
+                    return String(line[range.upperBound...])
+                }
+                return line
+            }
+            .filter { !$0.isEmpty }
+    }
+
+    func suggestShoppingItems(
+        currentItems: [String],
+        boughtItems: [String],
+        familySize: Int
+    ) async throws -> [String] {
+        let currentText = currentItems.isEmpty ? "None" : currentItems.joined(separator: ", ")
+        let boughtText = boughtItems.isEmpty ? "None" : boughtItems.joined(separator: ", ")
+
+        let prompt = """
+        Based on this family's shopping list, suggest 5 items they might need. Consider common household replenishment cycles and what complements their current list. Return ONLY a numbered list (1. item\\n2. item...). Each item should be a simple product name (1-3 words). No other text.
+        """
+
+        let userMsg = """
+        Family size: \(familySize)
+        Current shopping list: \(currentText)
+        Recently bought: \(boughtText)
+        """
+
+        let body: [String: Any] = [
+            "model": ClaudeAPIService.haikuModel,
+            "max_tokens": 200,
+            "system": prompt,
+            "messages": [["role": "user", "content": userMsg]]
+        ]
+
+        var request = URLRequest(url: proxyURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(appToken, forHTTPHeaderField: "X-App-Token")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "Failed to suggest items")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]],
+              let firstBlock = content.first,
+              let text = firstBlock["text"] as? String else {
+            throw APIError.parseError
+        }
+
+        return text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { line in
+                if let range = line.range(of: #"^\d+[\.\)]\s*"#, options: .regularExpression) {
+                    return String(line[range.upperBound...])
+                }
+                return line
+            }
+            .filter { !$0.isEmpty }
     }
 
     enum APIError: Error {

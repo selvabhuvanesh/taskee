@@ -551,8 +551,6 @@ struct ContentView: View {
     @State private var giftTaskToReveal: Item?
     @State private var taskListVersion = 0
     @State private var motivationMessage: String?
-    @AppStorage("lastMotivationDate_parent") private var lastMotivationDate = ""
-    @AppStorage("lastMotivationMsg_parent") private var lastMotivationMsg = ""
 
     private var pendingRedemptions: [RewardRedemption] {
         allRedemptions.filter { $0.isPending }
@@ -1150,31 +1148,31 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             bottomPillBar
         }
+        .overlay {
+            if let msg = motivationMessage {
+                motivationCallout(msg, theme: parentTheme)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
-            VStack(alignment: .trailing, spacing: 6) {
-                if let msg = motivationMessage {
-                    motivationCallout(msg, theme: parentTheme)
-                        .transition(.scale(scale: 0.3, anchor: .bottomTrailing).combined(with: .opacity))
-                }
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    withAnimation { isAIMode = true }
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 64, height: 64)
-                        .background(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            in: Circle()
-                        )
-                        .shadow(color: .purple.opacity(0.7), radius: 18, y: 2)
-                        .shadow(color: .blue.opacity(0.5), radius: 30, y: 4)
-                }
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                withAnimation { isAIMode = true }
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 64, height: 64)
+                    .background(
+                        LinearGradient(
+                            colors: [.purple, .blue],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+                    .shadow(color: .purple.opacity(0.7), radius: 18, y: 2)
+                    .shadow(color: .blue.opacity(0.5), radius: 30, y: 4)
             }
             .padding(.trailing, 20)
             .padding(.bottom, 80)
@@ -2200,32 +2198,32 @@ struct ContentView: View {
 
     @ViewBuilder
     private func motivationCallout(_ msg: String, theme: ChildTheme) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.yellow)
-            Text(msg)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(theme.textColor)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button {
-                withAnimation(.spring(duration: 0.3)) { motivationMessage = nil }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(theme.secondaryTextColor)
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.yellow)
+                Text(msg)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.textColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button {
+                    withAnimation(.spring(duration: 0.3)) { motivationMessage = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(theme.secondaryTextColor)
+                        .padding(7)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 22)
-        .frame(maxWidth: 280)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: 340)
         .background(
-            CalloutBubbleShape()
+            CenteredBubbleShape()
                 .fill(
                     LinearGradient(
                         colors: [theme.gradientColors.first ?? .blue, theme.accentColor.opacity(0.8)],
@@ -2233,20 +2231,12 @@ struct ContentView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
         )
+        .padding(.horizontal, 24)
     }
 
     private func fetchDailyMotivation() {
-        let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-        if lastMotivationDate == today, !lastMotivationMsg.isEmpty {
-            withAnimation(.spring(duration: 0.4)) { motivationMessage = lastMotivationMsg }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-                withAnimation { motivationMessage = nil }
-            }
-            return
-        }
-
         let quest = MonthlyQuest.compute(tasks: tasks, userName: authManager.userName)
         let streak = InsightsEngine.computeStreak(tasks: tasks, memberName: authManager.userName, calendar: Calendar.current, today: Date())
         let cal = Calendar.current
@@ -2257,6 +2247,10 @@ struct ContentView: View {
         let todayEnd = cal.date(byAdding: .day, value: 1, to: todayStart)!
         let todayCount = tasks.filter { $0.assignedTo == authManager.userName && $0.isOpen && $0.targetDate >= todayStart && $0.targetDate < todayEnd }.count
         let goalNames = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.map(\.name)
+        let projects = allProjects.filter { !$0.isCompleted }.map { (name: $0.name, status: $0.statusLabel) }
+        let pendingShoppingCount = shoppingItems.filter { !$0.isBought }.count
+        let goalProg = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.map { (name: $0.name, percent: Int($0.progress(from: tasks) * 100)) }
+        let coinsEarned = Int(tasks.filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }.reduce(0.0) { $0 + $1.reward })
 
         Task {
             do {
@@ -2266,13 +2260,15 @@ struct ContentView: View {
                     streakDays: streak,
                     questRank: quest.rank.rawValue,
                     completionRate: completionRate,
-                    activeGoalNames: goalNames
+                    activeGoalNames: goalNames,
+                    activeProjects: projects,
+                    shoppingPendingCount: pendingShoppingCount,
+                    goalProgress: goalProg,
+                    coinsEarned: coinsEarned
                 )
                 await MainActor.run {
-                    lastMotivationDate = today
-                    lastMotivationMsg = msg
                     withAnimation(.spring(duration: 0.4)) { motivationMessage = msg }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                         withAnimation { motivationMessage = nil }
                     }
                 }
@@ -9847,10 +9843,13 @@ struct ShoppingBagView: View {
     @Query(sort: \ShoppingItem.createdAt) private var allItems: [ShoppingItem]
     var theme: ChildTheme = ChildTheme(themeId: "default", fontId: "default")
 
+    @Query private var allMembers: [FamilyMember]
     @State private var newItemName = ""
     @State private var editingItem: ShoppingItem?
     @State private var editingName = ""
     @FocusState private var isInputFocused: Bool
+    @State private var aiSuggestedItems: [(id: UUID, text: String)] = []
+    @State private var isGeneratingSuggestions = false
 
     private var unboughtItems: [ShoppingItem] {
         allItems.filter { !$0.isBought }
@@ -9893,6 +9892,10 @@ struct ShoppingBagView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 8) {
+                                if !aiSuggestedItems.isEmpty {
+                                    aiSuggestionsSection
+                                }
+
                                 ForEach(unboughtItems) { item in
                                     shoppingRow(item: item)
                                 }
@@ -10062,6 +10065,95 @@ struct ShoppingBagView: View {
             modelContext.delete(item)
             Task { await cloudKitManager.deleteShoppingItem(id: id, familyCode: familyCode) }
         }
+    }
+
+    private var aiSuggestionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.purple)
+                Text("AI Suggestions")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.purple)
+                Spacer()
+                Button {
+                    withAnimation { aiSuggestedItems = [] }
+                } label: {
+                    Text("Dismiss All")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 4)
+
+            ForEach(Array(aiSuggestedItems.enumerated()), id: \.element.id) { _, suggestion in
+                HStack(spacing: 10) {
+                    Text(suggestion.text)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Button {
+                        addSuggestedItem(suggestion)
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.green)
+                    }
+
+                    Button {
+                        withAnimation { aiSuggestedItems.removeAll { $0.id == suggestion.id } }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    LinearGradient(colors: [.purple.opacity(0.08), .blue.opacity(0.08)], startPoint: .leading, endPoint: .trailing),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func generateAISuggestions() {
+        isGeneratingSuggestions = true
+        let current = unboughtItems.map(\.name)
+        let bought = boughtItems.map(\.name)
+        let familySize = allMembers.count
+
+        Task {
+            do {
+                let suggestions = try await ClaudeAPIService.shared.suggestShoppingItems(
+                    currentItems: current,
+                    boughtItems: bought,
+                    familySize: familySize
+                )
+                await MainActor.run {
+                    withAnimation {
+                        aiSuggestedItems = suggestions.map { (id: UUID(), text: $0) }
+                    }
+                    isGeneratingSuggestions = false
+                }
+            } catch {
+                await MainActor.run { isGeneratingSuggestions = false }
+            }
+        }
+    }
+
+    private func addSuggestedItem(_ suggestion: (id: UUID, text: String)) {
+        let item = ShoppingItem(name: suggestion.text, addedBy: "AI")
+        modelContext.insert(item)
+        let snap = CloudKitManager.ShoppingSnapshot(item)
+        let familyCode = authManager.familyCode
+        Task { await cloudKitManager.pushShoppingSnapshot(snap, familyCode: familyCode) }
+        withAnimation { aiSuggestedItems.removeAll { $0.id == suggestion.id } }
     }
 }
 

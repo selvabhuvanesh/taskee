@@ -79,10 +79,16 @@ struct ChildDashboardView: View {
     @State private var showStatsPopup = false
     @State private var selectedHomeGoal: Goal?
     @State private var motivationMessage: String?
-    @AppStorage("lastMotivationDate_child") private var lastMotivationDate = ""
-    @AppStorage("lastMotivationMsg_child") private var lastMotivationMsg = ""
     private var myMember: FamilyMember? {
         allMembers.first { $0.appleUserID == authManager.appleUserID }
+    }
+
+    @ViewBuilder
+    private var motivationOverlay: some View {
+        if let msg = motivationMessage {
+            motivationCallout(msg, theme: childTheme)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+        }
     }
 
     private var pickupAckTimestamp: Double {
@@ -312,6 +318,8 @@ struct ChildDashboardView: View {
 
                 FlyingCoinsOverlay(coins: $flyingCoins)
 
+                motivationOverlay
+
                 Color.clear.frame(height: 0)
                     .alert("On the way!", isPresented: $showPickupAck) {
                         Button("OK", role: .cancel) { }
@@ -356,29 +364,23 @@ struct ChildDashboardView: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                VStack(alignment: .trailing, spacing: 6) {
-                    if let msg = motivationMessage {
-                        motivationCallout(msg, theme: childTheme)
-                            .transition(.scale(scale: 0.3, anchor: .bottomTrailing).combined(with: .opacity))
-                    }
-                    Button {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        withAnimation { isAIMode = true }
-                    } label: {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 56, height: 56)
-                            .background(
-                                LinearGradient(
-                                    colors: [.purple, .blue],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                in: Circle()
-                            )
-                            .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
-                    }
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    withAnimation { isAIMode = true }
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Circle()
+                        )
+                        .shadow(color: .purple.opacity(0.4), radius: 8, y: 4)
                 }
                 .padding(.trailing, 20)
                 .padding(.bottom, 80)
@@ -895,32 +897,32 @@ struct ChildDashboardView: View {
 
     @ViewBuilder
     private func motivationCallout(_ msg: String, theme: ChildTheme) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.yellow)
-            Text(msg)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(theme.textColor)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button {
-                withAnimation(.spring(duration: 0.3)) { motivationMessage = nil }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(theme.secondaryTextColor)
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.yellow)
+                Text(msg)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.textColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button {
+                    withAnimation(.spring(duration: 0.3)) { motivationMessage = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(theme.secondaryTextColor)
+                        .padding(7)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 22)
-        .frame(maxWidth: 280)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: 340)
         .background(
-            CalloutBubbleShape()
+            CenteredBubbleShape()
                 .fill(
                     LinearGradient(
                         colors: [theme.gradientColors.first ?? .blue, theme.accentColor.opacity(0.8)],
@@ -928,20 +930,12 @@ struct ChildDashboardView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
         )
+        .padding(.horizontal, 24)
     }
 
     private func fetchDailyMotivation() {
-        let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-        if lastMotivationDate == today, !lastMotivationMsg.isEmpty {
-            withAnimation(.spring(duration: 0.4)) { motivationMessage = lastMotivationMsg }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-                withAnimation { motivationMessage = nil }
-            }
-            return
-        }
-
         let quest = MonthlyQuest.compute(tasks: allTasks, userName: authManager.userName)
         let streak = InsightsEngine.computeStreak(tasks: allTasks, memberName: authManager.userName, calendar: Calendar.current, today: Date())
         let cal = Calendar.current
@@ -952,6 +946,10 @@ struct ChildDashboardView: View {
         let todayEnd = cal.date(byAdding: .day, value: 1, to: todayStart)!
         let todayCount = allTasks.filter { $0.assignedTo == authManager.userName && $0.isOpen && $0.targetDate >= todayStart && $0.targetDate < todayEnd }.count
         let goalNames = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.map(\.name)
+        let projects = allProjects.filter { !$0.isCompleted }.map { (name: $0.name, status: $0.statusLabel) }
+        let pendingShoppingCount = shoppingItems.filter { !$0.isBought }.count
+        let goalProg = allGoals.filter { $0.assignedTo == authManager.userName && $0.isActive }.map { (name: $0.name, percent: Int($0.progress(from: allTasks) * 100)) }
+        let coinsEarned = Int(allTasks.filter { $0.assignedTo == authManager.userName && $0.isApproved && $0.reward > 0 }.reduce(0.0) { $0 + $1.reward })
 
         Task {
             do {
@@ -961,13 +959,15 @@ struct ChildDashboardView: View {
                     streakDays: streak,
                     questRank: quest.rank.rawValue,
                     completionRate: completionRate,
-                    activeGoalNames: goalNames
+                    activeGoalNames: goalNames,
+                    activeProjects: projects,
+                    shoppingPendingCount: pendingShoppingCount,
+                    goalProgress: goalProg,
+                    coinsEarned: coinsEarned
                 )
                 await MainActor.run {
-                    lastMotivationDate = today
-                    lastMotivationMsg = msg
                     withAnimation(.spring(duration: 0.4)) { motivationMessage = msg }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                         withAnimation { motivationMessage = nil }
                     }
                 }

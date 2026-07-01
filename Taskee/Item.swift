@@ -3013,6 +3013,14 @@ struct CalloutBubbleShape: Shape {
     }
 }
 
+struct CenteredBubbleShape: Shape {
+    var cornerRadius: CGFloat = 18
+
+    func path(in rect: CGRect) -> Path {
+        Path(roundedRect: rect, cornerRadius: cornerRadius)
+    }
+}
+
 // MARK: - Goal Model
 
 @Model

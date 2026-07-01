@@ -378,6 +378,9 @@ struct ProjectDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var editRequest: TaskEditRequest?
     @State private var taskToDelete: Item?
+    @State private var aiSuggestedIdeas: [(id: UUID, text: String)] = []
+    @State private var showAISuggestions = false
+    @State private var isGeneratingIdeas = false
 
     private var children: [FamilyMember] {
         members.filter { $0.memberRole == "child" && $0.isAccepted }
@@ -468,6 +471,51 @@ struct ProjectDetailView: View {
                     }
                 )
             }
+        }
+        .sheet(isPresented: $showAISuggestions) {
+            NavigationStack {
+                ZStack {
+                    LinearGradient(colors: theme.gradientColors, startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea()
+                    List {
+                        ForEach(Array(aiSuggestedIdeas.enumerated()), id: \.element.id) { index, item in
+                            HStack(spacing: 10) {
+                                TextField("Idea", text: Binding(
+                                    get: { index < aiSuggestedIdeas.count ? aiSuggestedIdeas[index].text : "" },
+                                    set: { if index < aiSuggestedIdeas.count { aiSuggestedIdeas[index].text = $0 } }
+                                ))
+                                .font(.subheadline.weight(.semibold))
+                                Button {
+                                    aiSuggestedIdeas.removeAll { $0.id == item.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                        .foregroundStyle(.red.opacity(0.7))
+                                }
+                            }
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+                .navigationTitle("AI Ideas")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(theme.colorScheme, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            aiSuggestedIdeas = []
+                            showAISuggestions = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save All") {
+                            saveAIIdeas()
+                        }
+                        .disabled(aiSuggestedIdeas.isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         .alert("Delete Task?", isPresented: Binding(
             get: { taskToDelete != nil },
@@ -599,6 +647,27 @@ struct ProjectDetailView: View {
                 Text("\(ideas.count)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(theme.tertiaryTextColor)
+                if project.status == "ideating" {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        generateAIIdeas()
+                    } label: {
+                        if isGeneratingIdeas {
+                            ProgressView()
+                                .frame(width: 28, height: 28)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                    in: Circle()
+                                )
+                        }
+                    }
+                    .disabled(isGeneratingIdeas)
+                }
             }
 
             ForEach(ideas) { idea in
@@ -867,6 +936,44 @@ struct ProjectDetailView: View {
 
         let familyCode = authManager.familyCode
         Task { await cloudKitManager.pushIdea(idea, familyCode: familyCode) }
+    }
+
+    private func generateAIIdeas() {
+        isGeneratingIdeas = true
+        let existingTexts = ideas.map(\.text)
+        Task {
+            do {
+                let suggestions = try await ClaudeAPIService.shared.generateProjectIdeas(
+                    projectName: project.name,
+                    description: project.descriptionText,
+                    category: project.category,
+                    existingIdeas: existingTexts
+                )
+                await MainActor.run {
+                    aiSuggestedIdeas = suggestions.map { (id: UUID(), text: $0) }
+                    isGeneratingIdeas = false
+                    showAISuggestions = true
+                }
+            } catch {
+                await MainActor.run { isGeneratingIdeas = false }
+            }
+        }
+    }
+
+    private func saveAIIdeas() {
+        let familyCode = authManager.familyCode
+        for item in aiSuggestedIdeas {
+            let idea = ProjectIdea(
+                projectId: project.id.uuidString,
+                text: item.text,
+                submittedBy: "AI"
+            )
+            modelContext.insert(idea)
+            try? modelContext.save()
+            Task { await cloudKitManager.pushIdea(idea, familyCode: familyCode) }
+        }
+        aiSuggestedIdeas = []
+        showAISuggestions = false
     }
 
     private func toggleVote(idea: ProjectIdea, isUpvote: Bool, existing: ProjectVote?) {
